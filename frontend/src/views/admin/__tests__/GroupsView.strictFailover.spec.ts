@@ -189,6 +189,7 @@ const mountView = () =>
         GroupCapacityBadge: true,
         GroupRateMultipliersModal: true,
         GroupRPMOverridesModal: true,
+        GroupSmartWSFields: defineComponent({ setup(_, { expose }) { expose({ loading: false, validate: () => true, save: async () => true }); return () => h("div"); } }),
         ReasoningEffortPolicyFields: defineComponent({ setup(_, { expose }) { expose({ validate: () => true, resetValidation: () => undefined }); return () => h("div"); } }),
         CodexManifestAccountsField: true,
         GroupUnavailableFallbackField: true,

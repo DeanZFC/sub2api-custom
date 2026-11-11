@@ -220,6 +220,7 @@ const mountView = () =>
         GroupCapacityBadge: true,
         GroupRateMultipliersModal: true,
         GroupRPMOverridesModal: true,
+        GroupSmartWSFields: defineComponent({ setup(_, { expose }) { expose({ loading: false, validate: () => true, save: async () => true }); return () => h("div"); } }),
         ReasoningEffortPolicyFields: true,
         CodexManifestAccountsField: CodexManifestAccountsFieldStub,
         PricingEntryCard: true,

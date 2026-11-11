@@ -382,15 +382,6 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
               <button
-                v-if="row.platform === 'openai'"
-                data-testid="group-smart-ws"
-                @click="smartWSGroup = row; showSmartWSModal = true"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700"
-              >
-                <Icon name="bolt" size="sm" />
-                <span class="text-xs">{{ t('admin.groups.smartWS.action') }}</span>
-              </button>
-              <button
                 @click="handleEdit(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
@@ -1592,7 +1583,7 @@
             </div>
           </div>
         </div>
-        <!-- OpenAI Fast 开关（OpenAI 与 Composite 平台） -->
+        <!-- OpenAI 服务档位（OpenAI 与 Composite 平台） -->
         <div
           v-if="supportsGroupOpenAIFast(createForm.platform)"
           class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
@@ -1600,14 +1591,16 @@
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {{ t("admin.groups.openaiFast.title") }}
           </h4>
-          <div class="flex items-center justify-between gap-4">
-            <label class="text-sm text-gray-600 dark:text-gray-400">
+          <div>
+            <label class="input-label" for="create-force-openai-service-tier">
               {{ t("admin.groups.openaiFast.force") }}
             </label>
-            <Toggle
-              data-testid="create-force-openai-fast"
+            <Select
+              id="create-force-openai-service-tier"
+              data-testid="create-force-openai-service-tier"
               :aria-label="t('admin.groups.openaiFast.force')"
-              v-model="createForm.force_openai_fast"
+              v-model="createForm.force_openai_service_tier"
+              :options="openAIServiceTierOptions"
             />
           </div>
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
@@ -2199,6 +2192,12 @@
           />
           <p class="input-hint">{{ t("admin.groups.platformNotEditable") }}</p>
         </div>
+        <GroupSmartWSFields
+          v-if="showEditModal && editForm.platform === 'openai'"
+          ref="editSmartWSRef"
+          :group-id="editingGroup.id"
+          :disabled="submitting"
+        />
         <template v-if="!authStore.isSimpleMode">
         <!-- 从分组复制账号（编辑时） -->
         <div v-if="copyAccountsGroupOptionsForEdit.length > 0">
@@ -3276,7 +3275,7 @@
             </div>
           </div>
         </div>
-        <!-- OpenAI Fast 开关（OpenAI 与 Composite 平台） -->
+        <!-- OpenAI 服务档位（OpenAI 与 Composite 平台） -->
         <div
           v-if="supportsGroupOpenAIFast(editForm.platform)"
           class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
@@ -3284,14 +3283,16 @@
           <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
             {{ t("admin.groups.openaiFast.title") }}
           </h4>
-          <div class="flex items-center justify-between gap-4">
-            <label class="text-sm text-gray-600 dark:text-gray-400">
+          <div>
+            <label class="input-label" for="edit-force-openai-service-tier">
               {{ t("admin.groups.openaiFast.force") }}
             </label>
-            <Toggle
-              data-testid="edit-force-openai-fast"
+            <Select
+              id="edit-force-openai-service-tier"
+              data-testid="edit-force-openai-service-tier"
               :aria-label="t('admin.groups.openaiFast.force')"
-              v-model="editForm.force_openai_fast"
+              v-model="editForm.force_openai_service_tier"
+              :options="openAIServiceTierOptions"
             />
           </div>
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
@@ -3801,6 +3802,7 @@
           <button
             @click="closeEditModal"
             type="button"
+            :disabled="submitting"
             class="btn btn-secondary"
           >
             {{ t("common.cancel") }}
@@ -3808,7 +3810,7 @@
           <button
             type="submit"
             form="edit-group-form"
-            :disabled="submitting"
+            :disabled="submitting || editSmartWSRef?.loading"
             class="btn btn-primary"
             data-tour="group-form-submit"
           >
@@ -4330,8 +4332,6 @@
       @success="loadGroups"
     />
 
-    <GroupSmartWSModal :show="showSmartWSModal" :group="smartWSGroup" @close="showSmartWSModal = false" />
-
     <!-- Group RPM Overrides Modal -->
     <GroupRPMOverridesModal
       :show="showRPMOverridesModal"
@@ -4351,6 +4351,7 @@ import { useOnboardingStore } from "@/stores/onboarding";
 import { adminAPI } from "@/api/admin";
 import type {
   AdminGroup,
+  GroupOpenAIServiceTier,
   CodexModelsManifestConfig,
   StrictFailoverConfig,
   CompositeModelRoute,
@@ -4384,7 +4385,7 @@ import Icon from "@/components/icons/Icon.vue";
 import GroupI18nField from "@/components/admin/group/GroupI18nField.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
-import GroupSmartWSModal from "@/components/admin/group/GroupSmartWSModal.vue";
+import GroupSmartWSFields from "@/components/admin/group/GroupSmartWSFields.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
 import CodexManifestAccountsField from "@/components/admin/group/CodexManifestAccountsField.vue";
@@ -4415,7 +4416,10 @@ import {
   type MessagesDispatchMappingRow,
 } from "./groupsMessagesDispatch";
 import {
+  getGroupOpenAIServiceTier,
+  groupOpenAIServiceTierToAPI,
   normalizeGroupOpenAIFast,
+  normalizeGroupOpenAIServiceTier,
   supportsGroupOpenAIFast,
 } from "./groupsOpenAIFast";
 import {
@@ -4706,6 +4710,12 @@ const platformOptions = computed(() =>
   ),
 );
 
+const openAIServiceTierOptions = computed(() => [
+  { value: "", label: t("admin.groups.openaiFast.noForce") },
+  { value: "priority", label: t("admin.groups.openaiFast.priority") },
+  { value: "ultrafast", label: t("admin.groups.openaiFast.ultrafast") },
+]);
+
 const platformFilterOptions = computed(() => [
   { value: "", label: t("admin.groups.allPlatforms") },
   ...GROUP_PLATFORM_OPTIONS,
@@ -4930,8 +4940,7 @@ const duplicatingGroupIds = reactive(new Set<number>());
 const showRateMultipliersModal = ref(false);
 const rateMultipliersGroup = ref<AdminGroup | null>(null);
 const showRPMOverridesModal = ref(false);
-const showSmartWSModal = ref(false);
-const smartWSGroup = ref<AdminGroup | null>(null);
+const editSmartWSRef = ref<InstanceType<typeof GroupSmartWSFields> | null>(null);
 const rpmOverridesGroup = ref<AdminGroup | null>(null);
 const sortableGroups = ref<AdminGroup[]>([]);
 type ConcreteGroupPlatform = Exclude<GroupPlatform, "composite">;
@@ -5042,7 +5051,7 @@ const createForm = reactive({
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
   long_context_pricing_enabled: true,
-  force_openai_fast: false,
+  force_openai_service_tier: "" as GroupOpenAIServiceTier,
   free_openai_fast: false,
   model_pricing: [] as PricingFormEntry[],
   // 图片生成计费配置
@@ -5411,7 +5420,7 @@ const editForm = reactive({
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
   long_context_pricing_enabled: true,
-  force_openai_fast: false,
+  force_openai_service_tier: "" as GroupOpenAIServiceTier,
   free_openai_fast: false,
   model_pricing: [] as PricingFormEntry[],
   // 图片生成计费配置
@@ -5910,7 +5919,7 @@ const closeCreateModal = () => {
   createForm.video_price_1080p = null;
   createForm.video_model_prices = createVideoModelPricesForm();
   createForm.long_context_pricing_enabled = true;
-  createForm.force_openai_fast = false;
+  createForm.force_openai_service_tier = "";
   createForm.free_openai_fast = false;
   createForm.model_pricing = [];
   createForm.web_search_price_per_call = null;
@@ -6035,9 +6044,9 @@ const handleCreateGroup = async () => {
     // 构建请求数据，包含模型路由配置
     const requestData = {
       ...createGroupForm,
-      force_openai_fast: normalizeGroupOpenAIFast(
+      ...groupOpenAIServiceTierToAPI(
         createForm.platform,
-        createForm.force_openai_fast,
+        createForm.force_openai_service_tier,
       ),
       free_openai_fast: normalizeGroupOpenAIFast(
         createForm.platform,
@@ -6187,7 +6196,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.monthly_limit_usd = group.monthly_limit_usd;
   editForm.long_context_pricing_enabled =
     group.long_context_pricing_enabled ?? true;
-  editForm.force_openai_fast = group.force_openai_fast ?? false;
+  editForm.force_openai_service_tier = getGroupOpenAIServiceTier(group);
   editForm.free_openai_fast = group.free_openai_fast ?? false;
   editForm.model_pricing = groupPricingFromAPI(group.model_pricing);
   editForm.allow_image_generation = group.allow_image_generation ?? false;
@@ -6299,6 +6308,7 @@ const handleEdit = async (group: AdminGroup) => {
 };
 
 const closeEditModal = () => {
+  if (submitting.value) return;
   editModelRoutingRules.value.forEach((rule) => {
     accountSearchRunner.clearKey(getEditRuleSearchKey(rule));
   });
@@ -6325,7 +6335,7 @@ const closeEditModal = () => {
   editForm.video_price_1080p = null;
   editForm.video_model_prices = createVideoModelPricesForm();
   editForm.long_context_pricing_enabled = true;
-  editForm.force_openai_fast = false;
+  editForm.force_openai_service_tier = "";
   editForm.free_openai_fast = false;
   editForm.model_pricing = [];
   editForm.web_search_price_per_call = null;
@@ -6343,7 +6353,8 @@ const closeEditModal = () => {
 };
 
 const handleUpdateGroup = async () => {
-  if (!editingGroup.value) return;
+  if (!editingGroup.value || submitting.value) return;
+  if (editSmartWSRef.value && !editSmartWSRef.value.validate()) return;
   if (editStrictFailoverRef.value && !editStrictFailoverRef.value.validate()) return;
   if (!editForm.name.trim()) {
     appStore.showError(t("admin.groups.nameRequired"));
@@ -6384,9 +6395,9 @@ const handleUpdateGroup = async () => {
     // 转换 fallback_group_id: null -> 0 (后端使用 0 表示清除)
     const payload = {
       ...editForm,
-      force_openai_fast: normalizeGroupOpenAIFast(
+      ...groupOpenAIServiceTierToAPI(
         editForm.platform,
-        editForm.force_openai_fast,
+        editForm.force_openai_service_tier,
       ),
       free_openai_fast: normalizeGroupOpenAIFast(
         editForm.platform,
@@ -6513,8 +6524,22 @@ const handleUpdateGroup = async () => {
           i18n: editForm.i18n,
         }
       : payload;
+    const copiedGroupIds = new Set(
+      authStore.isSimpleMode ? [] : editForm.copy_accounts_from_group_ids,
+    );
     await adminAPI.groups.update(editingGroup.value.id, requestData);
+    // Account copying is a one-time action; do not replay it on a SmartWS retry.
+    if (copiedGroupIds.size > 0) {
+      editForm.copy_accounts_from_group_ids =
+        editForm.copy_accounts_from_group_ids.filter((id) => !copiedGroupIds.has(id));
+    }
+    if (editSmartWSRef.value && !(await editSmartWSRef.value.save())) {
+      appStore.showError(t("admin.groups.smartWS.groupSavePartial"));
+      loadGroups();
+      return;
+    }
     appStore.showSuccess(t("admin.groups.groupUpdated"));
+    submitting.value = false;
     closeEditModal();
     loadGroups();
   } catch (error: any) {
@@ -6825,6 +6850,10 @@ watch(
     if (!supportsLivePlatform(newVal)) {
       createForm.allow_live = false;
     }
+    createForm.force_openai_service_tier = normalizeGroupOpenAIServiceTier(
+      newVal,
+      createForm.force_openai_service_tier,
+    );
     if (!isProfitControlPlatform(newVal)) {
       createForm.profit_control_enabled = false;
       createForm.profit_min_margin_percent = 0;
@@ -6883,6 +6912,10 @@ watch(
     if (!supportsLivePlatform(newVal)) {
       editForm.allow_live = false;
     }
+    editForm.force_openai_service_tier = normalizeGroupOpenAIServiceTier(
+      newVal,
+      editForm.force_openai_service_tier,
+    );
     if (!isProfitControlPlatform(newVal)) {
       editForm.profit_control_enabled = false;
       editForm.profit_min_margin_percent = 0;

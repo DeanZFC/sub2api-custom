@@ -365,10 +365,28 @@ func groupSupportsOpenAIFast(platform string) bool {
 	return platform == PlatformOpenAI || platform == PlatformComposite
 }
 
+// normalizeGroupForcedOpenAIServiceTier keeps the legacy boolean request API
+// compatible while an explicitly supplied tier (including empty) takes precedence.
+func normalizeGroupForcedOpenAIServiceTier(tier *string, legacyFast bool) (string, error) {
+	if tier == nil {
+		if legacyFast {
+			return OpenAIFastTierPriority, nil
+		}
+		return "", nil
+	}
+	switch *tier {
+	case "", OpenAIFastTierPriority, OpenAIFastTierUltrafast:
+		return *tier, nil
+	default:
+		return "", infraerrors.BadRequest("INVALID_FORCE_OPENAI_SERVICE_TIER", "force_openai_service_tier must be empty, priority, or ultrafast")
+	}
+}
+
 func sanitizeGroupOpenAIFast(group *Group) {
 	if group == nil || !groupSupportsOpenAIFast(group.Platform) {
 		if group != nil {
 			group.ForceOpenAIFast = false
+			group.ForceOpenAIServiceTier = ""
 			group.FreeOpenAIFast = false
 		}
 	}
@@ -413,6 +431,10 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	}
 
 	platform := NormalizeGroupPlatform(input.Platform)
+	forcedOpenAIServiceTier, err := normalizeGroupForcedOpenAIServiceTier(input.ForceOpenAIServiceTier, input.ForceOpenAIFast)
+	if err != nil {
+		return nil, err
+	}
 	if input.StrictFailover.Enabled || len(input.StrictFailover.Tiers) > 0 {
 		return nil, invalidStrictFailover("configure strict failover after creating and binding group accounts")
 	}
@@ -642,7 +664,8 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		SupportedModelScopes:            input.SupportedModelScopes,
 		AllowMessagesDispatch:           input.AllowMessagesDispatch,
 		AllowLive:                       input.AllowLive,
-		ForceOpenAIFast:                 input.ForceOpenAIFast,
+		ForceOpenAIFast:                 forcedOpenAIServiceTier == OpenAIFastTierPriority,
+		ForceOpenAIServiceTier:          forcedOpenAIServiceTier,
 		FreeOpenAIFast:                  input.FreeOpenAIFast,
 		RequireOAuthOnly:                input.RequireOAuthOnly,
 		RequirePrivacySet:               input.RequirePrivacySet,
@@ -798,6 +821,18 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		normalizeUpdateGroupInputForSimpleMode(input)
+	}
+
+	forcedOpenAIServiceTier := group.ForceOpenAIServiceTier
+	if input.ForceOpenAIServiceTier != nil || input.ForceOpenAIFast != nil {
+		legacyFast := group.ForceOpenAIFast
+		if input.ForceOpenAIFast != nil {
+			legacyFast = *input.ForceOpenAIFast
+		}
+		forcedOpenAIServiceTier, err = normalizeGroupForcedOpenAIServiceTier(input.ForceOpenAIServiceTier, legacyFast)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// 渠道缓存里存了 groupID → platform 的映射，改了平台要让它失效（见函数末尾）
@@ -1043,8 +1078,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if input.AllowLive != nil {
 		group.AllowLive = *input.AllowLive
 	}
-	if input.ForceOpenAIFast != nil {
-		group.ForceOpenAIFast = *input.ForceOpenAIFast
+	if input.ForceOpenAIServiceTier != nil || input.ForceOpenAIFast != nil {
+		group.ForceOpenAIServiceTier = forcedOpenAIServiceTier
+		group.ForceOpenAIFast = forcedOpenAIServiceTier == OpenAIFastTierPriority
 	}
 	if input.FreeOpenAIFast != nil {
 		group.FreeOpenAIFast = *input.FreeOpenAIFast

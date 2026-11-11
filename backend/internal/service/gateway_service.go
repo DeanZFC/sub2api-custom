@@ -79,7 +79,7 @@ const (
 )
 
 // ForceCacheBillingContextKey 强制缓存计费上下文键
-// 用于粘性会话切换时，将 input_tokens 转为 cache_read_input_tokens 计费
+// 用于 OAuth / Setup Token 账号粘性切换补偿；不适用于按量上游的用量或响应。
 type forceCacheBillingKeyType struct{}
 
 // accountWithLoad 账号与负载信息的组合，用于负载感知调度
@@ -640,10 +640,9 @@ type ForwardResult struct {
 	ReasoningEffort             *string
 	// RequestedReasoningEffort is the client-requested effort before mapping.
 	RequestedReasoningEffort *string
-	// ServiceTier records the tier requested by the client. OpenAI uses
-	// service_tier; Anthropic speed=fast is normalized to "fast". Usage recording
-	// lowers it to UpstreamResponseServiceTier when the upstream reports a
-	// cheaper tier (see ResolveBillingServiceTier).
+	// ServiceTier records the final outbound request tier used for billing.
+	// OpenAI uses service_tier; Anthropic speed=fast is normalized to "fast".
+	// UpstreamResponseServiceTier is diagnostic and never changes this tier.
 	ServiceTier *string
 
 	// 图片生成计费字段（图片生成模型使用）

@@ -1004,13 +1004,12 @@ func anthropicSpeedModel(parsed *ParsedRequest, result *ForwardResult) string {
 
 // anthropicSpeedServiceTier 把 Anthropic 的 speed=fast 归一成可计费的 "fast" tier。
 //
-// Fast mode 目前只在 Claude Opus 5 / Opus 4.8 上存在，且不支持 Bedrock 等第三方
+// Fast mode 支持 Claude Fable/Mythos 5.2、Opus 5 / Opus 4.8，且不支持 Bedrock 等第三方
 // 承载（Opus 4.7 的 fast mode 已被移除，传 speed=fast 会直接报错）。这里按模型和
 // 平台收紧，避免上游根本没跑 fast 时仍然按 2x 计费——宁可漏收也不能多收。
 //
 // 这里只决定请求侧的档位；上游响应里的 usage.speed 由 UpstreamResponseServiceTier
-// 带回，用量记录时经 ResolveBillingServiceTier 只降不升（usage.speed=standard 则按
-// 标准价计费）。
+// 独立带回用于诊断；计费始终使用最终发给上游的请求档位，不根据响应升档或降档。
 func anthropicSpeedServiceTier(account *Account, speed, model string) *string {
 	if account == nil || account.Platform != PlatformAnthropic || speed != "fast" {
 		return nil
@@ -1022,8 +1021,11 @@ func anthropicSpeedServiceTier(account *Account, speed, model string) *string {
 	return &tier
 }
 
-// modelSupportsAnthropicFastMode 判断模型是否属于支持 fast mode 的 Opus 5 / Opus 4.8。
+// modelSupportsAnthropicFastMode 判断模型是否支持 Anthropic fast mode。
 func modelSupportsAnthropicFastMode(model string) bool {
+	if claude.IsFable52(model) || claude.IsMythos52(model) {
+		return true
+	}
 	modelLower := strings.ToLower(strings.TrimSpace(model))
 	if !strings.Contains(modelLower, "opus") {
 		return false

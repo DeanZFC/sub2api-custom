@@ -34,3 +34,25 @@ func TestAPIKeyAuthSnapshotGroupForceOpenAIFastRoundtrip(t *testing.T) {
 	require.True(t, materialized.Group.FreeOpenAIFast)
 	require.Equal(t, apiKeyAuthSnapshotVersion, cached.Snapshot.Version)
 }
+
+func TestAPIKeyAuthSnapshotGroupUltrafastRoundtrip(t *testing.T) {
+	groupID := int64(51)
+	apiKey := &APIKey{
+		ID: 83, UserID: 40, GroupID: &groupID, Key: "sk-ultrafast-roundtrip", Status: StatusActive,
+		User:          &User{ID: 40, Status: StatusActive},
+		Group:         &Group{ID: groupID, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, ForceOpenAIServiceTier: "ultrafast"},
+		FallbackGroup: &Group{ID: 52, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, ForceOpenAIServiceTier: "priority", ForceOpenAIFast: true},
+	}
+	svc := &APIKeyService{}
+	payload, err := json.Marshal(&APIKeyAuthCacheEntry{Snapshot: svc.snapshotFromAPIKey(context.Background(), apiKey)})
+	require.NoError(t, err)
+	var cached APIKeyAuthCacheEntry
+	require.NoError(t, json.Unmarshal(payload, &cached))
+	materialized, used, err := svc.applyAuthCacheEntry(apiKey.Key, &cached)
+	require.NoError(t, err)
+	require.True(t, used)
+	require.Equal(t, "ultrafast", materialized.Group.ForceOpenAIServiceTier)
+	require.False(t, materialized.Group.ForceOpenAIFast)
+	require.Equal(t, "priority", materialized.FallbackGroup.ForceOpenAIServiceTier)
+	require.True(t, materialized.FallbackGroup.ForceOpenAIFast)
+}

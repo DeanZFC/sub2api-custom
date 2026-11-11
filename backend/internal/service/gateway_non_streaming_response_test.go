@@ -144,26 +144,22 @@ func TestHandleNonStreamingResponseAnthropicAPIKeyPassthrough_ValidJSONUnchanged
 	require.JSONEq(t, string(body), rec.Body.String())
 }
 
-func TestHandleNonStreamingResponseAnthropicAPIKeyPassthrough_ForceCacheBillingResponse(t *testing.T) {
+func TestHandleNonStreamingResponseAnthropicAPIKeyPassthrough_ForceCacheBillingPreservesUpstreamUsage(t *testing.T) {
 	tests := []struct {
 		name string
 		body string
-		want string
 	}{
 		{
-			name: "converts input tokens for downstream billing",
+			name: "ordinary input remains ordinary input",
 			body: `{"id":"msg_1","type":"message","content":[{"type":"text","text":"unchanged"}],"usage":{"input_tokens":5,"output_tokens":3}}`,
-			want: `{"id":"msg_1","type":"message","content":[{"type":"text","text":"unchanged"}],"usage":{"input_tokens":0,"output_tokens":3,"cache_read_input_tokens":5}}`,
 		},
 		{
-			name: "adds to genuine cache reads",
+			name: "genuine cache reads and writes remain unchanged",
 			body: `{"id":"msg_2","type":"message","usage":{"input_tokens":5,"output_tokens":3,"cache_read_input_tokens":7,"cache_creation_input_tokens":11}}`,
-			want: `{"id":"msg_2","type":"message","usage":{"input_tokens":0,"output_tokens":3,"cache_read_input_tokens":12,"cache_creation_input_tokens":11}}`,
 		},
 		{
 			name: "zero input leaves response unchanged",
 			body: `{"id":"msg_3","type":"message","usage":{"input_tokens":0,"output_tokens":3,"cache_read_input_tokens":7}}`,
-			want: `{"id":"msg_3","type":"message","usage":{"input_tokens":0,"output_tokens":3,"cache_read_input_tokens":7}}`,
 		},
 	}
 
@@ -180,12 +176,13 @@ func TestHandleNonStreamingResponseAnthropicAPIKeyPassthrough_ForceCacheBillingR
 			}
 			svc := &GatewayService{cfg: &config.Config{}}
 
-			usage, err := svc.handleNonStreamingResponseAnthropicAPIKeyPassthrough(WithForceCacheBilling(context.Background()), resp, c, &Account{ID: 2})
+			usage, err := svc.handleNonStreamingResponseAnthropicAPIKeyPassthrough(WithForceCacheBilling(context.Background()), resp, c, &Account{ID: 2, Type: AccountTypeAPIKey})
 
 			require.NoError(t, err)
-			require.Equal(t, int(gjson.Get(tt.body, "usage.input_tokens").Int()), usage.InputTokens, "local accounting must retain the unclassified usage")
-			require.Equal(t, int(gjson.Get(tt.body, "usage.cache_read_input_tokens").Int()), usage.CacheReadInputTokens, "local accounting must convert exactly once in RecordUsage")
-			require.JSONEq(t, tt.want, rec.Body.String())
+			require.Equal(t, int(gjson.Get(tt.body, "usage.input_tokens").Int()), usage.InputTokens)
+			require.Equal(t, int(gjson.Get(tt.body, "usage.cache_read_input_tokens").Int()), usage.CacheReadInputTokens)
+			require.Equal(t, int(gjson.Get(tt.body, "usage.cache_creation_input_tokens").Int()), usage.CacheCreationInputTokens)
+			require.JSONEq(t, tt.body, rec.Body.String(), "downstream usage must match the paid upstream even after failover")
 		})
 	}
 }

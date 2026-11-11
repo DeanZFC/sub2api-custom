@@ -52,7 +52,7 @@ type RecordUsageInput struct {
 	IPAddress          string             // 请求的客户端 IP 地址
 	SessionID          string             // 客户端显式会话标识（session_id / X-Session-Id 等请求头），仅用于用量行会话关联
 	RequestPayloadHash string             // 请求体语义哈希，用于降低 request_id 误复用时的静默误去重风险
-	ForceCacheBilling  bool               // 强制缓存计费：将 input_tokens 转为 cache_read 计费（用于粘性会话切换）
+	ForceCacheBilling  bool               // OAuth / Setup Token 粘性切换补偿；按量上游保留真实用量分类
 	APIKeyService      APIKeyQuotaUpdater // 可选：用于更新API Key配额
 	QuotaPlatform      string             // user×platform 配额计量平台：handler 在请求 ctx 内经 QuotaPlatform() 算定后传入（后扣运行在 worker 池 background ctx 上，取不到 ForcePlatform）
 
@@ -754,7 +754,7 @@ type RecordUsageLongContextInput struct {
 	RequestPayloadHash    string             // 请求体语义哈希，用于降低 request_id 误复用时的静默误去重风险
 	LongContextThreshold  int                // 长上下文阈值（如 200000）
 	LongContextMultiplier float64            // 超出阈值部分的倍率（如 2.0）
-	ForceCacheBilling     bool               // 强制缓存计费：将 input_tokens 转为 cache_read 计费（用于粘性会话切换）
+	ForceCacheBilling     bool               // OAuth / Setup Token 粘性切换补偿；按量上游保留真实用量分类
 	APIKeyService         APIKeyQuotaUpdater // API Key 配额服务（可选）
 	QuotaPlatform         string             // user×platform 配额计量平台：handler 在请求 ctx 内经 QuotaPlatform() 算定后传入（后扣运行在 worker 池 background ctx 上，取不到 ForcePlatform）
 
@@ -910,15 +910,14 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		result.UpstreamModel,
 	)
 	ApplyForwardImageBillingResolution(result)
-	logServiceTierBillingDowngrade("service.gateway", account, result.RequestID, ApplyForwardServiceTierBillingResolution(result))
+	ApplyForwardServiceTierBillingResolution(result)
 
-	// 强制缓存计费：将 input_tokens 转为 cache_read_input_tokens
-	// 用于粘性会话切换时的特殊计费处理
-	if input.ForceCacheBilling && result.Usage.InputTokens > 0 {
+	// 仅 OAuth / Setup Token 保留粘性切换补偿；按量上游保留真实用量，避免把仍付费的
+	// 普通输入降为缓存价，并低估账号成本。
+	inputTokensBeforeCompensation := result.Usage.InputTokens
+	if applyForceCacheBilling(&result.Usage, account, input.ForceCacheBilling) {
 		logger.LegacyPrintf("service.gateway", "force_cache_billing: %d input_tokens → cache_read_input_tokens (account=%d)",
-			result.Usage.InputTokens, account.ID)
-		result.Usage.CacheReadInputTokens += result.Usage.InputTokens
-		result.Usage.InputTokens = 0
+			inputTokensBeforeCompensation, account.ID)
 	}
 
 	// Cache TTL Override: 确保计费时 token 分类与账号设置一致。

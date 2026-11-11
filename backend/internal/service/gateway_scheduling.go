@@ -1637,6 +1637,7 @@ func (s *GatewayService) newSelectionResult(ctx context.Context, account *Accoun
 		err = validateProxyReservation(account, hydrated)
 	}
 	if err != nil {
+		// A failed hydration must release any concurrency slot acquired above.
 		if acquired && release != nil {
 			release()
 		}

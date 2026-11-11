@@ -306,7 +306,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 			st.SawDone = true
 			break
 		}
-		// 观察上游 CC chunk 回显的 model / service_tier（计费以回显为准）。
+		// 观察上游 CC chunk 回显的 model / service_tier；档位仅用于诊断，计费使用出站请求档位。
 		// CC chunk 无 type 字段，按 untyped payload 观察（上游约束：只有终止
 		// 事件与无类型 body 报告实际处理档位）。
 		if observer := upstreamResponseModelObserverFromContext(c); observer != nil {
@@ -378,7 +378,7 @@ func (s *OpenAIGatewayService) readCCUpstreamJSONResponse(
 		writeError(c, http.StatusBadGateway, "api_error", "Failed to parse upstream response")
 		return nil, OpenAIUsage{}, fmt.Errorf("parse chat completions response: %w", err)
 	}
-	// 观察上游 CC JSON 回显的 model / service_tier（计费以回显为准）。
+	// 观察上游 CC JSON 回显的 model / service_tier；档位仅用于诊断，计费使用出站请求档位。
 	// CC JSON 无 type 字段，按 untyped payload 观察（上游约束）。
 	if observer := upstreamResponseModelObserverFromContext(c); observer != nil {
 		observer.ObserveOpenAI(respBody, "")

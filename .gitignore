@@ -158,6 +158,8 @@ docs/*
 !docs/GPT_DIRECT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
 !docs/ASYNC_IMAGE_TASKS.md
+!docs/OPENAI_IMAGES_CODEX.md
+!docs/upstream-v0.2.21-merge-20261111.md
 !docs/BATCH_IMAGE_MVP.md
 !docs/COMPOSITE_GROUPS.md
 !docs/PLUGIN_DEVELOPMENT.md

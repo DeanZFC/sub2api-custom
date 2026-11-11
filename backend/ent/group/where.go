@@ -305,6 +305,11 @@ func ForceOpenaiFast(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldForceOpenaiFast, v))
 }
 
+// ForceOpenaiServiceTier applies equality check predicate on the "force_openai_service_tier" field. It's identical to ForceOpenaiServiceTierEQ.
+func ForceOpenaiServiceTier(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldForceOpenaiServiceTier, v))
+}
+
 // FreeOpenaiFast applies equality check predicate on the "free_openai_fast" field. It's identical to FreeOpenaiFastEQ.
 func FreeOpenaiFast(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldFreeOpenaiFast, v))
@@ -2368,6 +2373,71 @@ func ForceOpenaiFastEQ(v bool) predicate.Group {
 // ForceOpenaiFastNEQ applies the NEQ predicate on the "force_openai_fast" field.
 func ForceOpenaiFastNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldForceOpenaiFast, v))
+}
+
+// ForceOpenaiServiceTierEQ applies the EQ predicate on the "force_openai_service_tier" field.
+func ForceOpenaiServiceTierEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldForceOpenaiServiceTier, v))
+}
+
+// ForceOpenaiServiceTierNEQ applies the NEQ predicate on the "force_openai_service_tier" field.
+func ForceOpenaiServiceTierNEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldForceOpenaiServiceTier, v))
+}
+
+// ForceOpenaiServiceTierIn applies the In predicate on the "force_openai_service_tier" field.
+func ForceOpenaiServiceTierIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldForceOpenaiServiceTier, vs...))
+}
+
+// ForceOpenaiServiceTierNotIn applies the NotIn predicate on the "force_openai_service_tier" field.
+func ForceOpenaiServiceTierNotIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldForceOpenaiServiceTier, vs...))
+}
+
+// ForceOpenaiServiceTierGT applies the GT predicate on the "force_openai_service_tier" field.
+func ForceOpenaiServiceTierGT(v string) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldForceOpenaiServiceTier, v))
+}
+
+// ForceOpenaiServiceTierGTE applies the GTE predicate on the "force_openai_service_tier" field.
+func ForceOpenaiServiceTierGTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldForceOpenaiServiceTier, v))
+}
+
+// ForceOpenaiServiceTierLT applies the LT predicate on the "force_openai_service_tier" field.
+func ForceOpenaiServiceTierLT(v string) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldForceOpenaiServiceTier, v))
+}
+
+// ForceOpenaiServiceTierLTE applies the LTE predicate on the "force_openai_service_tier" field.
+func ForceOpenaiServiceTierLTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldForceOpenaiServiceTier, v))
+}
+
+// ForceOpenaiServiceTierContains applies the Contains predicate on the "force_openai_service_tier" field.
+func ForceOpenaiServiceTierContains(v string) predicate.Group {
+	return predicate.Group(sql.FieldContains(FieldForceOpenaiServiceTier, v))
+}
+
+// ForceOpenaiServiceTierHasPrefix applies the HasPrefix predicate on the "force_openai_service_tier" field.
+func ForceOpenaiServiceTierHasPrefix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasPrefix(FieldForceOpenaiServiceTier, v))
+}
+
+// ForceOpenaiServiceTierHasSuffix applies the HasSuffix predicate on the "force_openai_service_tier" field.
+func ForceOpenaiServiceTierHasSuffix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasSuffix(FieldForceOpenaiServiceTier, v))
+}
+
+// ForceOpenaiServiceTierEqualFold applies the EqualFold predicate on the "force_openai_service_tier" field.
+func ForceOpenaiServiceTierEqualFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldEqualFold(FieldForceOpenaiServiceTier, v))
+}
+
+// ForceOpenaiServiceTierContainsFold applies the ContainsFold predicate on the "force_openai_service_tier" field.
+func ForceOpenaiServiceTierContainsFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldContainsFold(FieldForceOpenaiServiceTier, v))
 }
 
 // FreeOpenaiFastEQ applies the EQ predicate on the "free_openai_fast" field.

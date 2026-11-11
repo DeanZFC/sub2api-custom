@@ -1029,6 +1029,7 @@ export default {
         hint: 'Requires Responses WebSocket. VM and ticket-bound requests keep their existing transport. Only failures before dispatch can fall back to HTTP; dispatched requests are never replayed. The configured account egress is preserved.',
         loadFailed: 'Could not load settings. Close and try again.',
         saveFailed: 'Save could not be confirmed. Reloading the current setting was attempted.',
+        groupSavePartial: 'Other group settings were saved, but SmartWS could not be confirmed. Review the setting and try again.',
         conflict: 'Another operation changed this setting. Review the reloaded value before saving.',
       },
       addUserRpm: 'Add User RPM Override',
@@ -1310,11 +1311,14 @@ export default {
         enableAnyway: 'Enable anyway'
       },
       openaiFast: {
-        title: 'OpenAI Fast mode',
-        force: 'Force Fast (priority)',
-        hint: 'Forces service_tier=priority on OpenAI requests in this group. The global Fast/Flex policy can still filter or block it. New requests update immediately after saving; existing WebSocket sessions must reconnect.',
+        title: 'OpenAI service tier',
+        force: 'Force service tier',
+        noForce: 'Do not force (use request tier)',
+        priority: 'Fast (priority)',
+        ultrafast: 'Ultrafast',
+        hint: 'Requests from this group to OpenAI-compatible upstreams use the selected tier. Does not apply to Excel BPS channels. The global Fast/Flex policy and upstream model and account support still apply. New requests update immediately after saving; existing WebSocket sessions must reconnect.',
         free: 'Free Fast',
-        freeHint: 'Fast requests in this group still use the priority tier, but customers are charged the equivalent Standard price.'
+        freeHint: 'Applies only to Fast (priority): customers are charged the equivalent Standard price. Does not apply to Ultrafast.'
       },
       invalidRequestFallback: {
         title: 'Invalid Request Fallback Group',

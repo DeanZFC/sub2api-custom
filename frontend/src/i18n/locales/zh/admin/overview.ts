@@ -1046,6 +1046,7 @@ export default {
         hint: '需开启 Responses WebSocket。VM 与票据绑定请求保留原通道；仅发送前失败可回退 HTTP，已发送请求不自动重放。保持账号配置的出口，真实首字计时不变。',
         loadFailed: '读取设置失败，请关闭后重试。',
         saveFailed: '保存未确认，已尝试重新读取当前设置。',
+        groupSavePartial: '分组其他设置已保存，但 SmartWS 设置未确认，请核对后重试。',
         conflict: '设置已被其他操作修改，已重新读取，请核对后保存。',
       },
       addUserRpm: '添加用户专属 RPM',
@@ -1308,11 +1309,14 @@ export default {
         enableAnyway: '仍然开启'
       },
       openaiFast: {
-        title: 'OpenAI Fast 模式',
-        force: '强制使用 Fast（priority）',
-        hint: '开启后，此分组的 OpenAI 请求会强制写入 service_tier=priority；全局 Fast/Flex 策略仍可过滤或拦截。保存后新请求立即生效，已建立的 WebSocket 会话需重连。',
+        title: 'OpenAI 服务档位',
+        force: '强制服务档位',
+        noForce: '不强制（使用请求档位）',
+        priority: 'Fast（priority）',
+        ultrafast: 'Ultrafast',
+        hint: '此分组发往 OpenAI 协议上游的请求将统一使用所选档位，不适用于 Excel BPS 通道；仍受全局 Fast/Flex 策略和上游模型、账号支持范围限制。保存后新请求立即生效，已建立的 WebSocket 会话需重连。',
         free: '免费 Fast',
-        freeHint: '该分组的 Fast 请求仍使用 priority 档位，但客户实际费用按同一请求的 Standard 价格计算。'
+        freeHint: '仅适用于 Fast（priority）：客户实际费用按同一请求的 Standard 价格计算，不适用于 Ultrafast。'
       },
       invalidRequestFallback: {
         title: '无效请求兜底分组',

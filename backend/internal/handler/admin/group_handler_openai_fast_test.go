@@ -25,3 +25,22 @@ func TestGroupRequestsDecodeForceOpenAIFast(t *testing.T) {
 	require.Nil(t, omitted.ForceOpenAIFast)
 	require.Nil(t, omitted.FreeOpenAIFast)
 }
+
+func TestGroupRequestsDecodeForcedServiceTier(t *testing.T) {
+	var createReq CreateGroupRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"force_openai_service_tier":"ultrafast"}`), &createReq))
+	require.NotNil(t, createReq.ForceOpenAIServiceTier)
+	require.Equal(t, "ultrafast", *createReq.ForceOpenAIServiceTier)
+
+	var updateReq UpdateGroupRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"force_openai_service_tier":""}`), &updateReq))
+	require.NotNil(t, updateReq.ForceOpenAIServiceTier)
+	require.Empty(t, *updateReq.ForceOpenAIServiceTier)
+
+	var omittedCreate CreateGroupRequest
+	var omittedUpdate UpdateGroupRequest
+	require.NoError(t, json.Unmarshal([]byte(`{}`), &omittedCreate))
+	require.NoError(t, json.Unmarshal([]byte(`{}`), &omittedUpdate))
+	require.Nil(t, omittedCreate.ForceOpenAIServiceTier)
+	require.Nil(t, omittedUpdate.ForceOpenAIServiceTier)
+}

@@ -65,7 +65,7 @@ func TestWithForceCacheBilling(t *testing.T) {
 	}
 }
 
-func TestForceCacheBilling_TokenConversion(t *testing.T) {
+func TestApplyForceCacheBilling_TokenConversion(t *testing.T) {
 	tests := []struct {
 		name                    string
 		forceCacheBilling       bool
@@ -110,17 +110,12 @@ func TestForceCacheBilling_TokenConversion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// 模拟 RecordUsage 中的 ForceCacheBilling 逻辑
 			usage := ClaudeUsage{
 				InputTokens:          tt.inputTokens,
 				CacheReadInputTokens: tt.cacheReadInputTokens,
 			}
 
-			// 这是 RecordUsage 中的实际逻辑
-			if tt.forceCacheBilling && usage.InputTokens > 0 {
-				usage.CacheReadInputTokens += usage.InputTokens
-				usage.InputTokens = 0
-			}
+			applyForceCacheBilling(&usage, &Account{Type: AccountTypeOAuth}, tt.forceCacheBilling)
 
 			if usage.InputTokens != tt.expectedInputTokens {
 				t.Errorf("InputTokens = %d, want %d", usage.InputTokens, tt.expectedInputTokens)
@@ -129,5 +124,20 @@ func TestForceCacheBilling_TokenConversion(t *testing.T) {
 				t.Errorf("CacheReadInputTokens = %d, want %d", usage.CacheReadInputTokens, tt.expectedCacheReadTokens)
 			}
 		})
+	}
+}
+
+func TestApplyForceCacheBilling_UnknownAccountPreservesUsage(t *testing.T) {
+	for _, account := range []*Account{nil, {Type: ""}, {Type: "unknown"}} {
+		usage := ClaudeUsage{InputTokens: 1899, CacheReadInputTokens: 17}
+		if applyForceCacheBilling(&usage, account, true) {
+			t.Fatal("unknown account must not receive cache compensation")
+		}
+		if usage.InputTokens != 1899 || usage.CacheReadInputTokens != 17 {
+			t.Fatalf("unknown account usage changed: %+v", usage)
+		}
+	}
+	if applyForceCacheBilling(nil, &Account{Type: AccountTypeOAuth}, true) {
+		t.Fatal("nil usage must not receive cache compensation")
 	}
 }

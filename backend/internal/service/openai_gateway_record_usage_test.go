@@ -3218,68 +3218,80 @@ func TestGatewayServiceCalculateRecordUsageCost_ChannelImageBillingNormalizesMis
 	require.InDelta(t, 0.44, cost.ActualCost, 1e-12)
 }
 
-func TestOpenAIGatewayServiceRecordUsage_FastIgnoresUpstreamTier(t *testing.T) {
-	for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth, AccountTypeSetupToken} {
-		for _, observed := range []string{"", "default", "standard", "flex", "priority", "ultrafast", "turbo"} {
-			for _, billingPath := range []string{"legacy", "atomic"} {
-				t.Run(accountType+"/"+observed+"/"+billingPath, func(t *testing.T) {
-					usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
-					userRepo := &openAIRecordUsageUserRepoStub{}
-					billingRepo := &openAIRecordUsageBillingRepoStub{}
-					svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
-					if billingPath == "atomic" {
-						svc.usageBillingRepo = billingRepo
-					}
-					groupID := int64(77)
-					channelCache := newEmptyChannelCache()
-					channelCache.channelByGroupID[groupID] = &Channel{ID: 1, Status: StatusActive}
-					channelCache.groupPlatform[groupID] = PlatformOpenAI
-					channelCache.loadedAt = time.Now()
-					svc.channelService = &ChannelService{}
-					svc.channelService.cache.Store(channelCache)
-					serviceTier := "priority"
-					result := &OpenAIForwardResult{
-						RequestID:                   "resp_fast_ignores_response",
-						ServiceTier:                 &serviceTier,
-						UpstreamResponseServiceTier: observed,
-						Usage:                       OpenAIUsage{InputTokens: 120, OutputTokens: 50, CacheReadInputTokens: 20},
-						Model:                       "gpt-5.4",
-						Duration:                    time.Second,
-					}
-					err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
-						Result: result,
-						APIKey: &APIKey{ID: 1017, GroupID: &groupID, Group: &Group{
-							ID: groupID, Platform: PlatformOpenAI, RateMultiplier: 0.5,
-						}},
-						User:    &User{ID: 2017},
-						Account: &Account{ID: 3017, Platform: PlatformOpenAI, Type: accountType},
+func TestOpenAIGatewayServiceRecordUsage_OutboundTierIgnoresUpstreamTier(t *testing.T) {
+	for _, tierCase := range []struct {
+		tier       string
+		model      string
+		multiplier float64
+	}{
+		{tier: "priority", model: "gpt-5.4", multiplier: 2},
+		{tier: "ultrafast", model: "gpt-6-astra", multiplier: 6},
+		{tier: "default", model: "gpt-5.4", multiplier: 1},
+		{tier: "flex", model: "gpt-5.4", multiplier: 0.5},
+	} {
+		for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth, AccountTypeSetupToken} {
+			for _, observed := range []string{"", "default", "standard", "flex", "priority", "ultrafast", "turbo"} {
+				for _, billingPath := range []string{"legacy", "atomic"} {
+					t.Run(tierCase.tier+"/"+accountType+"/"+observed+"/"+billingPath, func(t *testing.T) {
+						usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+						userRepo := &openAIRecordUsageUserRepoStub{}
+						billingRepo := &openAIRecordUsageBillingRepoStub{}
+						svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+						if billingPath == "atomic" {
+							svc.usageBillingRepo = billingRepo
+						}
+						groupID := int64(77)
+						channelCache := newEmptyChannelCache()
+						channelCache.channelByGroupID[groupID] = &Channel{ID: 1, Status: StatusActive}
+						channelCache.groupPlatform[groupID] = PlatformOpenAI
+						channelCache.loadedAt = time.Now()
+						svc.channelService = &ChannelService{}
+						svc.channelService.cache.Store(channelCache)
+						serviceTier := tierCase.tier
+						result := &OpenAIForwardResult{
+							RequestID:                   "resp_outbound_tier_ignores_response",
+							ServiceTier:                 &serviceTier,
+							UpstreamResponseServiceTier: observed,
+							Usage:                       OpenAIUsage{InputTokens: 120, OutputTokens: 50, CacheReadInputTokens: 20},
+							Model:                       tierCase.model,
+							Duration:                    time.Second,
+						}
+						err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+							Result: result,
+							APIKey: &APIKey{ID: 1017, GroupID: &groupID, Group: &Group{
+								ID: groupID, Platform: PlatformOpenAI, RateMultiplier: 0.5,
+							}},
+							User:    &User{ID: 2017},
+							Account: &Account{ID: 3017, Platform: PlatformOpenAI, Type: accountType},
+						})
+						require.NoError(t, err)
+						require.Equal(t, 1, usageRepo.calls)
+						require.NotNil(t, usageRepo.lastLog)
+						log := usageRepo.lastLog
+						require.NotNil(t, log.ServiceTier)
+						require.Equal(t, tierCase.tier, *log.ServiceTier)
+						require.Same(t, &serviceTier, result.ServiceTier, "billing must not rewrite the outbound tier")
+						require.Equal(t, observed, result.UpstreamResponseServiceTier, "preserve the upstream declaration for diagnostics")
+						base, err := svc.billingService.CalculateCost(tierCase.model, UsageTokens{InputTokens: 100, OutputTokens: 50, CacheReadTokens: 20}, 1)
+						require.NoError(t, err)
+						require.InDelta(t, base.InputCost*tierCase.multiplier, log.InputCost, 1e-10)
+						require.InDelta(t, base.OutputCost*tierCase.multiplier, log.OutputCost, 1e-10)
+						require.InDelta(t, base.CacheReadCost*tierCase.multiplier, log.CacheReadCost, 1e-10)
+						require.InDelta(t, base.TotalCost*tierCase.multiplier, log.TotalCost, 1e-10)
+						require.InDelta(t, base.TotalCost*tierCase.multiplier*0.5, log.ActualCost, 1e-10)
+						require.NotNil(t, log.AccountStatsCost)
+						require.InDelta(t, base.TotalCost*tierCase.multiplier, *log.AccountStatsCost, 1e-10)
+						if billingPath == "atomic" {
+							require.Equal(t, 1, billingRepo.calls)
+							require.Equal(t, tierCase.tier, billingRepo.lastCmd.ServiceTier)
+							require.InDelta(t, log.ActualCost, billingRepo.lastCmd.BalanceCost, 1e-8)
+							require.Zero(t, userRepo.deductCalls)
+						} else {
+							require.Equal(t, 1, userRepo.deductCalls)
+							require.InDelta(t, log.ActualCost, userRepo.lastAmount, 1e-10)
+						}
 					})
-					require.NoError(t, err)
-					require.Equal(t, 1, usageRepo.calls)
-					require.NotNil(t, usageRepo.lastLog)
-					log := usageRepo.lastLog
-					require.NotNil(t, log.ServiceTier)
-					require.Equal(t, "priority", *log.ServiceTier)
-					require.Equal(t, observed, result.UpstreamResponseServiceTier, "preserve the upstream declaration for diagnostics")
-					base, err := svc.billingService.CalculateCost("gpt-5.4", UsageTokens{InputTokens: 100, OutputTokens: 50, CacheReadTokens: 20}, 1)
-					require.NoError(t, err)
-					require.InDelta(t, base.InputCost*2, log.InputCost, 1e-10)
-					require.InDelta(t, base.OutputCost*2, log.OutputCost, 1e-10)
-					require.InDelta(t, base.CacheReadCost*2, log.CacheReadCost, 1e-10)
-					require.InDelta(t, base.TotalCost*2, log.TotalCost, 1e-10)
-					require.InDelta(t, base.TotalCost*2*0.5, log.ActualCost, 1e-10)
-					require.NotNil(t, log.AccountStatsCost)
-					require.InDelta(t, base.TotalCost*2, *log.AccountStatsCost, 1e-10)
-					if billingPath == "atomic" {
-						require.Equal(t, 1, billingRepo.calls)
-						require.Equal(t, "priority", billingRepo.lastCmd.ServiceTier)
-						require.InDelta(t, log.ActualCost, billingRepo.lastCmd.BalanceCost, 1e-8)
-						require.Zero(t, userRepo.deductCalls)
-					} else {
-						require.Equal(t, 1, userRepo.deductCalls)
-						require.InDelta(t, log.ActualCost, userRepo.lastAmount, 1e-10)
-					}
-				})
+				}
 			}
 		}
 	}
@@ -3344,46 +3356,7 @@ func TestOpenAIGatewayServiceRecordUsage_FastBillingFollowsRequestPolicy(t *test
 	}
 }
 
-func TestOpenAIGatewayServiceRecordUsage_CodexDefaultEchoKeepsFastBilling(t *testing.T) {
-	for _, accountType := range []string{AccountTypeOAuth, AccountTypeSetupToken} {
-		t.Run(accountType, func(t *testing.T) {
-			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
-			svc := newOpenAIRecordUsageServiceForTest(
-				usageRepo,
-				&openAIRecordUsageUserRepoStub{},
-				&openAIRecordUsageSubRepoStub{},
-				nil,
-			)
-			serviceTier := "priority"
-			tokens := UsageTokens{InputTokens: 100, OutputTokens: 50}
-
-			err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
-				Result: &OpenAIForwardResult{
-					RequestID:                   "resp_codex_default_echo",
-					ServiceTier:                 &serviceTier,
-					UpstreamResponseServiceTier: "default",
-					Usage:                       OpenAIUsage{InputTokens: tokens.InputTokens, OutputTokens: tokens.OutputTokens},
-					Model:                       "gpt-5.6-sol",
-					Duration:                    time.Second,
-				},
-				APIKey:  &APIKey{ID: 1019},
-				User:    &User{ID: 2019},
-				Account: &Account{ID: 3019, Platform: PlatformOpenAI, Type: accountType},
-			})
-
-			require.NoError(t, err)
-			require.NotNil(t, usageRepo.lastLog)
-			require.NotNil(t, usageRepo.lastLog.ServiceTier)
-			require.Equal(t, "priority", *usageRepo.lastLog.ServiceTier)
-
-			fastCost, calcErr := svc.billingService.CalculateCostWithServiceTier("gpt-5.6-sol", tokens, 1.0, "priority")
-			require.NoError(t, calcErr)
-			require.InDelta(t, fastCost.TotalCost, usageRepo.lastLog.TotalCost, 1e-10)
-		})
-	}
-}
-
-func TestOpenAIGatewayServiceRecordUsage_ShadowUsesParentCredentialTierContract(t *testing.T) {
+func TestOpenAIGatewayServiceRecordUsage_ShadowPreservesOutboundTier(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	svc := newOpenAIRecordUsageServiceForTest(
 		usageRepo,

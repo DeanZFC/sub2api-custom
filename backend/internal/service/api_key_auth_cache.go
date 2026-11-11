@@ -118,6 +118,7 @@ type APIKeyAuthGroupSnapshot struct {
 	RequireOAuthOnly            bool                              `json:"require_oauth_only"`
 	RequirePrivacySet           bool                              `json:"require_privacy_set"`
 	ForceOpenAIFast             bool                              `json:"force_openai_fast"`
+	ForceOpenAIServiceTier      string                            `json:"force_openai_service_tier"`
 	FreeOpenAIFast              bool                              `json:"free_openai_fast"`
 	DefaultMappedModel          string                            `json:"default_mapped_model,omitempty"`
 	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config,omitempty"`
