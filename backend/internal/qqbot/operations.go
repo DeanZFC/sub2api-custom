@@ -56,7 +56,7 @@ func (s *Service) ListJobs(ctx context.Context, f JobFilter) (JobPage, error) {
 	if err != nil {
 		return out, err
 	}
-	where := ` FROM qq_bot_jobs WHERE app_id=$1 AND ($2='' OR group_id=$2) AND ($3='' OR member_id=$3) AND ($4='' OR kind=$4 OR ($4='notifications' AND kind IN ('price_notification','health_notification','ranking_notification'))) AND ($5='' OR status=$5) AND ($6::timestamptz IS NULL OR created_at >= $6) AND ($7::timestamptz IS NULL OR created_at <= $7) AND ($8='' OR site_query->>'kind'=$8) AND ($9='' OR site_query->>'status'=$9)`
+	where := ` FROM qq_bot_jobs WHERE app_id=$1 AND ($2='' OR group_id=$2) AND ($3='' OR member_id=$3) AND ($4='' OR kind=$4 OR ($4='notifications' AND kind IN ('price_notification','health_notification','ranking_notification','announcement'))) AND ($5='' OR status=$5) AND ($6::timestamptz IS NULL OR created_at >= $6) AND ($7::timestamptz IS NULL OR created_at <= $7) AND ($8='' OR site_query->>'kind'=$8) AND ($9='' OR site_query->>'status'=$9)`
 	args := []any{c.AppID, f.GroupID, f.MemberID, f.Kind, f.Status, from, to, f.QueryKind, f.QueryStatus}
 	// Count and page share one snapshot even while workers finish jobs.
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})

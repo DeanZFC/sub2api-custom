@@ -19,9 +19,10 @@ const priceNotificationEvent = "PRICE_CHANGE_NOTIFICATION"
 
 // Disabled by default. Empty Groups means all AllowedGroups.
 type PriceNotificationConfig struct {
-	Enabled   bool     `json:"enabled"`
-	Scheduled bool     `json:"scheduled"`
-	Groups    []string `json:"groups"`
+	Enabled    bool     `json:"enabled"`
+	Scheduled  bool     `json:"scheduled"`
+	MentionAll bool     `json:"mention_all"`
+	Groups     []string `json:"groups"`
 }
 
 type PriceField struct {
@@ -210,12 +211,12 @@ func (s *Service) checkPriceChanges(ctx context.Context, now time.Time) (time.Ti
 		chunks := formatPriceChanges(previous, current, c.PriceNotifications.Scheduled)
 		batchID, sequence := randomID(), 0
 		for _, group := range priceNotificationGroups(c) {
-			for _, chunk := range chunks {
+			for index, chunk := range chunks {
 				// created_at is the transaction timestamp. Ordered IDs preserve
 				// continuation order when several chunks share that timestamp.
 				id := fmt.Sprintf("%s-%08d", batchID, sequence)
 				sequence++
-				body, err := json.Marshal(map[string]any{"text": chunk, "sandbox": c.Sandbox})
+				body, err := json.Marshal(map[string]any{"text": chunk, "sandbox": c.Sandbox, "continuation": index > 0})
 				if err != nil {
 					return next, err
 				}
@@ -431,8 +432,9 @@ func (s *Service) deliverPriceNotification(parent context.Context, c Config, j J
 		return
 	}
 	var body struct {
-		Text    string `json:"text"`
-		Sandbox bool   `json:"sandbox"`
+		Text         string `json:"text"`
+		Sandbox      bool   `json:"sandbox"`
+		Continuation bool   `json:"continuation"`
 	}
 	if json.Unmarshal(j.Payload, &body) != nil || body.Text == "" || body.Sandbox != c.Sandbox {
 		s.finish(j, "cancelled", "通知内容无效或 QQ 环境已变更")
@@ -440,6 +442,12 @@ func (s *Service) deliverPriceNotification(parent context.Context, c Config, j J
 	}
 	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
 	defer cancel()
+	// QQ permits one @everyone message per group each day. A batch may contain
+	// multiple changed subjects or chunks; mention only its first message.
+	if body.Continuation {
+		c.PriceNotifications.MentionAll = false
+		c.HealthNotifications.MentionAll = false
+	}
 	err := s.sendPriceNotification(ctx, c, j, body.Text)
 	if err != nil {
 		s.finish(j, "delivery_failed", err.Error())
@@ -461,7 +469,16 @@ func (s *Service) sendPriceNotification(ctx context.Context, c Config, j Job, te
 	if !c.Enabled || c.AppID != j.AppID || !allowsNotification(c, j) || c.NotificationQuietHours.active(time.Now()) {
 		return ErrDisabled
 	}
-	if j.EventType == rankingNotificationEvent {
+	switch j.EventType {
+	case priceNotificationEvent:
+		if c.PriceNotifications.MentionAll {
+			text = "<qqbot-at-everyone />\n" + text
+		}
+	case healthNotificationEvent:
+		if c.HealthNotifications.MentionAll {
+			text = "<qqbot-at-everyone />\n" + text
+		}
+	case rankingNotificationEvent:
 		text = `<qqbot-at-user id="` + html.EscapeString(j.MemberID) + `" />` + "\n" + text
 	}
 	if len([]rune(text)) > 1800 {

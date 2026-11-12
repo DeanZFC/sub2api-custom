@@ -44,6 +44,7 @@ func RegisterAdminRoutes(
 			bot.POST("/setup/probe/:kind", h.QQBot.SetupProbe)
 			bot.PUT("/config", h.QQBot.SaveConfig)
 			bot.GET("/runtime", h.QQBot.Runtime)
+			bot.POST("/announcements", h.QQBot.SendAnnouncement)
 			bot.GET("/members", h.QQBot.ListMembers)
 			bot.PUT("/config/:section", h.QQBot.SaveConfigSection)
 			bot.GET("/config-history", h.QQBot.ConfigHistory)

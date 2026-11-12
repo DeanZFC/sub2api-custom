@@ -148,6 +148,10 @@ func (s *Service) runOne(parent context.Context) {
 		s.finish(j, "failed", ErrDisabled.Error())
 		return
 	}
+	if j.EventType == announcementEvent {
+		s.deliverAnnouncement(ctx, c, j)
+		return
+	}
 	if j.EventType == rankingNotificationEvent {
 		s.deliverRankingNotification(ctx, c, j)
 		return

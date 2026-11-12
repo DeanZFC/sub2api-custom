@@ -53,7 +53,7 @@ watch(() => filters.group_id, () => { filters.member_id = '' }, { flush: 'sync' 
 function selectMember(member: QQMemberOption) { filters.group_id = member.group_id; filters.member_id = member.member_id }
 let applied = { ...filters }
 function search() { applied = { ...filters }; void load(1) }
-const kinds = ['chat', 'image', 'ambient_chat', 'spam_report', 'notifications', 'price_notification', 'health_notification', 'ranking_notification']
+const kinds = ['chat', 'image', 'ambient_chat', 'spam_report', 'notifications', 'price_notification', 'health_notification', 'ranking_notification', 'announcement']
 function kindLabel(kind: string) { const key = `qqbot.workspace.jobKinds.${kind}`; return te(key) ? t(key) : kind }
 const statuses = ['queued', 'running', 'completed', 'skipped', 'failed', 'delivery_failed', 'expired', 'interrupted', 'cancelled']
 const queryKinds: QQSiteQueryKind[] = ['model_price', 'channel_status', 'activity_rules', 'account_balance', 'today_usage', 'lottery_chances']

@@ -54,6 +54,20 @@ func settlePeriodicGrowth(ctx context.Context, tx *sql.Tx, c Config, j Job, uid 
 		reward := task.reward()
 		status := "未开启"
 		if task.Enabled && reward.enabled() {
+			if isGrowthAmountDayKind(task.Kind) {
+				detail, n, changed, e := settlePeriodicAmountDays(ctx, tx, c, j, uid, task, progress, at)
+				if e != nil {
+					return "", 0, false, e
+				}
+				grants += n
+				balanceChanged = balanceChanged || changed
+				status = detail
+				if reward.Type == "physical" || reward.Type == "other" {
+					status += "\n奖品由管理员发放"
+				}
+				text += fmt.Sprintf("\n\n**%d. %s**\n状态：%s\n每轮奖励：%s", i+1, replyPlainLabel(task.Name), status, reward.description())
+				continue
+			}
 			consumed, cycles := decimal.Zero, int64(0)
 			err := tx.QueryRowContext(ctx, `SELECT consumed,cycles FROM qq_bot_periodic_growth_progress WHERE user_id=$1 AND task_id=$2 AND kind=$3`, uid, task.ID, task.Kind).Scan(&consumed, &cycles)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {

@@ -342,6 +342,12 @@ func siteGrowthRules(c GrowthConfig) string {
 			}
 			if set.periodic {
 				kind = "周期任务，每累计达标可再获奖励"
+				if isGrowthAmountDayKind(task.Kind) {
+					kind = "周期任务，每轮达标后可再获奖励，已结算日期不重复使用"
+					if isGrowthAmountStreakKind(task.Kind) {
+						kind += "，未达标的连续进度遇间断重新计算"
+					}
+				}
 			}
 			text += fmt.Sprintf("\n\n**%s**\n类型：%s\n目标：%s\n奖励：%s", replyPlainLabel(task.Name), kind, siteGrowthTarget(task), task.reward().description())
 			text += siteRuleClaimInstructions(task.reward())
@@ -373,6 +379,14 @@ func siteGrowthTarget(t GrowthTask) string {
 		return fmt.Sprintf("累计消耗 %.0f Token", t.Target)
 	case "usage_amount":
 		return "累计消费 " + siteRuleMoney(t.Target)
+	case "usage_amount_days":
+		return fmt.Sprintf("累计 %.0f 天每日消费满 %s（按北京时间日期统计）", t.Target, siteRuleMoney(t.DailyAmount))
+	case "usage_amount_streak":
+		return fmt.Sprintf("连续 %.0f 天每日消费满 %s（按北京时间日期统计）", t.Target, siteRuleMoney(t.DailyAmount))
+	case "recharge_days":
+		return fmt.Sprintf("累计 %.0f 天每日有效充值满 %s（按北京时间日期统计）", t.Target, siteRuleMoney(t.DailyAmount))
+	case "recharge_streak":
+		return fmt.Sprintf("连续 %.0f 天每日有效充值满 %s（按北京时间日期统计）", t.Target, siteRuleMoney(t.DailyAmount))
 	case "recharge_total":
 		return "累计有效充值 " + siteRuleMoney(t.Target)
 	default:

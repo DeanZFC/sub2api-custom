@@ -45,11 +45,11 @@ export function defaultAutonomousConfig(): QQAutonomousConfig {
     start_hour: 0, end_hour: 0, followup_seconds: 90, max_chars: 100, mention_user: false }
 }
 export interface QQHealthNotificationConfig {
-  enabled: boolean; groups: string[]; minimum_samples: number; error_percent: number
+  enabled: boolean; mention_all?: boolean; groups: string[]; minimum_samples: number; error_percent: number
   recovery_percent: number; ttft_seconds: number; failure_minutes: number; recovery_minutes: number; cooldown_minutes: number
 }
 export function defaultHealthNotificationConfig(): QQHealthNotificationConfig {
-  return { enabled: false, groups: [], minimum_samples: 50, error_percent: 20, recovery_percent: 5,
+  return { enabled: false, mention_all: false, groups: [], minimum_samples: 50, error_percent: 20, recovery_percent: 5,
     ttft_seconds: 10, failure_minutes: 3, recovery_minutes: 2, cooldown_minutes: 30 }
 }
 export interface QQGroupPolicy {
@@ -77,7 +77,7 @@ export interface QQBotConfig {
   custom_commands: QQBotCustomCommand[]
   site_knowledge?: QQSiteKnowledgeConfig
   group_admins?: QQGroupAdmin[]
-  price_notifications?: { enabled: boolean; scheduled: boolean; groups: string[] }
+  price_notifications?: { enabled: boolean; scheduled: boolean; mention_all?: boolean; groups: string[] }
   chat_model: string; chat_protocol: 'chat_completions' | 'responses'
   image_enabled: boolean; image_base_url: string; image_api_key: string; image_api_key_set: boolean
   image_model: string; image_size: string; system_prompt: string; max_output_tokens: number
@@ -87,6 +87,12 @@ export interface QQBotConfig {
   checkin_reward: number; invite_enabled: boolean; invite_reward: number; invite_daily_limit: number
   invite_min_recharge_total?: number; invite_min_recharge_30d?: number; invite_recharge_window_days?: number
   clear_app_secret?: boolean; clear_api_key?: boolean; clear_image_api_key?: boolean
+}
+export interface QQAnnouncementRequest {
+  app_id: string; sandbox: boolean; groups: string[]; text: string; mention_all: boolean; request_id: string
+}
+export interface QQAnnouncementResult {
+  batch_id: string; jobs: { id: string; group_id: string }[]; duplicate: boolean
 }
 export interface QQRecentMember {
   group_id: string; member_id: string; nickname: string; email: string
@@ -138,7 +144,7 @@ export interface QQBindingState {
   binding: { member_id: string; group_id: string; nickname: string; created_at: string } | null
   pending: QQBindingRequest | null
 }
-export type QQGrowthTaskKind = 'binding' | 'usage_count' | 'checkin_total' | 'checkin_streak' | 'recharge_total' | 'usage_tokens' | 'usage_amount' | 'usage_days' | 'model_count' | 'invite_count'
+export type QQGrowthTaskKind = 'binding' | 'usage_count' | 'checkin_total' | 'checkin_streak' | 'recharge_total' | 'usage_tokens' | 'usage_amount' | 'usage_days' | 'model_count' | 'invite_count' | 'usage_amount_days' | 'usage_amount_streak' | 'recharge_days' | 'recharge_streak'
 export type QQGrowthTaskPeriod = 'once' | 'daily' | 'weekly'
 export interface QQGrowthReward {
   coupon_template_id?: number
@@ -146,6 +152,7 @@ export interface QQGrowthReward {
 }
 export interface QQGrowthTask {
   period?: QQGrowthTaskPeriod
+  daily_amount?: number
   reward: QQGrowthReward
   id: string; name: string; kind: QQGrowthTaskKind; target: number; chances: number; enabled: boolean
 }
@@ -254,6 +261,7 @@ export interface QQSetupProbe { kind: string; status: 'ready' | 'blocked'; messa
 export interface QQActivityBundle { version: string; checkin: QQCheckinConfig; lottery: QQLotteryConfig; invite: QQInviteConfig; ranking: QQRankingConfig; budget: number | null }
 export interface QQSetupRequest { config: QQBotConfig; versions: Record<string, string>; sections: string[]; site_quota: number; regenerate_site_key?: boolean; image_site_quota?: number; regenerate_image_site_key?: boolean }
 export const qqbotAPI = {
+  sendAnnouncement: async (request: QQAnnouncementRequest) => (await apiClient.post<QQAnnouncementResult>('/admin/qqbot/announcements', request)).data,
   setupOptions: async () => (await apiClient.get<QQSetupOptions>('/admin/qqbot/setup/options')).data,
   setupChecks: async () => (await apiClient.get<QQSetupReadiness>('/admin/qqbot/setup/checks')).data,
   saveSetup: async (request: QQSetupRequest) => (await apiClient.put<QQBotConfig>('/admin/qqbot/setup', request)).data,

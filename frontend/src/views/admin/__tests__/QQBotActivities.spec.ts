@@ -271,7 +271,7 @@ describe('QQ activity pages with real translations', () => {
     const w = mount(QQBotGrowthSettings, { global: { plugins: [translation] } })
     await flushPromises()
     expect(w.find('form form').exists()).toBe(false)
-    expect(w.get('[data-testid="periodic-preset"]').findAll('option').map(option => option.attributes('value'))).toEqual(['usage_amount', 'usage_tokens', 'usage_count', 'recharge_total'])
+    expect(w.get('[data-testid="periodic-preset"]').findAll('option').map(option => option.attributes('value'))).toEqual(['usage_amount', 'usage_tokens', 'usage_count', 'recharge_total', 'usage_amount_days', 'usage_amount_streak', 'recharge_days', 'recharge_streak'])
     await w.get('[data-testid="add-periodic-task"]').trigger('click')
     expect((w.get('[data-testid="periodic-enabled-0"]').element as HTMLInputElement).checked).toBe(false)
     await w.get('[data-testid="periodic-name-0"]').setValue('Every USD 10')

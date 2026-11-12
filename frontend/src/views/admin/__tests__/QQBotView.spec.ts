@@ -4,13 +4,14 @@ import { createI18n } from 'vue-i18n'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import QQBotView from '../QQBotView.vue'
 import QQBotChatPreview from '@/components/admin/qqbot/QQBotChatPreview.vue'
+import QQBotAnnouncement from '@/components/admin/qqbot/QQBotAnnouncement.vue'
 import QQBotSiteAISettings from '@/components/admin/qqbot/QQBotSiteAISettings.vue'
 import QQBotImageAISettings from '@/components/admin/qqbot/QQBotImageAISettings.vue'
 import zh from '@/i18n/locales/zh'
 import en from '@/i18n/locales/en'
 import { configSections, pickSection, cloneConfig } from '@/components/admin/qqbot/configSections'
 import { defaultAutonomousConfig, defaultModerationConfig, type QQSetupRequest, type QQBotConfig, type QQMemberOption } from '@/api/qqbot'
-const api = vi.hoisted(() => ({ config: vi.fn(), setupOptions: vi.fn(), saveSetup: vi.fn(), saveSection: vi.fn(), runtime: vi.fn(), groupInfo: vi.fn(), bindings: vi.fn(), members: vi.fn(), deleteDiscoveredGroup: vi.fn(), probe: vi.fn(), configHistory: vi.fn(), commands: vi.fn(), chatPreview: vi.fn() }))
+const api = vi.hoisted(() => ({ config: vi.fn(), setupOptions: vi.fn(), saveSetup: vi.fn(), saveSection: vi.fn(), runtime: vi.fn(), groupInfo: vi.fn(), bindings: vi.fn(), members: vi.fn(), deleteDiscoveredGroup: vi.fn(), probe: vi.fn(), configHistory: vi.fn(), commands: vi.fn(), chatPreview: vi.fn(), sendAnnouncement: vi.fn() }))
 vi.mock('@/api/qqbot', async original => ({ ...await original<typeof import('@/api/qqbot')>(), qqbotAPI: api }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 const wrappers: VueWrapper[] = []
@@ -264,13 +265,46 @@ describe('QQ module settings', () => {
  it('requires explicit all-groups selection and saves notification scope', async () => {
   const w = await mountView(); await category(w, '通知与额度'); await w.get('#qqbot-settings-tab-notifications').trigger('click')
   const pickers = w.get('#qqbot-settings-panel-notifications').findAllComponents({ name: 'QQGroupPicker' })
-  await pickers[0]!.findAll('input[type="checkbox"]')[1]!.setValue(true)
+  const pricePicker = pickers.find(picker => picker.props('allowAll'))!
+  await pricePicker.findAll('input[type="checkbox"]')[1]!.setValue(true)
   await w.get('[data-testid="price-notifications-enabled"]').setValue(true)
   await w.get('form').trigger('submit'); await flushPromises()
   expect(server.price_notifications?.groups).toEqual(['group'])
-  await pickers[0]!.findAll('input[type="checkbox"]')[1]!.setValue(false)
+  await pricePicker.findAll('input[type="checkbox"]')[1]!.setValue(false)
   await w.get('form').trigger('submit'); await flushPromises()
   expect(server.price_notifications?.groups).toEqual(['group'])
+ })
+ it('saves separate mention-everyone switches without queuing an announcement', async () => {
+  const w = await mountView('zh', '/admin/qqbot/config?tab=notifications')
+  expect(w.get<HTMLInputElement>('[data-testid="price-notifications-mention-all"]').element.checked).toBe(false)
+  expect(w.get<HTMLInputElement>('[data-testid="health-mention-all"]').element.checked).toBe(false)
+  await w.get('[data-testid="price-notifications-mention-all"]').setValue(true)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(server.price_notifications?.mention_all).toBe(true)
+  expect(server.health_notifications?.mention_all).toBe(false)
+  await w.get('[data-testid="health-mention-all"]').setValue(true)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(server.health_notifications?.mention_all).toBe(true)
+  expect(api.sendAnnouncement).not.toHaveBeenCalled()
+ })
+ it('queues using saved connection and group policies while preserving configuration drafts', async () => {
+  server.enabled = true
+  api.sendAnnouncement.mockResolvedValue({ batch_id: 'batch', jobs: [{ id: 'announcement-job', group_id: 'group' }], duplicate: false })
+  const w = await mountView()
+  await w.get('#qqbot-settings-panel-connection input[autocomplete="off"]').setValue('unsaved-app')
+  await category(w, '通知与额度'); await w.get('#qqbot-settings-tab-notifications').trigger('click')
+  const announcement = w.getComponent(QQBotAnnouncement)
+  expect(announcement.props('config').app_id).toBe('app')
+  announcement.getComponent({ name: 'QQGroupPicker' }).vm.$emit('update:modelValue', ['group'])
+  await announcement.get('[data-testid="qq-announcement-text"]').setValue('后台公告')
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  api.runtime.mockResolvedValue({ groups: [], jobs: [{ id: 'announcement-job', group_id: 'group', member_id: '', kind: 'announcement', status: 'queued', error: '', input_tokens: 0, output_tokens: 0, created_at: '2026-11-11T08:00:00Z' }], rewards: [], bindings: 0, encryption_ready: true })
+  await announcement.get('[data-testid="qq-announcement-send"]').trigger('click'); await flushPromises()
+  expect(api.sendAnnouncement).toHaveBeenCalledWith(expect.objectContaining({ app_id: 'app', sandbox: false, groups: ['group'], text: '后台公告', mention_all: false }))
+  expect(api.runtime).toHaveBeenCalledTimes(2)
+  expect(w.get('#qqbot-settings-panel-notifications').text()).toContain('待发送')
+  expect(api.saveSection).not.toHaveBeenCalled()
+  expect(w.get('#qqbot-settings-panel-connection input[autocomplete="off"]').element).toHaveProperty('value', 'unsaved-app')
  })
  it('presets keep autonomous participation opt-in and bounded', async () => {
   const w = await mountView(); await category(w, '对话与指令')

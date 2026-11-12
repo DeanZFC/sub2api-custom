@@ -321,9 +321,9 @@ func (s *Service) claimJob(ctx context.Context) (Job, error) {
 	// members wait for a slow model call. The transaction lock and global cap
 	// above apply across service instances; notification pacing stays separate.
 	j, err := scanJob(tx.QueryRowContext(ctx, `SELECT `+jobColumns+` FROM qq_bot_jobs q WHERE status='queued'
- AND (event_type NOT IN ('PRICE_CHANGE_NOTIFICATION','HEALTH_CHANGE_NOTIFICATION','RANKING_REWARD_NOTIFICATION') OR (
-   NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.event_type IN ('PRICE_CHANGE_NOTIFICATION','HEALTH_CHANGE_NOTIFICATION','RANKING_REWARD_NOTIFICATION') AND p.status='running')
-   AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.event_type IN ('PRICE_CHANGE_NOTIFICATION','HEALTH_CHANGE_NOTIFICATION','RANKING_REWARD_NOTIFICATION') AND p.started_at>NOW()-INTERVAL '3100 milliseconds')
+ AND (event_type NOT IN ('PRICE_CHANGE_NOTIFICATION','HEALTH_CHANGE_NOTIFICATION','RANKING_REWARD_NOTIFICATION','MANUAL_ANNOUNCEMENT') OR (
+   NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.event_type IN ('PRICE_CHANGE_NOTIFICATION','HEALTH_CHANGE_NOTIFICATION','RANKING_REWARD_NOTIFICATION','MANUAL_ANNOUNCEMENT') AND p.status='running')
+   AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.event_type IN ('PRICE_CHANGE_NOTIFICATION','HEALTH_CHANGE_NOTIFICATION','RANKING_REWARD_NOTIFICATION','MANUAL_ANNOUNCEMENT') AND p.started_at>NOW()-INTERVAL '3100 milliseconds')
  ))
  AND (q.kind<>'ambient_chat' OR ((q.autonomous_ready_at IS NULL OR q.autonomous_ready_at<=clock_timestamp() OR q.created_at<clock_timestamp()-INTERVAL '2 minutes')
    AND NOT EXISTS(SELECT 1 FROM qq_bot_jobs p WHERE p.app_id=q.app_id AND p.group_id=q.group_id AND p.kind='ambient_chat' AND p.status='running')

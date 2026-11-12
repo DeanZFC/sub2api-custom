@@ -32,11 +32,13 @@
                 <option v-for="kind in taskKinds(task.period)" :key="kind" :value="kind">{{ t('qqbot.growth.kinds.' + kind) }}</option>
               </select>
             </label>
-            <label class="block space-y-1">{{ t('qqbot.growth.period') }}<select v-model="task.period" :data-testid="'task-period-' + index" class="input" :disabled="persistedTaskIDs.has(task.id)" :title="persistedTaskIDs.has(task.id) ? t('qqbot.growth.periodLocked') : undefined" @change="changeTaskPeriod(task)"><option v-for="period in periods" :key="period" :value="period">{{ t('qqbot.growth.periods.' + period) }}</option></select></label>
+            <label class="block space-y-1">{{ t('qqbot.growth.period') }}<select v-model="task.period" :data-testid="'task-period-' + index" class="input" :disabled="persistedTaskIDs.has(task.id)" :title="persistedTaskIDs.has(task.id) ? t('qqbot.growth.periodLocked') : undefined" @change="changeTaskPeriod(task)"><option v-for="period in taskPeriods(task.kind)" :key="period" :value="period">{{ t('qqbot.growth.periods.' + period) }}</option></select></label>
             <label class="block space-y-1">{{ t('qqbot.growth.targets.' + task.kind) }}<input v-model.number="task.target" :data-testid="'task-target-' + index" type="number" :min="isAmountKind(task.kind) ? 0.01 : 1" :max="targetLimit(task.kind, task.period)" :step="isAmountKind(task.kind) ? 0.01 : 1" :readonly="task.kind === 'binding'" required class="input" /></label>
+            <label v-if="isDailyAmountKind(task.kind)" class="block space-y-1">{{ t('qqbot.growth.dailyAmount') }}<input v-model.number="task.daily_amount" :data-testid="'task-daily-amount-' + index" type="number" min="0.01" max="1000000000" step="0.01" required class="input" /></label>
           </div>
           <QQBotGrowthRewardFields v-model="task.reward" prefix="task" :index="index" />
           <p class="text-sm text-gray-500">{{ t('qqbot.growth.typeHelp.' + task.kind) }}</p>
+          <p v-if="isDailyAmountKind(task.kind)" class="text-sm text-gray-500">{{ t('qqbot.growth.dailyAmountHelp') }}</p>
         </article>
         <p v-if="!form.growth.tasks.length" class="rounded-lg border border-dashed p-6 text-center text-sm text-gray-500 dark:border-dark-700">{{ t('qqbot.growth.empty') }}</p>
         <div class="flex flex-wrap items-end gap-3">
@@ -72,14 +74,16 @@
             <div class="grid gap-4 sm:grid-cols-2">
               <label class="block space-y-1">{{ t('qqbot.growth.name') }}<input v-model="task.name" :data-testid="'periodic-name-' + index" maxlength="40" required class="input" /></label>
               <label class="block space-y-1">{{ t('qqbot.growth.kind') }}
-                <select v-model="task.kind" :data-testid="'periodic-kind-' + index" class="input" @change="task.target = targets[task.kind]">
+                <select v-model="task.kind" :data-testid="'periodic-kind-' + index" class="input" @change="changeTaskKind(task)">
                   <option v-for="kind in periodicKinds" :key="kind" :value="kind">{{ t('qqbot.growth.kinds.' + kind) }}</option>
                 </select>
               </label>
               <label class="block space-y-1">{{ t('qqbot.growth.periodicTargets.' + task.kind) }}<input v-model.number="task.target" :data-testid="'periodic-target-' + index" type="number" :min="isAmountKind(task.kind) ? 0.01 : 1" :max="targetLimit(task.kind, task.period)" :step="isAmountKind(task.kind) ? 0.01 : 1" required class="input" /></label>
+              <label v-if="isDailyAmountKind(task.kind)" class="block space-y-1">{{ t('qqbot.growth.dailyAmount') }}<input v-model.number="task.daily_amount" :data-testid="'periodic-daily-amount-' + index" type="number" min="0.01" max="1000000000" step="0.01" required class="input" /></label>
             </div>
             <QQBotGrowthRewardFields v-model="task.reward" prefix="periodic" :index="index" />
             <p class="text-sm text-gray-500">{{ t('qqbot.growth.typeHelp.' + task.kind) }}</p>
+            <template v-if="isDailyAmountKind(task.kind)"><p class="text-sm text-gray-500">{{ t('qqbot.growth.dailyAmountHelp') }}</p><p class="text-sm text-gray-500">{{ t('qqbot.growth.periodicDailyAmountHelp') }}</p></template>
           </article>
           <p v-if="!form.growth.periodic_tasks.length" class="rounded-lg border border-dashed p-6 text-center text-sm text-gray-500 dark:border-dark-700">{{ t('qqbot.growth.empty') }}</p>
           <div class="flex flex-wrap items-end gap-3">
@@ -110,9 +114,10 @@ import QQBotGrowthRewardFields from './QQBotGrowthRewardFields.vue'
 import { normalizeGrowthReward, rewardEnabled, validGrowthReward } from './growthReward'
 
 const { t } = useI18n()
-const kinds: QQGrowthTaskKind[] = ['binding', 'usage_count', 'usage_days', 'model_count', 'invite_count', 'recharge_total', 'usage_tokens', 'usage_amount']
-const periodicKinds: QQGrowthTaskKind[] = ['usage_amount', 'usage_tokens', 'usage_count', 'recharge_total']
-const targets: Record<QQGrowthTaskKind, number> = { binding: 1, usage_count: 10, checkin_total: 7, checkin_streak: 7, recharge_total: 10, usage_tokens: 1_000_000, usage_amount: 10, usage_days: 3, model_count: 3, invite_count: 3 }
+const dailyAmountKinds: QQGrowthTaskKind[] = ['usage_amount_days', 'usage_amount_streak', 'recharge_days', 'recharge_streak']
+const kinds: QQGrowthTaskKind[] = ['binding', 'usage_count', 'usage_days', 'model_count', 'invite_count', 'recharge_total', 'usage_tokens', 'usage_amount', ...dailyAmountKinds]
+const periodicKinds: QQGrowthTaskKind[] = ['usage_amount', 'usage_tokens', 'usage_count', 'recharge_total', ...dailyAmountKinds]
+const targets: Record<QQGrowthTaskKind, number> = { binding: 1, usage_count: 10, checkin_total: 7, checkin_streak: 7, recharge_total: 10, usage_tokens: 1_000_000, usage_amount: 10, usage_days: 3, model_count: 3, invite_count: 3, usage_amount_days: 7, usage_amount_streak: 7, recharge_days: 7, recharge_streak: 7 }
 const maxTasks = 12
 const newTaskKind = ref<QQGrowthTaskKind>('usage_count')
 const newPeriodicKind = ref<QQGrowthTaskKind>('usage_amount')
@@ -144,15 +149,22 @@ function addChallenge(preset: ChallengePreset) {
   form.value.growth.tasks.push({ id: 'challenge_' + preset.id, name: t('qqbot.growth.presets.' + preset.id + '.name'), kind: preset.kind, target: preset.target, period: preset.period, chances: preset.chances, reward: normalizeGrowthReward(undefined, preset.chances), enabled: false })
   taskFilter.value = 'all'
 }
-function taskKinds(period?: QQGrowthTaskPeriod) { return kinds.filter(kind => !period || period === 'once' || (kind !== 'binding' && kind !== 'recharge_total')) }
+function isDailyAmountKind(kind: QQGrowthTaskKind) { return dailyAmountKinds.includes(kind) }
+function taskPeriods(kind: QQGrowthTaskKind) { return isDailyAmountKind(kind) ? ['once'] : periods }
+function taskKinds(period?: QQGrowthTaskPeriod) { return kinds.filter(kind => !period || period === 'once' || (kind !== 'binding' && kind !== 'recharge_total' && !isDailyAmountKind(kind))) }
 function changeTaskPeriod(task: QQGrowthTask) {
   if (!taskKinds(task.period).includes(task.kind)) {
     task.kind = 'usage_count'
     task.target = targets.usage_count
+    delete task.daily_amount
   }
   task.target = Math.min(task.target, targetLimit(task.kind, task.period))
 }
-function changeTaskKind(task: QQGrowthTask) { task.target = Math.min(targets[task.kind], targetLimit(task.kind, task.period)) }
+function changeTaskKind(task: QQGrowthTask) {
+  task.target = Math.min(targets[task.kind], targetLimit(task.kind, task.period))
+  if (isDailyAmountKind(task.kind)) { task.daily_amount = 10; task.period = 'once' }
+  else delete task.daily_amount
+}
 
 
 function isAmountKind(kind: QQGrowthTaskKind) { return kind === 'recharge_total' || kind === 'usage_amount' }
@@ -166,7 +178,7 @@ function targetLimit(kind: QQGrowthTaskKind, period?: QQGrowthTaskPeriod) {
 function addTask(section: 'tasks' | 'periodic_tasks') {
   if (!form.value || busy.value || form.value.growth[section].length >= maxTasks) return
   const kind = section === 'tasks' ? newTaskKind.value : newPeriodicKind.value
-  form.value.growth[section].push({ id: 'task_' + crypto.randomUUID().replace(/-/g, ''), name: t('qqbot.growth.kinds.' + kind), kind, target: targets[kind], ...(section === 'tasks' ? { period: 'once' as const } : {}), chances: 1, reward: normalizeGrowthReward(undefined, 1), enabled: false })
+  form.value.growth[section].push({ id: 'task_' + crypto.randomUUID().replace(/-/g, ''), name: Array.from(t('qqbot.growth.kinds.' + kind)).slice(0, 40).join(''), kind, target: targets[kind], ...(section === 'tasks' || isDailyAmountKind(kind) ? { period: 'once' as const } : {}), ...(isDailyAmountKind(kind) ? { daily_amount: 10 } : {}), chances: 1, reward: normalizeGrowthReward(undefined, 1), enabled: false })
 }
 
 function validTask(task: QQGrowthTask) {
@@ -174,6 +186,7 @@ function validTask(task: QQGrowthTask) {
     && kinds.includes(task.kind) && taskKinds(task.period).includes(task.kind) && (!task.period || periods.includes(task.period)) && Number.isFinite(task.target) && task.target >= (isAmountKind(task.kind) ? 0.01 : 1)
     && task.target <= targetLimit(task.kind, task.period)
     && (isAmountKind(task.kind) ? Number(task.target.toFixed(2)) === task.target : Number.isInteger(task.target))
+    && (!isDailyAmountKind(task.kind) || (typeof task.daily_amount === 'number' && Number.isFinite(task.daily_amount) && task.daily_amount >= 0.01 && task.daily_amount <= 1_000_000_000 && Number(task.daily_amount.toFixed(2)) === task.daily_amount))
     && validGrowthReward(task.reward)
 }
 

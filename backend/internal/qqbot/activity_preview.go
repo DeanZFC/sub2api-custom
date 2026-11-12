@@ -142,6 +142,22 @@ func (s *Service) PreviewActivities(ctx context.Context, uid int64) (ActivityPre
 	}
 	progress := progressByPeriod["once"]
 	for _, task := range checkin.Growth.PeriodicTasks {
+		if isGrowthAmountDayKind(task.Kind) {
+			var cursor time.Time
+			var cycles int64
+			err = tx.QueryRowContext(ctx, `SELECT last_reward_day,cycles FROM qq_bot_growth_amount_day_progress WHERE user_id=$1 AND task_id=$2 AND kind=$3`, uid, task.ID, task.Kind).Scan(&cursor, &cycles)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return out, err
+			}
+			ok, description := previewPeriodicAmountDays(task, progress, cursor, at)
+			reward := task.reward()
+			status := fmt.Sprintf("已结算 %d 轮", cycles)
+			if ok {
+				status += "；待结算"
+			}
+			out.Tasks = append(out.Tasks, PreviewTask{ID: "periodic:" + task.ID, Name: task.Name, Progress: description, Eligible: out.Bound && c.Enabled && task.Enabled && reward.enabled() && ok, Status: status, Reward: reward.description()})
+			continue
+		}
 		consumed, cycles := decimal.Zero, int64(0)
 		err = tx.QueryRowContext(ctx, `SELECT consumed,cycles FROM qq_bot_periodic_growth_progress WHERE user_id=$1 AND task_id=$2 AND kind=$3`, uid, task.ID, task.Kind).Scan(&consumed, &cycles)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -181,4 +197,29 @@ func (s *Service) PreviewActivities(ctx context.Context, uid int64) (ActivityPre
 		out.CheckinMilestones = append(out.CheckinMilestones, PreviewTask{ID: milestone.ID, Name: milestone.Name, Progress: description, Eligible: out.Bound && c.Enabled && checkin.Enabled && ok && milestone.Enabled && reward.enabled(), Status: status, Reward: reward.description()})
 	}
 	return out, tx.Commit()
+}
+
+func previewPeriodicAmountDays(task GrowthTask, progress growthProgress, cursor, at time.Time) (bool, string) {
+	dates := dailyGrowthDates(progress, task)
+	unsettled := make([]time.Time, 0, len(dates))
+	for _, date := range dates {
+		// SQL DATE values use UTC; the cursor denotes a Beijing calendar date.
+		if cursor.IsZero() || date.Format("2006-01-02") > cursor.Format("2006-01-02") {
+			unsettled = append(unsettled, date)
+		}
+	}
+	count, label := len(unsettled), "未结算累计"
+	if isGrowthAmountStreakKind(task.Kind) {
+		longest, current := growthAmountDateRuns(unsettled, at)
+		count, label = current, "本轮连续"
+		// A completed historic run remains payable even after a later gap.
+		if float64(longest) >= task.Target {
+			count, label = longest, "未结算最长连续"
+		}
+	}
+	source := "消费"
+	if growthAmountDaySource(task.Kind) == "recharge" {
+		source = "有效充值"
+	}
+	return task.Target > 0 && float64(count) >= task.Target, fmt.Sprintf("%s %d/%.0f 天（每日%s满 USD %.2f）", label, count, task.Target, source, task.DailyAmount)
 }

@@ -21,6 +21,14 @@ describe('QQ bot config version headers', () => {
     expect(post).toHaveBeenCalledWith('/admin/qqbot/chat-preview', request, { timeout: 180000 })
   })
 
+  it('queues announcements with the saved bot identity and stable request ID', async () => {
+    const request = { app_id: 'app', sandbox: false, groups: ['group'], text: '公告', mention_all: true, request_id: '11111111-1111-4111-8111-111111111111' }
+    const value = { batch_id: 'batch', jobs: [{ id: 'job', group_id: 'group' }], duplicate: false }
+    post.mockResolvedValueOnce({ data: value })
+    expect(await qqbotAPI.sendAnnouncement(request)).toEqual(value)
+    expect(post).toHaveBeenCalledWith('/admin/qqbot/announcements', request)
+  })
+
   it('uses the uncompressed config version when a proxy rewrites the ETag', async () => {
     const version = 'a'.repeat(64)
     const config = {

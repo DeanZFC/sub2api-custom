@@ -67,17 +67,22 @@
           </div>
         </section>
         <section v-show="activeTab === 'notifications'" id="qqbot-settings-panel-notifications" role="tabpanel" aria-labelledby="qqbot-settings-tab-notifications" class="card space-y-4 p-6" :aria-label="t('qqbot.priceNotifications.title')">
+          <QQBotAnnouncement v-if="baseline" :config="baseline" :names="groupNames" :disabled="busy" @queued="refreshRuntime" />
           <fieldset v-if="form.notification_quiet_hours" class="space-y-3 rounded-lg border p-4 dark:border-dark-700"><legend>{{ t('qqbot.workspace.quietHours') }}</legend><label class="flex items-center gap-2"><input v-model="form.notification_quiet_hours.enabled" type="checkbox" />{{ t('common.enabled') }}</label><div class="grid gap-3 sm:grid-cols-2"><label>{{ t('qqbot.workspace.startHour') }}<input v-model.number="form.notification_quiet_hours.start_hour" class="input" type="number" min="0" max="23" required /></label><label>{{ t('qqbot.workspace.endHour') }}<input v-model.number="form.notification_quiet_hours.end_hour" class="input" type="number" min="0" max="23" required /></label></div><p class="text-xs text-gray-500">{{ t('qqbot.workspace.quietHoursHelp') }}</p></fieldset>
           <h2 class="text-lg font-semibold">{{ t('qqbot.priceNotifications.title') }}</h2>
           <p class="text-sm text-gray-500">{{ t('qqbot.priceNotifications.help') }}</p>
           <label class="flex items-center gap-2"><input v-model="priceNotifications.enabled" data-testid="price-notifications-enabled" type="checkbox" />{{ t('qqbot.priceNotifications.enabled') }}</label>
           <label class="flex items-center gap-2"><input v-model="priceNotifications.scheduled" data-testid="price-notifications-scheduled" type="checkbox" />{{ t('qqbot.priceNotifications.scheduled') }}</label>
+          <label class="flex items-center gap-2"><input v-model="priceNotifications.mention_all" data-testid="price-notifications-mention-all" type="checkbox" />{{ t('qqbot.priceNotifications.mentionAll') }}</label>
+          <p class="text-xs text-gray-500">{{ t('qqbot.announcement.mentionHelp') }}</p>
           <QQGroupPicker v-model="notificationGroups" :groups="allowedGroups" :policies="groupPolicies" :names="groupNames" :label="t('qqbot.priceNotifications.groups')" allow-all />
           <p class="text-xs text-gray-500">{{ t('qqbot.priceNotifications.permission') }}</p>
           <fieldset class="space-y-3 rounded-lg border p-4 dark:border-dark-700">
             <legend class="font-medium">{{ t('qqbot.health.title') }}</legend>
             <p class="text-sm text-gray-500">{{ t('qqbot.health.help') }}</p>
             <label class="flex items-center gap-2"><input v-model="healthNotifications.enabled" data-testid="health-enabled" type="checkbox" />{{ t('qqbot.health.enabled') }}</label>
+            <label class="flex items-center gap-2"><input v-model="healthNotifications.mention_all" data-testid="health-mention-all" type="checkbox" />{{ t('qqbot.health.mentionAll') }}</label>
+            <p class="text-xs text-gray-500">{{ t('qqbot.announcement.mentionHelp') }}</p>
             <QQGroupPicker v-model="healthGroups" :groups="allowedGroups" :policies="groupPolicies" :names="groupNames" :label="t('qqbot.health.groups')" allow-all />
             <div class="grid gap-4 md:grid-cols-2">
               <label v-for="field in healthFields" :key="field.key" class="space-y-1">{{ t(`qqbot.health.${field.key}`) }}<input v-model.number="healthNotifications[field.key]" :data-testid="`health-${field.key}`" type="number" :min="field.min" :max="field.max" :step="field.step" required class="input" /></label>
@@ -188,6 +193,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import QQBotAutonomousSettings from '@/components/admin/qqbot/QQBotAutonomousSettings.vue'
 import QQBotKnowledgeSettings from '@/components/admin/qqbot/QQBotKnowledgeSettings.vue'
 import QQBotChatPreview from '@/components/admin/qqbot/QQBotChatPreview.vue'
+import QQBotAnnouncement from '@/components/admin/qqbot/QQBotAnnouncement.vue'
 import QQBotGroupAdminSettings from '@/components/admin/qqbot/QQBotGroupAdminSettings.vue'
 import QQBotModerationSettings from '@/components/admin/qqbot/QQBotModerationSettings.vue'
 import { defaultModerationConfig } from '@/api/qqbot'
@@ -266,8 +272,8 @@ const healthFields = [
   { key: 'cooldown_minutes', min: 0, max: 1440, step: 1 }
 ] as const
 const notificationGroupsText = ref('')
-const priceNotifications = ref({ enabled: false, scheduled: true, groups: [] as string[] })
-const notificationJobs = computed(() => runtime.value?.jobs.filter(job => job.kind === 'price_notification' || job.kind === 'health_notification' || job.kind === 'ranking_notification') ?? [])
+const priceNotifications = ref({ enabled: false, scheduled: true, mention_all: false, groups: [] as string[] })
+const notificationJobs = computed(() => runtime.value?.jobs.filter(job => ['price_notification', 'health_notification', 'ranking_notification', 'announcement'].includes(job.kind)) ?? [])
 const baseline = ref<QQBotConfig | null>(null)
 const history = ref<QQConfigChange[]>([])
 const parseGroups = (text: string) => [...new Set(text.split(/[\s,，]+/).filter(Boolean))]
@@ -332,7 +338,7 @@ function apply(c: QQBotConfig, updateBaseline = true) {
   healthNotifications.value = { ...defaultHealthNotificationConfig(), ...c.health_notifications }
   healthGroupsText.value = healthNotifications.value.groups.join('\n')
   groupsText.value = (c.allowed_groups || []).join('\n')
-  priceNotifications.value = { enabled: false, scheduled: true, ...c.price_notifications, groups: c.price_notifications?.groups ?? [] }
+  priceNotifications.value = { enabled: false, scheduled: true, mention_all: false, ...c.price_notifications, groups: c.price_notifications?.groups ?? [] }
   notificationGroupsText.value = priceNotifications.value.groups.join('\n')
   if (updateBaseline) baseline.value = cloneConfig(draft())
 }

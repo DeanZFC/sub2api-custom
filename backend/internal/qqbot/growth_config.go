@@ -6,6 +6,7 @@ import (
 	"math"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/shopspring/decimal"
@@ -16,14 +17,15 @@ const maxGrowthTasks = 12
 var growthTaskIDPattern = regexp.MustCompile("^[a-z][a-z0-9_-]{0,63}$")
 
 type GrowthTask struct {
-	Reward  *GrowthReward `json:"reward,omitempty"`
-	ID      string        `json:"id"`
-	Name    string        `json:"name"`
-	Kind    string        `json:"kind"`
-	Period  string        `json:"period,omitempty"`
-	Target  float64       `json:"target"`
-	Chances int           `json:"chances"`
-	Enabled bool          `json:"enabled"`
+	Reward      *GrowthReward `json:"reward,omitempty"`
+	ID          string        `json:"id"`
+	Name        string        `json:"name"`
+	Kind        string        `json:"kind"`
+	Period      string        `json:"period,omitempty"`
+	Target      float64       `json:"target"`
+	DailyAmount float64       `json:"daily_amount,omitempty"`
+	Chances     int           `json:"chances"`
+	Enabled     bool          `json:"enabled"`
 }
 
 func (g GrowthConfig) tasks() []GrowthTask {
@@ -69,9 +71,9 @@ func validateGrowth(c CheckinConfig) error {
 			return errors.New("循环任务按累计进度结算，不能同时设置每日或每周重置")
 		}
 		switch task.Kind {
-		case "usage_count", "usage_tokens", "usage_amount", "recharge_total", "checkin_total":
+		case "usage_count", "usage_tokens", "usage_amount", "recharge_total", "checkin_total", "usage_amount_days", "usage_amount_streak", "recharge_days", "recharge_streak":
 		default:
-			return errors.New("周期任务仅支持累计消费、Token、调用、充值或签到")
+			return errors.New("周期任务仅支持累计消费、Token、调用、充值、签到或按日金额达标任务")
 		}
 	}
 	tasks = append(append([]GrowthTask(nil), tasks...), c.Growth.PeriodicTasks...)
@@ -83,6 +85,9 @@ func validateGrowth(c CheckinConfig) error {
 		}
 		if period != "once" && (task.Kind == "binding" || task.Kind == "recharge_total" || task.Kind == "checkin_total" || task.Kind == "checkin_streak") {
 			return errors.New("绑定、充值和签到里程碑仅支持一次性奖励")
+		}
+		if period != "once" && isGrowthAmountDayKind(task.Kind) {
+			return errors.New("按日金额达标任务仅支持一次性成就或循环任务，不能按每日或每周重置")
 		}
 		if !growthTaskIDPattern.MatchString(task.ID) || ids[task.ID] {
 			return errors.New("成长任务标识格式不正确或重复")
@@ -101,6 +106,13 @@ func validateGrowth(c CheckinConfig) error {
 			return errors.New("成长任务目标不正确")
 		}
 		switch task.Kind {
+		case "usage_amount_days", "usage_amount_streak", "recharge_days", "recharge_streak":
+			if task.Target < 1 || task.Target > 3650 || math.Trunc(task.Target) != task.Target {
+				return errors.New("金额达标天数目标须为 1～3650 的整数")
+			}
+			if task.DailyAmount < .01 || !validRechargeThreshold(task.DailyAmount) {
+				return errors.New("每日金额门槛须为 0.01～1000000000 USD，最多两位小数")
+			}
 		case "binding":
 			if task.Target != 1 {
 				return errors.New("绑定任务目标必须为 1")
@@ -141,12 +153,30 @@ type growthProgress struct {
 	days, models, invites int
 	recharge              decimal.Decimal
 	tokens, spent         decimal.Decimal
+	amountDays            map[string][]growthAmountDay
+	at                    time.Time
 }
 
 func (p growthProgress) task(task GrowthTask) (bool, string) {
 	var current float64
 	unit := "天"
 	switch task.Kind {
+	case "usage_amount_days", "usage_amount_streak", "recharge_days", "recharge_streak":
+		dates := dailyGrowthDates(p, task)
+		count := len(dates)
+		eligible := count >= int(task.Target)
+		label := "累计达标"
+		history := ""
+		if isGrowthAmountStreakKind(task.Kind) {
+			longest, current := growthAmountDateRuns(dates, p.at)
+			count, eligible, label = current, longest >= int(task.Target), "当前连续"
+			history = fmt.Sprintf("，历史最长 %d 天", longest)
+		}
+		action := "消费"
+		if growthAmountDaySource(task.Kind) == "recharge" {
+			action = "有效充值"
+		}
+		return eligible, fmt.Sprintf("%s %d/%.0f 天（每日%s满 USD %.2f%s）", label, count, task.Target, action, task.DailyAmount, history)
 	case "binding":
 		return true, "已完成"
 	case "usage_count":

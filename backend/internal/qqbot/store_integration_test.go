@@ -198,6 +198,12 @@ func testDB(t *testing.T) *sql.DB {
 		_, err = db.Exec(string(raw))
 		require.NoError(t, err)
 	}
+	raw, err = migrations.FS.ReadFile("353_qq_bot_growth_amount_days.sql")
+	require.NoError(t, err)
+	for range 2 {
+		_, err = db.Exec(string(raw))
+		require.NoError(t, err)
+	}
 	intentSQL, err := migrations.FS.ReadFile("302_qq_bot_image_intent.sql")
 	require.NoError(t, err)
 	for range 2 {

@@ -65,10 +65,14 @@ func loadGrowthProgress(ctx context.Context, db queryRower, uid int64, tasks []G
 		groups[period] = append(groups[period], task)
 	}
 	for period, scoped := range groups {
-		var p growthProgress
-		var usage, recharge, checkin, invites bool
+		p := growthProgress{at: at}
+		var usage, recharge, checkin, invites, usageAmountDays, rechargeAmountDays bool
 		for _, task := range scoped {
 			switch task.Kind {
+			case "usage_amount_days", "usage_amount_streak":
+				usageAmountDays = true
+			case "recharge_days", "recharge_streak":
+				rechargeAmountDays = true
 			case "usage_count", "usage_tokens", "usage_amount", "usage_days", "model_count":
 				usage = true
 			case "recharge_total":
@@ -97,6 +101,19 @@ func loadGrowthProgress(ctx context.Context, db queryRower, uid int64, tasks []G
 			p.recharge, err = rechargeSum(ctx, db, uid, nil, lockRecharge)
 			if err != nil {
 				return nil, err
+			}
+		}
+		if usageAmountDays || rechargeAmountDays {
+			p.amountDays = make(map[string][]growthAmountDay)
+			for _, source := range []string{"usage", "recharge"} {
+				if source == "usage" && !usageAmountDays || source == "recharge" && !rechargeAmountDays {
+					continue
+				}
+				days, err := loadGrowthAmountDays(ctx, db, uid, source, at, lockRecharge)
+				if err != nil {
+					return nil, err
+				}
+				p.amountDays[source] = days
 			}
 		}
 		if checkin {
