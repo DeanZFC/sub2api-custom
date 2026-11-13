@@ -1,6 +1,6 @@
 # 当前自定义功能清单
 
-维护日期：2026-11-02。范围为当前工作区的有效实现；发布状态以版本标签和发布产物为准。
+维护日期：2026-11-13。范围为当前工作区的有效实现；发布状态以版本标签和发布产物为准。
 
 | 功能 | 当前能力 | 主要实现 / 使用说明 |
 | --- | --- | --- |
@@ -17,7 +17,8 @@
 | QQ 账户及运营 | 账户绑定、邮箱确认转账、签到、邀请、抽奖和保底、一次性与周期成长、排行榜、奖励与价格健康通知、成员目录 | backend/internal/qqbot/growth.go；backend/internal/qqbot/lottery.go；qq-bot.md |
 | QQ 群信息展示 | 管理端读取群信息、缓存群名及群选择器名称回填 | backend/internal/qqbot/group_info.go；frontend/src/composables/useQQGroupNames.ts |
 | GPT 直充 | CTAI API 适配、验码、兑换、订阅与进度；请求幂等、任务凭据加密、奖励结算及后台补结算 | GPT_DIRECT_CN.md；backend/internal/service/gpt_direct_rewards.go |
-| OpenAI VM Bridge | OAuth 专属槽位、绑定与解绑保护、失败拒绝直连、代理恢复、Responses/图片/搜索适配、SSE/WS 连续会话及用量处理 | openai-vm.md；deploy/openai-vm/ |
+| 固定 IPv6 出口 | 保留旧绑定与恢复；独立 OVH 分配、预留、账号独占、单审计 Key 独占、退役重试和存储统计；排除轮转池与 BPS 池 | ovh-ipv6-compatibility.md；deploy/ovh-ipv6-egress/ |
+| VM Bridge 退休保护 | VM 传输及入口已移除；保留旧绑定审计与停用隔离，需恢复原路由后手动启用 | openai-vm.md |
 | 更新与运维 | Fork 版本及来源、不可变镜像 manifest、宿主更新器、镜像及健康核验、持久化完成状态、重启恢复、多实例部署 | AUTO_UPDATE.md；backend/internal/sourceupdater/ |
 | 访问及审核策略 | 指定文档路径的大陆访问限制；可信用户 ID 的内容审核白名单及执行前复核 | backend/internal/server/middleware/mainland_web_block.go；backend/internal/service/content_moderation.go |
 

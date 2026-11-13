@@ -473,6 +473,7 @@ type UpdateAccountInput struct {
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.
 type BulkUpdateAccountsInput struct {
+	ProxyMode      string
 	ProxyIDs       *[]int64
 	AccountIDs     []int64
 	Filters        *BulkUpdateAccountFilters
@@ -504,9 +505,11 @@ type BulkUpdateAccountFilters struct {
 
 // BulkUpdateAccountResult captures the result for a single account update.
 type BulkUpdateAccountResult struct {
-	AccountID int64  `json:"account_id"`
-	Success   bool   `json:"success"`
-	Error     string `json:"error,omitempty"`
+	ProxyID     *int64 `json:"proxy_id,omitempty"`
+	ManagedIPv6 string `json:"managed_ipv6,omitempty"`
+	AccountID   int64  `json:"account_id"`
+	Success     bool   `json:"success"`
+	Error       string `json:"error,omitempty"`
 }
 
 // AdminUpdateAPIKeyGroupIDResult is the result of AdminUpdateAPIKeyGroupID.
@@ -711,34 +714,35 @@ var ErrRPMStatusUnavailable = infraerrors.New(http.StatusNotImplemented, "RPM_ST
 
 // adminServiceImpl implements AdminService
 type adminServiceImpl struct {
-	excelOAuthReauth     *OpenAIOAuthReauthService
-	mihomoProxyMu        sync.Mutex
-	cfg                  *config.Config
-	userRepo             UserRepository
-	groupRepo            GroupRepository
-	groupDuplicateRepo   GroupDuplicateRepository
-	emptyGroupDeleteRepo EmptyGroupDeleteRepository
-	accountRepo          AccountRepository
-	accountDuplicateRepo AccountDuplicateRepository
-	accountBillingRepo   AccountBillingSettingsRepository
-	proxyRepo            ProxyRepository
-	apiKeyRepo           APIKeyRepository
-	redeemCodeRepo       RedeemCodeRepository
-	userGroupRateRepo    UserGroupRateRepository
-	userRPMCache         UserRPMCache
-	billingCacheService  *BillingCacheService
-	proxyProber          ProxyExitInfoProber
-	proxyLatencyCache    ProxyLatencyCache
-	authCacheInvalidator APIKeyAuthCacheInvalidator
-	entClient            *dbent.Client // 用于开启数据库事务
-	settingService       *SettingService
-	defaultSubAssigner   DefaultSubscriptionAssigner
-	userSubRepo          UserSubscriptionRepository
-	privacyClientFactory PrivacyClientFactory
-	runtimeBlocker       AccountRuntimeBlocker
-	affiliateService     adminRechargeAffiliateAccruer
-	compositeRouteRepo   CompositeModelRouteRepository
-	compositeResolver    *CompositeRouteResolver
+	managedIPv6Concurrency *ConcurrencyService
+	excelOAuthReauth       *OpenAIOAuthReauthService
+	mihomoProxyMu          sync.Mutex
+	cfg                    *config.Config
+	userRepo               UserRepository
+	groupRepo              GroupRepository
+	groupDuplicateRepo     GroupDuplicateRepository
+	emptyGroupDeleteRepo   EmptyGroupDeleteRepository
+	accountRepo            AccountRepository
+	accountDuplicateRepo   AccountDuplicateRepository
+	accountBillingRepo     AccountBillingSettingsRepository
+	proxyRepo              ProxyRepository
+	apiKeyRepo             APIKeyRepository
+	redeemCodeRepo         RedeemCodeRepository
+	userGroupRateRepo      UserGroupRateRepository
+	userRPMCache           UserRPMCache
+	billingCacheService    *BillingCacheService
+	proxyProber            ProxyExitInfoProber
+	proxyLatencyCache      ProxyLatencyCache
+	authCacheInvalidator   APIKeyAuthCacheInvalidator
+	entClient              *dbent.Client // 用于开启数据库事务
+	settingService         *SettingService
+	defaultSubAssigner     DefaultSubscriptionAssigner
+	userSubRepo            UserSubscriptionRepository
+	privacyClientFactory   PrivacyClientFactory
+	runtimeBlocker         AccountRuntimeBlocker
+	affiliateService       adminRechargeAffiliateAccruer
+	compositeRouteRepo     CompositeModelRouteRepository
+	compositeResolver      *CompositeRouteResolver
 	// 分组平台变更后用来失效渠道缓存；可为 nil（缓存会在 TTL 到期后自然重建）
 	channelCacheInvalidator ChannelCacheInvalidator
 }

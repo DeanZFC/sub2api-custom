@@ -11,7 +11,7 @@ export default {
         "filterHint": "All results are shown by default, including artwork after automatic or manual review. Uncheck All results to show only automatic reviews awaiting manual attention; other tests remain visible.",
         "title": "Pelican automatic review",
         "enableRule": "Automatic visual review with manual exception review",
-        "ruleHint": "An independent judge examines several animation frames for the pelican, bicycle and cycling motion. Clear verdicts enter the pass-rate window; uncertain results await review. Administrator overrides remain available.",
+        "ruleHint": "An independent judge examines several animation frames for the pelican, bicycle and cycling motion. Clear verdicts enter the pass-rate window. Missing, unavailable or inconclusive review defaults to pass; administrators can override it.",
         "configureJudge": "Configure the shared judge and review budget",
         "enableGlobal": "Enable automatic Pelican visual review",
         "globalHint": "Configure the judge once, then enable automatic review in each Pelican rule. Choose a trusted OpenAI account with image input support. Accounts cannot judge themselves.",
@@ -41,7 +41,7 @@ export default {
           "unknown": "The server capture for automatic review did not complete."
         },
         "criteriaTitle": "Review evidence",
-        "pendingHint": "Pending results do not enter the capability pass rate. Judge or renderer failures do not count as failures of the tested account.",
+        "pendingHint": "Successfully generated artwork defaults to pass and enters the capability pass rate when no valid automatic review is available. A manual rejection updates the statistics.",
         "overrideHint": "Administrators can override the visual verdict. Generation duration limits apply independently.",
         "criteria": {
                 "pelican": "Recognizable pelican",
@@ -181,7 +181,7 @@ export default {
           modeHint: "Choose each check’s role. A successful round requires all automatic conditions to pass with no manual veto. Pass actions run after the required number of consecutive successful rounds. Any automatic failure or administrator rejection immediately triggers the fail actions. Keep the current groups and scheduling while results are pending or the streak is incomplete. For more complex AND / OR conditions, switch to combined rules.",
           groups: "After all automatic checks pass",
           failure: "When any automatic check fails or an administrator rejects",
-          samplesHint: "Pending checks, unknown outcomes and pending automatic reviews do not count as successes. Pass actions wait for the required consecutive rounds. Checks used only for manual veto do not need prior approval. Other rules and manual stops remain effective.",
+          samplesHint: "Pending checks and unknown test outcomes do not count as successes. Successfully generated Pelican artwork defaults to pass when automatic review is unavailable. Pass actions wait for the required consecutive rounds. Checks used only for manual veto do not need prior approval. Other rules and manual stops remain effective.",
           invalid: "Enable at least one automatic check, set consecutive rounds to an integer from 1 to 100, and verify thresholds, answers, and recovery settings. Reviews must be administrator-only. When assigning groups, select at least one group within this strategy.",
         },
         combined: {
@@ -219,7 +219,7 @@ export default {
           removeRule: "Remove rule",
           emptyRules: "Add a rule and enable at least one check above.",
           missingReference: "This check is no longer enabled above. Re-enable it or update this condition before saving; the condition has been retained.",
-          samplesHint: "Pending checks, unknown outcomes and pending reviews are not passes. The next round must pass all automatic checks before this plan clears its hold; other rules and manual stops remain effective.",
+          samplesHint: "Pending checks and unknown test outcomes are not passes. Successfully generated Pelican artwork defaults to pass when automatic review is unconfigured or unavailable; manual review can reject it. The next round must meet the configured recovery conditions before this plan clears its hold. Other rules and manual stops remain effective.",
           invalid: "Check verdict settings and combined rules. Every rule needs a unique ID, a name, priority 0–1000, nonempty condition groups, and references to enabled checks above. Assigned groups must belong to this strategy. Limit: 32 rules, 6 levels, 128 nodes per rule.",
         },
         priority: 'Action priority (0–1000)',

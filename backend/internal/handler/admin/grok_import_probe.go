@@ -213,6 +213,7 @@ func ProvideAccountHandler(
 	grokQuotaService *service.GrokQuotaService,
 	performance *service.AccountPerformanceService,
 ) *AccountHandler {
+	service.ConfigureManagedIPv6Concurrency(adminService, concurrencyService)
 	handler := NewAccountHandler(
 		adminService,
 		oauthService,

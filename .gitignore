@@ -199,3 +199,6 @@ deploy/docker-compose.updater.json
 !docs/scheduler-outbox-retries.md
 !docs/upstream-protection-update-20261106.md
 !docs/upstream-main-merge-20261107.md
+
+!docs/ovh-ipv6-compatibility.md
+!docs/smartws-bps-merge-review-20261113.md

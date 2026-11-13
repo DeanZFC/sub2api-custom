@@ -243,6 +243,15 @@ export default {
      },
 
     riskControl: {
+      autoAssignIPv6: 'Assign an OVH IPv6 to each new key',
+      autoAssignIPv6Hint: 'Each new key receives a dedicated address when saved. Assign existing keys individually below. Turning this off preserves assigned addresses.',
+      ipv6SaveBeforeTest: 'Save new keys to allocate their addresses before testing saved keys.',
+      keyIPv6: 'Dedicated OVH IPv6',
+      keyIPv6Unassigned: 'No dedicated IPv6',
+      allocateIPv6: 'Assign IPv6',
+      allocatingIPv6: 'Assigning…',
+      ipv6Assigned: 'Dedicated IPv6 assigned and active',
+      ipv6AllocationFailed: 'Allocation result is unconfirmed. Refresh key status before retrying.',
       engine: 'Audit engine',
       activeEngine: 'Active engine: {engine}',
       engineUnavailable: 'No usable Key for the active engine. API auditing is unavailable; failed checks fail open under the existing policy.',

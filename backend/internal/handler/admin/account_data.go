@@ -18,10 +18,12 @@ import (
 )
 
 const (
-	dataType       = "sub2api-data"
-	legacyDataType = "sub2api-bundle"
-	dataVersion    = 1
-	dataPageCap    = 1000
+	dataType                = "sub2api-data"
+	legacyDataType          = "sub2api-bundle"
+	dataVersion             = 1
+	dataPageCap             = 1000
+	managedIPv6DataProxyKey = "ovh-ipv6:requires-new-allocation"
+	managedIPv6ImportError  = "固定 IPv6 地址不能复制或复用，请显式选择新代理或重新分配 OVH IPv6 后再导入"
 )
 
 type DataPayload struct {
@@ -36,6 +38,7 @@ type DataPayload struct {
 }
 
 type DataProxy struct {
+	ManagedIPv6     string `json:"managed_ipv6,omitempty"`
 	ProxyKey        string `json:"proxy_key"`
 	Name            string `json:"name"`
 	Protocol        string `json:"protocol"`
@@ -58,6 +61,8 @@ type DataProxy struct {
 // 影子的独立调度配置(priority/并发/分组/status 管理员可单独调)亦不在本备份范围,属已知局限
 // (外审第6轮裁决:保持排除 + 前端警告,而非升级格式做完整往返)。
 type DataAccount struct {
+	ProxyMode          string         `json:"proxy_mode,omitempty"`
+	ProxyID            *int64         `json:"proxy_id,omitempty"`
 	Name               string         `json:"name"`
 	Notes              *string        `json:"notes,omitempty"`
 	Platform           string         `json:"platform"`
@@ -73,6 +78,8 @@ type DataAccount struct {
 }
 
 type DataImportRequest struct {
+	ProxyMode            string      `json:"proxy_mode,omitempty"`
+	ProxyID              *int64      `json:"proxy_id,omitempty"`
 	Data                 DataPayload `json:"data"`
 	SkipDefaultGroupBind *bool       `json:"skip_default_group_bind"`
 }
@@ -95,6 +102,56 @@ type DataImportError struct {
 
 func buildProxyKey(protocol, host string, port int, username, password string) string {
 	return fmt.Sprintf("%s|%s|%d|%s|%s", strings.TrimSpace(protocol), strings.TrimSpace(host), port, strings.TrimSpace(username), strings.TrimSpace(password))
+}
+
+func isManagedDataProxyUsername(username string) bool {
+	username = strings.TrimSpace(username)
+	return strings.HasPrefix(username, "ovh6_") || strings.HasPrefix(username, "v6-sub2-")
+}
+
+func isManagedDataProxyKey(key string) bool {
+	key = strings.TrimSpace(key)
+	if strings.HasPrefix(key, "ovh-ipv6:") {
+		return true
+	}
+	parts := strings.SplitN(key, "|", 5)
+	return len(parts) >= 4 && isManagedDataProxyUsername(parts[3])
+}
+
+func isManagedProxyForData(proxy service.Proxy) bool {
+	return proxy.ManagedIPv6 != "" || isManagedDataProxyUsername(proxy.Username)
+}
+
+func isManagedDataProxy(proxy DataProxy) bool {
+	return proxy.ManagedIPv6 != "" || isManagedDataProxyUsername(proxy.Username) || isManagedDataProxyKey(proxy.ProxyKey)
+}
+
+// Routing ownership belongs to the live lease, never to a transferable backup.
+func stripManagedIPv6DataExtra(extra map[string]any) map[string]any {
+	clean := make(map[string]any, len(extra))
+	for key, value := range extra {
+		if key == "openai_ipv6_bound" || key == "ovh_ipv6_bound" {
+			continue
+		}
+		clean[key] = value
+	}
+	if extra == nil {
+		return nil
+	}
+	return clean
+}
+
+func resolveDataAccountProxy(req DataImportRequest, item DataAccount) (DataAccount, error) {
+	if req.ProxyMode != "" || req.ProxyID != nil {
+		item.ProxyMode, item.ProxyID = req.ProxyMode, req.ProxyID
+	}
+	if _, err := service.NormalizeAccountProxyMode(item.ProxyMode, item.ProxyID, false); err != nil {
+		return item, err
+	}
+	if item.ProxyMode != "" || item.ProxyID != nil {
+		item.ProxyKey = nil
+	}
+	return item, nil
 }
 
 func (h *AccountHandler) ExportData(c *gin.Context) {
@@ -150,13 +207,19 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 	// 构建 id→name 映射，用于导出备用代理 name
 	proxyNameByID := make(map[int64]string, len(proxies))
 	for i := range proxies {
-		proxyNameByID[proxies[i].ID] = proxies[i].Name
+		if !isManagedProxyForData(proxies[i]) {
+			proxyNameByID[proxies[i].ID] = proxies[i].Name
+		}
 	}
 
 	proxyKeyByID := make(map[int64]string, len(proxies))
 	dataProxies := make([]DataProxy, 0, len(proxies))
 	for i := range proxies {
 		p := proxies[i]
+		if isManagedProxyForData(p) {
+			proxyKeyByID[p.ID] = managedIPv6DataProxyKey
+			continue
+		}
 		key := buildProxyKey(p.Protocol, p.Host, p.Port, p.Username, p.Password)
 		proxyKeyByID[p.ID] = key
 
@@ -188,12 +251,16 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 	dataAccounts := make([]DataAccount, 0, len(accounts))
 	for i := range accounts {
 		acc := accounts[i]
-		extra := service.RedactOpenAICodexTicketExtra(service.StripRetiredAccountExtra(acc.Extra))
+		extra := stripManagedIPv6DataExtra(service.RedactOpenAICodexTicketExtra(service.StripRetiredAccountExtra(acc.Extra)))
 		var proxyKey *string
 		if acc.ProxyID != nil {
 			if key, ok := proxyKeyByID[*acc.ProxyID]; ok {
 				proxyKey = &key
 			}
+		}
+		if includeProxies && (acc.IsManagedIPv6Bound() || (acc.Proxy != nil && isManagedProxyForData(*acc.Proxy))) {
+			key := managedIPv6DataProxyKey
+			proxyKey = &key
 		}
 		var expiresAt *int64
 		if acc.ExpiresAt != nil {
@@ -258,11 +325,16 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 	}
 
 	proxyKeyToID := make(map[string]int64, len(existingProxies))
+	managedProxyKeys := make(map[string]bool)
 	// proxyNameToID 用于 backup_proxy_name 反查：DB 已有 + 本批次新建均会写入
 	proxyNameToID := make(map[string]int64, len(existingProxies))
 	for i := range existingProxies {
 		p := existingProxies[i]
 		key := buildProxyKey(p.Protocol, p.Host, p.Port, p.Username, p.Password)
+		if isManagedProxyForData(p) {
+			managedProxyKeys[key] = true
+			continue
+		}
 		proxyKeyToID[key] = p.ID
 		if p.Name != "" {
 			proxyNameToID[p.Name] = p.ID
@@ -274,6 +346,13 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		key := item.ProxyKey
 		if key == "" {
 			key = buildProxyKey(item.Protocol, item.Host, item.Port, item.Username, item.Password)
+		}
+		canonicalKey := buildProxyKey(item.Protocol, item.Host, item.Port, item.Username, item.Password)
+		if isManagedDataProxy(item) || managedProxyKeys[key] || managedProxyKeys[canonicalKey] {
+			managedProxyKeys[key] = true
+			result.ProxyFailed++
+			result.Errors = append(result.Errors, DataImportError{Kind: "proxy", Name: item.Name, ProxyKey: managedIPv6DataProxyKey, Message: managedIPv6ImportError})
+			continue
 		}
 		if err := validateDataProxy(item); err != nil {
 			result.ProxyFailed++
@@ -406,6 +485,18 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 
 	for i := range dataPayload.Accounts {
 		item := dataPayload.Accounts[i]
+		var selectionErr error
+		item, selectionErr = resolveDataAccountProxy(req, item)
+		if selectionErr != nil {
+			result.AccountFailed++
+			result.Errors = append(result.Errors, DataImportError{Kind: "account", Name: item.Name, Message: selectionErr.Error()})
+			continue
+		}
+		if item.ProxyKey != nil && managedProxyKeys[*item.ProxyKey] {
+			result.AccountFailed++
+			result.Errors = append(result.Errors, DataImportError{Kind: "account", Name: item.Name, ProxyKey: managedIPv6DataProxyKey, Message: managedIPv6ImportError})
+			continue
+		}
 		if err := validateDataAccount(item); err != nil {
 			result.AccountFailed++
 			result.Errors = append(result.Errors, DataImportError{
@@ -416,7 +507,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			continue
 		}
 
-		var proxyID *int64
+		proxyID := item.ProxyID
 		if item.ProxyKey != nil && *item.ProxyKey != "" {
 			if id, ok := proxyKeyToID[*item.ProxyKey]; ok {
 				proxyID = &id
@@ -432,10 +523,11 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			}
 		}
 
-		item.Extra = service.StripRetiredAccountExtra(item.Extra)
+		item.Extra = stripManagedIPv6DataExtra(service.StripRetiredAccountExtra(item.Extra))
 		enrichCredentialsFromIDToken(&item)
 
 		accountInput := &service.CreateAccountInput{
+			ProxyMode:            item.ProxyMode,
 			Name:                 item.Name,
 			Notes:                item.Notes,
 			Platform:             item.Platform,
@@ -659,6 +751,9 @@ func validateDataHeader(payload DataPayload) error {
 }
 
 func validateDataProxy(item DataProxy) error {
+	if isManagedDataProxy(item) {
+		return errors.New(managedIPv6ImportError)
+	}
 	if strings.TrimSpace(item.Protocol) == "" {
 		return errors.New("proxy protocol is required")
 	}
@@ -683,6 +778,12 @@ func validateDataProxy(item DataProxy) error {
 }
 
 func validateDataAccount(item DataAccount) error {
+	if _, err := service.NormalizeAccountProxyMode(item.ProxyMode, item.ProxyID, false); err != nil {
+		return err
+	}
+	if item.ProxyKey != nil && isManagedDataProxyKey(*item.ProxyKey) {
+		return errors.New(managedIPv6ImportError)
+	}
 	if strings.TrimSpace(item.Name) == "" {
 		return errors.New("account name is required")
 	}

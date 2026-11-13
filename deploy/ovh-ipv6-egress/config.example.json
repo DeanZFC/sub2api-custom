@@ -1,0 +1,18 @@
+{
+  "prefix": "2001:db8:205:b900::/56",
+  "interface": "eth0",
+  "proxy_listen": "172.22.0.1:11880",
+  "control_listen": "172.22.0.1:11881",
+  "advertise_host": "172.22.0.1",
+  "control_token": "",
+  "state_dir": "/var/lib/sub2api-ovh-ipv6-egress",
+  "probe_url": "https://auth.openai.com/.well-known/openid-configuration",
+  "allowed_clients": [
+    "172.22.0.0/16"
+  ],
+  "allowed_hosts": [
+    "chatgpt.com",
+    "auth.openai.com",
+    "api.openai.com"
+  ]
+}

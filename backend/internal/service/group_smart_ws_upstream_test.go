@@ -31,7 +31,7 @@ func TestGroupSmartWSHonorsTransportSwitches(t *testing.T) {
 		{"account_v2_disabled", func(_ *OpenAIGatewayService, a *Account) {
 			a.Extra["openai_oauth_responses_websockets_v2_enabled"] = false
 		}, 0},
-		{"vm_keeps_own_transport", func(_ *OpenAIGatewayService, a *Account) { a.Extra["openai_vm_bound"] = true }, 0},
+		{"retired_vm_route_excluded", func(_ *OpenAIGatewayService, a *Account) { a.Extra["openai_vm_bound"] = true }, 0},
 		{"group_disabled", func(s *OpenAIGatewayService, _ *Account) {
 			s.settingService.groupSmartWSCache[1] = groupSmartWSCacheEntry{enabled: false, expires: time.Now().Add(time.Minute)}
 		}, 0},

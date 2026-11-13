@@ -42,6 +42,38 @@ type settingRepository struct {
 	client *ent.Client
 }
 
+// Follow the group-delete lock order (groups, then settings). Compare before
+// allocating so concurrent saves neither leak leases nor lose key bindings.
+func (r *settingRepository) UpdateContentModerationConfigAtomic(ctx context.Context, expected string, groupIDs []int64, update func(context.Context) (string, error)) error {
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	client := tx.Client()
+	if err := lockLiveGroups(ctx, client, groupIDs); err != nil {
+		return err
+	}
+	if _, err := client.ExecContext(ctx, `INSERT INTO settings(key,value,updated_at) VALUES($1,'',NOW()) ON CONFLICT(key) DO NOTHING`, service.SettingKeyContentModerationConfig); err != nil {
+		return err
+	}
+	var current string
+	if err := scanSingleRow(ctx, client, `SELECT value FROM settings WHERE key=$1 FOR UPDATE`, []any{service.SettingKeyContentModerationConfig}, &current); err != nil {
+		return err
+	}
+	if current != expected {
+		return service.ErrContentModerationConfigConflict
+	}
+	value, err := update(ent.NewTxContext(ctx, tx))
+	if err != nil {
+		return err
+	}
+	if _, err = client.ExecContext(ctx, `UPDATE settings SET value=$2,updated_at=NOW() WHERE key=$1`, service.SettingKeyContentModerationConfig, value); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func NewSettingRepository(client *ent.Client) service.SettingRepository {
 	return &settingRepository{client: client}
 }

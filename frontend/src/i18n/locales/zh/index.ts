@@ -1,3 +1,4 @@
+import ovhIPv6 from './ovhIPv6'
 import gptDirect from './gptDirect'
 import qqbot from './qqbot'
 import accountPerformance from './accountPerformance'
@@ -14,6 +15,7 @@ import invoice from './invoice'
 import coupon from './coupon'
 
 export default {
+  ovhIPv6,
   gptDirect,
   ...qqbot,
  accountPerformance,

@@ -17,6 +17,9 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 	if request == nil || account == nil {
 		return nil, errors.New("OpenAI request or account is missing")
 	}
+	if err := rejectRetiredVMAccount(request.Context(), s.accountRepo, account); err != nil {
+		return nil, err
+	}
 	if attempt, _ := request.Context().Value(groupSmartWSAttemptKey{}).(*groupSmartWSAttempt); attempt != nil && attempt.sent.Load() {
 		return nil, finishGroupSmartWSAttempt(attempt, errSmartWSAlreadyDispatched)
 	}
@@ -95,15 +98,10 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 		}
 	}()
 
-	if s.openaiVM != nil {
-		if response, handled, err := s.openaiVM.RoundTrip(request, account); handled {
-			return response, err
-		}
-	}
-	if err := validateOpenAIVMProxy(account, account.Proxy); err != nil {
+	if err := validateManagedAccountProxy(account, account.Proxy); err != nil {
 		return nil, err
 	}
-	if s.pluginManager != nil && !bound && !account.IsOpenAIIPv6Bound() {
+	if s.pluginManager != nil && !bound && !account.IsManagedIPv6Bound() {
 		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
 		if handled {
 			return response, err
@@ -124,6 +122,12 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 	account *Account,
 	useTLSFallback bool,
 ) (*http.Response, error) {
+	if request == nil || account == nil {
+		return nil, errors.New("OpenAI request or account is missing")
+	}
+	if err := rejectRetiredVMAccount(request.Context(), s.accountRepo, account); err != nil {
+		return nil, err
+	}
 	if gateway := s.openaiGatewayService; gateway != nil && request != nil && request.URL != nil && request.URL.String() == chatgptCodexURL && gateway.openAICodexTicketEnabledContext(request.Context()) {
 		raw, err := snapshotHTTPRequestBody(request)
 		if err != nil {
@@ -146,19 +150,14 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 			return nil, err
 		}
 	}
-	if s.openaiVM != nil {
-		started := time.Now().UTC()
-		if response, handled, err := s.openaiVM.RoundTrip(request, account); handled {
-			return observeAccountTestResponse(request.Context(), started, response, err)
-		}
-	}
-	if err := validateOpenAIVMProxy(account, account.Proxy); err != nil {
+
+	if err := validateManagedAccountProxy(account, account.Proxy); err != nil {
 		return nil, err
 	}
 	if err := validateOpenAIIPv6Route(account, proxyURL); err != nil {
 		return nil, err
 	}
-	if s.pluginManager != nil && !account.IsOpenAIIPv6Bound() {
+	if s.pluginManager != nil && !account.IsManagedIPv6Bound() {
 		started := time.Now().UTC()
 		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
 		if handled {

@@ -144,10 +144,10 @@ func testScheduledTestCombinedVotes(t *testing.T, ctx context.Context, db *sql.D
 		require.NoError(t, db.QueryRowContext(ctx, `SELECT MIN(group_id) FROM account_groups WHERE account_id=62`).Scan(&got))
 		require.Equal(t, want, got)
 	}
-	group(8)
+	group(10) // Successfully generated HTML defaults to pass before any votes.
 	_, err = repo.CastTestVote(ctx, 1, rows[1].ID, "pass")
 	require.NoError(t, err)
-	group(8)
+	group(10)
 	_, err = repo.CastTestVote(ctx, 2, rows[1].ID, "pass")
 	require.NoError(t, err)
 	group(10)

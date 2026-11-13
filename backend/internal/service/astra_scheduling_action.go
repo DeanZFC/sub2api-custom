@@ -31,7 +31,7 @@ func applyAstraScheduling(ctx context.Context, repo AccountRepository, a *Accoun
 	return AstraSchedulingActionResult{Changed: err == nil, Allowed: ready, Action: "account"}, err
 }
 func astraSchedulingAppliesToRequest(s config.AstraRoutingSettings, a *Account, model string, group int64) bool {
-	if a != nil && (a.IsOpenAIVMBound() || a.IsOpenAIPersonalAccessToken() || a.IsOpenAIAgentIdentity() || a.isExcelBPSAllModelsEnabled()) {
+	if a != nil && (a.IsRetiredVMRoute() || a.IsOpenAIPersonalAccessToken() || a.IsOpenAIAgentIdentity() || a.isExcelBPSAllModelsEnabled()) {
 		return false
 	}
 	switch s.EffectiveSchedulingMode() {

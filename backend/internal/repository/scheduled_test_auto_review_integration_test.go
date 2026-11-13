@@ -3,6 +3,7 @@
 package repository
 
 import (
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -61,6 +62,9 @@ func TestAutoReviewBudgetIntegration(t *testing.T) {
 }
 
 func visualPassRateFixture(t *testing.T) *passRateFixture {
+	if os.Getenv("MIGRATION_TEST_DATABASE_URL") == "" {
+		t.Setenv("MIGRATION_TEST_DATABASE_URL", integrationDatabaseDSN)
+	}
 	f := newPassRateFixture(t, 2)
 	f.exec(`CREATE TABLE quality_operations_config(id INT PRIMARY KEY,version BIGINT,config JSONB);
  INSERT INTO quality_operations_config VALUES(1,1,'{"pelican_review":{"enabled":true,"judge_account_id":63,"judge_model":"vision","daily_requests":100}}');`)
@@ -81,7 +85,9 @@ func visualResult(f *passRateFixture, verdict string) *service.ScheduledTestResu
 	settings, err := f.repo.LoadReviewSettings(f.ctx)
 	require.NoError(f.t, err)
 	row.ExecutionInfo = &service.ScheduledTestExecutionInfo{AutoReview: &service.ScheduledTestAutoReviewSummary{Verdict: verdict, RubricVersion: service.ScheduledTestReviewRubricVersion, JudgeAccountID: settings.JudgeAccountID, JudgeModel: settings.JudgeModel}}
-	f.complete(row, "success", verdict)
+	row.Status = "success"
+	effective, _ := service.EvaluateScheduledTestPassRateVerdict(f.plan.Protection.Rules[0], row)
+	f.complete(row, "success", effective)
 	return row
 }
 func TestAutoReviewPassRateIntegration(t *testing.T) {
@@ -106,10 +112,11 @@ func TestAutoReviewPassRateIntegration(t *testing.T) {
 		require.Equal(t, 1, s.Passed)
 		require.True(t, s.Blocked)
 	})
-	t.Run("pending excluded and changed judge starts new window", func(t *testing.T) {
+	t.Run("unavailable review counts as pass and changed judge starts new window", func(t *testing.T) {
 		f := visualPassRateFixture(t)
 		visualResult(f, "pending")
-		require.Zero(t, f.evidenceCount())
+		require.Equal(t, 1, f.evidenceCount())
+		require.Equal(t, 1, f.summary("model-a").Passed)
 		visualResult(f, "pass")
 		old := f.summary("model-a")
 		f.exec(`UPDATE quality_operations_config SET config=jsonb_set(config,'{pelican_review,judge_model}','"new-vision"')`)
@@ -118,7 +125,7 @@ func TestAutoReviewPassRateIntegration(t *testing.T) {
 		require.NotEqual(t, old.RuleVersion, current.RuleVersion)
 		require.Equal(t, 1, current.Samples)
 	})
-	t.Run("judge config changing before completion makes old result pending", func(t *testing.T) {
+	t.Run("judge config changing before completion defaults to pass without reusing old evidence", func(t *testing.T) {
 		f := visualPassRateFixture(t)
 		row := f.begin()
 		row.Status = "success"
@@ -132,7 +139,47 @@ func TestAutoReviewPassRateIntegration(t *testing.T) {
 		require.NoError(t, f.repo.CompleteProtection(f.ctx, row, "fail", "old judge failure"))
 		var verdict string
 		require.NoError(t, f.db.QueryRowContext(f.ctx, `SELECT verdict FROM scheduled_test_protection_states WHERE result_id=$1`, row.ID).Scan(&verdict))
-		require.Equal(t, "pending", verdict)
+		require.Equal(t, "pass", verdict)
 		require.Zero(t, f.evidenceCount())
+	})
+	t.Run("unconfigured review counts every round and administrator corrections update the same observation", func(t *testing.T) {
+		f := visualPassRateFixture(t)
+		f.plan.Protection.Rules[0].AutoReview = nil
+		var err error
+		f.plan, err = f.plans.Update(f.ctx, f.plan)
+		require.NoError(t, err)
+		var row *service.ScheduledTestResult
+		for i := 0; i < 2; i++ {
+			row = f.begin()
+			row.OutputKind, row.OutputHTML = "html", "<svg/>"
+			f.complete(row, "success", "pass")
+		}
+		s := f.summary("model-a")
+		require.Equal(t, 2, s.Samples)
+		require.Equal(t, 2, s.Passed)
+		require.Equal(t, float64(100), *s.PassRate)
+		require.False(t, s.Stale)
+		reviews, err := f.repo.ListAdminReviews(f.ctx)
+		require.NoError(t, err)
+		require.Len(t, reviews, 1)
+		require.Equal(t, "pass", reviews[0].Verdict)
+		require.Equal(t, "pass", reviews[0].Result.QualityVerdict)
+		require.NotNil(t, reviews[0].Result.PassRate)
+		require.Equal(t, 2, reviews[0].Result.PassRate.Passed)
+		var generation int64
+		require.NoError(t, f.db.QueryRowContext(f.ctx, `SELECT generation FROM scheduled_test_protection_states WHERE result_id=$1`, row.ID).Scan(&generation))
+		require.NoError(t, f.repo.DecideTestResult(f.ctx, 1, row.ID, generation, "fail"))
+		s = f.summary("model-a")
+		require.Equal(t, 2, s.Samples)
+		require.Equal(t, 1, s.Passed)
+		require.True(t, s.Blocked)
+		f.complete(row, "success", "pass")
+		require.Equal(t, 1, f.summary("model-a").Passed, "duplicate completion cannot override manual rejection")
+		require.NoError(t, f.repo.DecideTestResult(f.ctx, 1, row.ID, generation, "pass"))
+		s = f.summary("model-a")
+		require.Equal(t, 2, s.Samples)
+		require.Equal(t, 2, s.Passed)
+		require.False(t, s.Blocked)
+		require.Equal(t, 2, f.evidenceCount(), "corrections must not add duplicate observations")
 	})
 }

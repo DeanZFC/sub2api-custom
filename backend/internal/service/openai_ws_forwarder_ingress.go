@@ -121,21 +121,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}()
 	}
 
+	if err := rejectRetiredVMAccount(ctx, s.accountRepo, account); err != nil {
+		return err
+	}
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
 	forceHTTPBridge := account.Platform == PlatformGrok ||
-		(s.pluginManager != nil && s.pluginManager.ShouldRouteOpenAIOAuth(account))
-	if s.openaiVM != nil {
-		vmRoute, bound, err := s.openaiVM.websocketRoute(ctx, account, token, c.Request.Header)
-		if err != nil {
-			return err
-		}
-		if bound {
-			if s.cfg != nil && s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled && account.ResolveOpenAIResponsesWebSocketV2Mode(s.cfg.Gateway.OpenAIWS.IngressModeDefault) == OpenAIWSIngressModeOff {
-				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "websocket mode is disabled for this account", nil)
-			}
-			return s.proxyResponsesWebSocketV2PassthroughWithVMRoute(ctx, c, clientConn, account, token, firstClientMessage, hooks, wsDecision, vmRoute)
-		}
-	}
+		(s.pluginManager != nil && !account.IsManagedIPv6Bound() && s.pluginManager.ShouldRouteOpenAIOAuth(account))
+
 	modeRouterV2Enabled := s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled
 	ingressMode := OpenAIWSIngressModeCtxPool
 	if modeRouterV2Enabled && !forceHTTPBridge {

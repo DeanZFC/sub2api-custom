@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -19,11 +20,20 @@ import (
 
 // OpenAIOAuthHandler handles OpenAI OAuth-related operations
 type OpenAIOAuthHandler struct {
-	openaiOAuthService *service.OpenAIOAuthService
+	openaiOAuthService openAIOAuthOperations
 	adminService       service.AdminService
 	quotaService       openAIQuotaService
 	referralService    openAIReferralService
 	rateLimitService   openAIAccountStateRecoverer
+}
+
+type openAIOAuthOperations interface {
+	GenerateAuthURL(context.Context, *int64, string, string, ...string) (*service.OpenAIAuthURLResult, error)
+	ExchangeCode(context.Context, *service.OpenAIExchangeCodeInput) (*service.OpenAITokenInfo, error)
+	RefreshTokenWithClientID(context.Context, string, string, string) (*service.OpenAITokenInfo, error)
+	RefreshAccountToken(context.Context, *service.Account) (*service.OpenAITokenInfo, error)
+	ValidateCodexPersonalAccessToken(context.Context, string, string) (*service.OpenAITokenInfo, error)
+	BuildAccountCredentials(*service.OpenAITokenInfo) map[string]any
 }
 
 type openAIQuotaService interface {
@@ -88,12 +98,14 @@ func NewOpenAIOAuthHandler(
 	rateLimitService *service.RateLimitService,
 ) *OpenAIOAuthHandler {
 	h := &OpenAIOAuthHandler{
-		openaiOAuthService: openaiOAuthService,
-		adminService:       adminService,
+		adminService: adminService,
 	}
 	// Assign through explicit nil checks: storing a nil *Service in an interface
 	// field yields a non-nil interface, which would silently defeat the
 	// `== nil` capability guards below and panic instead of returning 400.
+	if openaiOAuthService != nil {
+		h.openaiOAuthService = openaiOAuthService
+	}
 	if quotaService != nil {
 		h.quotaService = quotaService
 		h.referralService = quotaService
@@ -179,6 +191,7 @@ type OpenAIRefreshTokenRequest struct {
 }
 
 type OpenAICodexPATCreateRequest struct {
+	ProxyMode               string         `json:"proxy_mode"`
 	ProxyIDs                []int64        `json:"proxy_ids"`
 	AccessToken             string         `json:"access_token" binding:"required"`
 	Name                    string         `json:"name"`
@@ -321,6 +334,7 @@ func (h *OpenAIOAuthHandler) RefreshAccountToken(c *gin.Context) {
 // POST /api/v1/admin/openai/create-from-oauth
 func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 	var req struct {
+		ProxyMode   string  `json:"proxy_mode"`
 		SessionID   string  `json:"session_id" binding:"required"`
 		Code        string  `json:"code" binding:"required"`
 		State       string  `json:"state" binding:"required"`
@@ -335,8 +349,13 @@ func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	if _, err := service.NormalizeAccountProxyMode(req.ProxyMode, req.ProxyID, false); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 
-	// Exchange code for tokens
+	// ProxyMode selects the created account's route. Token exchange keeps its
+	// existing explicit proxy/session route and does not allocate a new proxy.
 	tokenInfo, err := h.openaiOAuthService.ExchangeCode(c.Request.Context(), &service.OpenAIExchangeCodeInput{
 		SessionID:   req.SessionID,
 		Code:        req.Code,
@@ -370,6 +389,7 @@ func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 		Type:        "oauth",
 		Credentials: credentials,
 		Extra:       nil,
+		ProxyMode:   req.ProxyMode,
 		ProxyID:     req.ProxyID,
 		Concurrency: req.Concurrency,
 		Priority:    req.Priority,
@@ -389,6 +409,14 @@ func (h *OpenAIOAuthHandler) CreateAccountFromCodexPAT(c *gin.Context) {
 	var req OpenAICodexPATCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if _, err := service.NormalizeAccountProxyMode(req.ProxyMode, req.ProxyID, false); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if req.ProxyMode != "" && len(req.ProxyIDs) > 0 {
+		response.ErrorFrom(c, infraerrors.BadRequest("PROXY_SELECTION_CONFLICT", "自动代理分配不能同时指定代理池"))
 		return
 	}
 	if err := service.ValidateOpenAILongContextBillingExtra(service.PlatformOpenAI, req.Extra); err != nil {
@@ -412,6 +440,8 @@ func (h *OpenAIOAuthHandler) CreateAccountFromCodexPAT(c *gin.Context) {
 		return
 	}
 
+	// Account route selection happens after validation; PAT validation retains
+	// its existing explicit proxy behavior.
 	var proxyURL string
 	if req.ProxyID != nil {
 		proxy, err := h.adminService.GetProxy(c.Request.Context(), *req.ProxyID)
@@ -461,6 +491,7 @@ func (h *OpenAIOAuthHandler) CreateAccountFromCodexPAT(c *gin.Context) {
 		Type:                  service.AccountTypeOAuth,
 		Credentials:           credentials,
 		Extra:                 extra,
+		ProxyMode:             req.ProxyMode,
 		ProxyID:               req.ProxyID,
 		ProxyIDs:              req.ProxyIDs,
 		Concurrency:           concurrency,

@@ -5,8 +5,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -28,6 +30,7 @@ type contentModerationConfigRequest struct {
 	Model         *string                                               `json:"model"`
 	// 审计请求使用的代理服务器：null 不修改；0 清除（直连）；>0 指定代理。
 	ProxyID              *int64              `json:"proxy_id"`
+	AutoAssignIPv6       *bool               `json:"auto_assign_ipv6"`
 	APIKey               *string             `json:"api_key"`
 	APIKeys              *[]string           `json:"api_keys"`
 	APIKeysMode          string              `json:"api_keys_mode"`
@@ -61,15 +64,16 @@ type contentModerationConfigRequest struct {
 }
 
 type contentModerationAPIKeyTestRequest struct {
-	Engine     string              `json:"engine"`
-	Thresholds *map[string]float64 `json:"thresholds"`
-	APIKeys    []string            `json:"api_keys"`
-	BaseURL    string              `json:"base_url"`
-	Model      string              `json:"model"`
-	TimeoutMS  int                 `json:"timeout_ms"`
-	ProxyID    *int64              `json:"proxy_id"`
-	Prompt     string              `json:"prompt"`
-	Images     []string            `json:"images"`
+	Engine         string              `json:"engine"`
+	Thresholds     *map[string]float64 `json:"thresholds"`
+	APIKeys        []string            `json:"api_keys"`
+	BaseURL        string              `json:"base_url"`
+	Model          string              `json:"model"`
+	TimeoutMS      int                 `json:"timeout_ms"`
+	ProxyID        *int64              `json:"proxy_id"`
+	AutoAssignIPv6 *bool               `json:"auto_assign_ipv6"`
+	Prompt         string              `json:"prompt"`
+	Images         []string            `json:"images"`
 }
 
 type contentModerationHashRequest struct {
@@ -86,6 +90,10 @@ func (h *ContentModerationHandler) GetConfig(c *gin.Context) {
 }
 
 func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
+	if adminaccess.RestrictedFromContext(c.Request.Context()) != nil {
+		response.Error(c, 403, "审计配置仅限完整管理员修改")
+		return
+	}
 	var req contentModerationConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -98,6 +106,7 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 		BaseURL:                        req.BaseURL,
 		Model:                          req.Model,
 		ProxyID:                        req.ProxyID,
+		AutoAssignIPv6:                 req.AutoAssignIPv6,
 		APIKey:                         req.APIKey,
 		APIKeys:                        req.APIKeys,
 		APIKeysMode:                    req.APIKeysMode,
@@ -142,13 +151,14 @@ func (h *ContentModerationHandler) TestAPIKeys(c *gin.Context) {
 	}
 	result, err := h.service.TestAPIKeys(c.Request.Context(), service.TestContentModerationAPIKeysInput{
 		Engine: req.Engine, Thresholds: req.Thresholds,
-		APIKeys:   req.APIKeys,
-		BaseURL:   req.BaseURL,
-		Model:     req.Model,
-		TimeoutMS: req.TimeoutMS,
-		ProxyID:   req.ProxyID,
-		Prompt:    req.Prompt,
-		Images:    req.Images,
+		APIKeys:        req.APIKeys,
+		BaseURL:        req.BaseURL,
+		Model:          req.Model,
+		TimeoutMS:      req.TimeoutMS,
+		ProxyID:        req.ProxyID,
+		AutoAssignIPv6: req.AutoAssignIPv6,
+		Prompt:         req.Prompt,
+		Images:         req.Images,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -260,4 +270,27 @@ func parseContentModerationDate(raw string) (time.Time, bool, error) {
 	}
 	t, err := time.Parse("2006-01-02", raw)
 	return t, err == nil, err
+}
+
+func (h *ContentModerationHandler) AllocateAPIKeyIPv6(c *gin.Context) {
+	if adminaccess.RestrictedFromContext(c.Request.Context()) != nil {
+		response.Error(c, 403, "审计 Key IPv6 分配仅限完整管理员访问")
+		return
+	}
+	var req struct {
+		Engine  string `json:"engine" binding:"required,oneof=openai typesafe"`
+		KeyHash string `json:"key_hash" binding:"required,len=64,hexadecimal"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "必须指定审计引擎和已保存的 Key")
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	middleware.SetAuditAction(c, "admin.risk_control.api_key.allocate_ipv6")
+	view, err := h.service.AllocateAPIKeyIPv6(c.Request.Context(), req.Engine, req.KeyHash)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, view)
 }

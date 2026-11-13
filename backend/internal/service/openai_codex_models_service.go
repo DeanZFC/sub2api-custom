@@ -1953,6 +1953,17 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstreamForRequest(reques
 }
 
 func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, request openAIModelsRequest, ifNoneMatch string) (*OpenAIModelsResponse, error) {
+	if err := rejectRetiredVMAccount(ctx, s.accountRepo, request.credentialAccount); err != nil {
+		return nil, err
+	}
+	if s.openaiIPv6 != nil {
+		if err := s.openaiIPv6.CheckRoute(ctx, request.credentialAccount, request.proxyURL); err != nil {
+			return nil, err
+		}
+	}
+	if err := validateOpenAIIPv6Route(request.credentialAccount, request.proxyURL); err != nil {
+		return nil, err
+	}
 	reqCtx, cancel := context.WithTimeout(ctx, codexModelsManifestRequestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, request.url, nil)
@@ -1973,15 +1984,13 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, re
 		resp, err = s.httpUpstream.Do(req, request.proxyURL, request.accountID, request.accountConcurrency)
 	} else {
 		handled := false
-		if s.openaiVM != nil {
-			resp, handled, err = s.openaiVM.RoundTrip(req, request.credentialAccount)
-		}
-		if !handled && s.pluginManager != nil {
+
+		if s.pluginManager != nil && !request.credentialAccount.IsManagedIPv6Bound() {
 			resp, handled, err = s.pluginManager.RoundTripOpenAIOAuth(reqCtx, req, request.proxyURL, request.credentialAccount)
 		}
 		if !handled {
 			if request.credentialAccount != nil {
-				if proxyErr := validateOpenAIVMProxy(request.credentialAccount, request.credentialAccount.Proxy); proxyErr != nil {
+				if proxyErr := validateManagedAccountProxy(request.credentialAccount, request.credentialAccount.Proxy); proxyErr != nil {
 					return nil, proxyErr
 				}
 			}

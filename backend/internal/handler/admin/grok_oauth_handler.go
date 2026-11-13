@@ -317,6 +317,7 @@ func (h *GrokOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 }
 
 type GrokSSOToOAuthRequest struct {
+	ProxyMode          string         `json:"proxy_mode"`
 	SSOTokens          []string       `json:"sso_tokens"`
 	SSOToken           string         `json:"sso_token"`
 	Name               string         `json:"name"`
@@ -361,6 +362,18 @@ func (h *GrokOAuthHandler) CreateAccountsFromSSO(c *gin.Context) {
 	var req GrokSSOToOAuthRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if _, err := service.NormalizeAccountProxyMode(req.ProxyMode, req.ProxyID, false); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if req.ProxyMode == "ovh_ipv6" {
+		response.ErrorFrom(c, infraerrors.BadRequest("OVH_IPV6_INELIGIBLE", "OVH IPv6 仅支持原生 OpenAI OAuth 账号"))
+		return
+	}
+	if req.ProxyMode != "" && len(req.ProxyIDs) > 0 {
+		response.ErrorFrom(c, infraerrors.BadRequest("PROXY_SELECTION_CONFLICT", "自动代理分配不能同时指定代理池"))
 		return
 	}
 	tokens := normalizeSSOImportTokens(req.SSOTokens, req.SSOToken)
@@ -422,6 +435,8 @@ func (h *GrokOAuthHandler) safeCreateAccountFromSSOToken(ctx context.Context, re
 }
 
 func (h *GrokOAuthHandler) createAccountFromSSOToken(ctx context.Context, req GrokSSOToOAuthRequest, token string, index, total int) grokSSOImportWorkerResult {
+	// ProxyMode only selects the created account's route; token conversion
+	// continues to use the existing explicit proxy option.
 	tokenInfo, err := h.grokOAuthService.ConvertFromSSO(ctx, token, req.ProxyID)
 	if err != nil {
 		return grokSSOImportWorkerResult{item: GrokSSOToOAuthItemResult{Index: index, Error: grokSSOImportErrorMessage(err)}}
@@ -437,6 +452,7 @@ func (h *GrokOAuthHandler) createAccountFromSSOToken(ctx context.Context, req Gr
 		Type:               service.AccountTypeOAuth,
 		Credentials:        credentials,
 		Extra:              cloneGrokSSOMap(req.Extra),
+		ProxyMode:          req.ProxyMode,
 		ProxyID:            req.ProxyID,
 		ProxyIDs:           req.ProxyIDs,
 		Concurrency:        req.Concurrency,

@@ -169,32 +169,6 @@ func TestExcelBPSAccountTestUsesCanonicalIdentityForCodexCLIOnly(t *testing.T) {
 	}
 }
 
-func TestExcelBPSAccountTestRetainsVMRoutePriority(t *testing.T) {
-	vmRequests := 0
-	vm, repo, _ := vmTestService(t, func(w http.ResponseWriter, r *http.Request) {
-		vmRequests++
-		require.Equal(t, "/v1/accounts/300/responses", r.URL.Path)
-		resp := excelBPSAccountTestResponse("gpt-6-astra")
-		defer func() { _ = resp.Body.Close() }()
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.Copy(w, resp.Body)
-	})
-	repo.b = &OpenAIVMBinding{AccountID: 300, Status: "ready"}
-	account := excelAccount()
-	account.Extra["openai_excel_bps_mihomo"] = true
-	upstream := &httpUpstreamRecorder{}
-	gateway := openAIClientToolsTestService(upstream)
-	gateway.openaiVM = vm
-	gateway.accountRepo = &excelBPSAccountTestRepo{account: account}
-	svc := &AccountTestService{openaiGatewayService: gateway}
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/300/test", nil)
-
-	require.NoError(t, svc.testOpenAIAccountConnection(c, account, "gpt-6-astra", "Reply OK", AccountTestModeDefault))
-	require.Equal(t, 1, vmRequests)
-	require.Nil(t, upstream.lastReq)
-}
-
 func TestExcelBPSAccountTestGlobalSwitchAndPrimaryGrant(t *testing.T) {
 	for _, primary := range []bool{false, true} {
 		t.Run(strconv.FormatBool(primary), func(t *testing.T) {

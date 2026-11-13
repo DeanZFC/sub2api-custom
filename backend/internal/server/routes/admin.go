@@ -95,7 +95,6 @@ func RegisterAdminRoutes(
 
 		// 账号管理
 		registerAccountRoutes(admin, h, stepUpAuth)
-		registerOpenAIVMRoutes(admin, h, stepUpAuth)
 		registerOpenAIIPv6Routes(admin, h, stepUpAuth)
 
 		// 公告管理
@@ -225,6 +224,7 @@ func registerContentModerationRoutes(admin *gin.RouterGroup, h *handler.Handlers
 		risk.GET("/config", h.Admin.ContentModeration.GetConfig)
 		risk.PUT("/config", h.Admin.ContentModeration.UpdateConfig)
 		risk.POST("/api-keys/test", h.Admin.ContentModeration.TestAPIKeys)
+		risk.POST("/api-keys/allocate-ipv6", h.Admin.ContentModeration.AllocateAPIKeyIPv6)
 		risk.GET("/status", h.Admin.ContentModeration.GetStatus)
 		risk.GET("/logs", h.Admin.ContentModeration.ListLogs)
 		risk.POST("/users/:user_id/unban", h.Admin.ContentModeration.UnbanUser)
@@ -604,6 +604,10 @@ func registerProxyRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth
 	{
 		proxies.GET("", h.Admin.Proxy.List)
 		proxies.GET("/all", h.Admin.Proxy.GetAll)
+		proxies.GET("/ovh-ipv6", h.Admin.Proxy.GetOVHIPv6)
+		proxies.PUT("/ovh-ipv6", gin.HandlerFunc(stepUpAuth), h.Admin.Proxy.SetOVHIPv6)
+		proxies.POST("/ovh-ipv6/allocate", gin.HandlerFunc(stepUpAuth), h.Admin.Proxy.AllocateOVHIPv6)
+		proxies.GET("/ovh-ipv6/storage", h.Admin.Proxy.GetOVHIPv6Storage)
 		// 代理导出泄露账号密码原文——要求 step-up 2FA
 		proxies.GET("/data", gin.HandlerFunc(stepUpAuth), h.Admin.Proxy.ExportData)
 		proxies.POST("/data", h.Admin.Proxy.ImportData)
@@ -899,20 +903,6 @@ func registerPluginRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAut
 		plugins.POST("/:id/test", gin.HandlerFunc(stepUpAuth), h.Admin.Plugin.Test)
 		plugins.POST("/:id/ui-session", h.Admin.Plugin.CreateUISession)
 	}
-}
-
-func registerOpenAIVMRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
-	if h.Admin.OpenAIVM == nil {
-		return
-	}
-	vm := admin.Group("/openai-vm")
-	vm.GET("/config", h.Admin.OpenAIVM.GetConfig)
-	vm.PUT("/config", gin.HandlerFunc(stepUpAuth), h.Admin.OpenAIVM.SaveConfig)
-	vm.POST("/test", gin.HandlerFunc(stepUpAuth), h.Admin.OpenAIVM.Test)
-	admin.GET("/accounts/:id/vm", h.Admin.OpenAIVM.Status)
-	admin.POST("/accounts/:id/vm", gin.HandlerFunc(stepUpAuth), h.Admin.OpenAIVM.Create)
-	admin.DELETE("/accounts/:id/vm", gin.HandlerFunc(stepUpAuth), h.Admin.OpenAIVM.Delete)
-	admin.POST("/accounts/:id/vm/retry", gin.HandlerFunc(stepUpAuth), h.Admin.OpenAIVM.Retry)
 }
 
 func registerChannelRoutes(admin *gin.RouterGroup, h *handler.Handlers) {

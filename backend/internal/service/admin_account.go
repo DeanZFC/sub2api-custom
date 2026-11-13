@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -437,6 +438,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	delete(accountExtra, OllamaCloudUsageSnapshotExtraKey)
 	delete(accountExtra, OpenCodeGoUsageAutoRefreshExtraKey)
 	delete(accountExtra, OpenCodeGoUsageSnapshotExtraKey)
+	delete(accountExtra, "ovh_ipv6_bound")
 	accountExtra = prepareCodexFingerprintExtraForCreate(input.Platform, input.Type, accountExtra)
 	account := &Account{
 		Name:        input.Name,
@@ -494,6 +496,21 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
+	if input.ProxyMode != "" && len(input.ProxyIDs) == 0 {
+		input.ProxyIDs = nil
+	}
+	if len(input.ProxyIDs) == 1 && s.managedProxyID(ctx, &input.ProxyIDs[0]) {
+		input.ProxyID = &input.ProxyIDs[0]
+		input.ProxyIDs = nil
+	}
+	if input.ProxyMode != "" || s.requiresManagedProxyTransaction(ctx, input.ProxyID) {
+		return s.createAccountProxyMode(ctx, input)
+	}
+	if s.managedProxyID(ctx, input.ProxyID) {
+		if err := validateOVHIPv6Eligibility(&Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials, Extra: input.Extra}); err != nil {
+			return nil, err
+		}
+	}
 	if input.ProxyIDs != nil {
 		ids, err := s.validateAccountProxyIDs(ctx, input.ProxyIDs)
 		if err != nil {
@@ -618,8 +635,25 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 }
 
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
+	if input.ProxyIDs != nil && len(*input.ProxyIDs) == 1 && s.managedProxyID(ctx, &(*input.ProxyIDs)[0]) {
+		input.ProxyID = &(*input.ProxyIDs)[0]
+		input.ProxyIDs = nil
+	}
+	if input.ProxyMode != "" || s.requiresManagedProxyTransaction(ctx, input.ProxyID) {
+		return s.updateAccountProxyMode(ctx, id, input)
+	}
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
+		return nil, err
+	}
+	if account.IsOVHIPv6Bound() && input.ProxyIDs != nil && len(*input.ProxyIDs) == 1 {
+		input.ProxyID = &(*input.ProxyIDs)[0]
+		input.ProxyIDs = nil
+	}
+	if account.IsOVHIPv6Bound() && (input.ProxyID != nil || input.ProxyIDs != nil) && dbent.TxFromContext(ctx) == nil {
+		return s.updateAccountProxyMode(ctx, id, input)
+	}
+	if err := s.validateManagedIPv6AccountChange(ctx, account, input); err != nil {
 		return nil, err
 	}
 	if account.Platform == PlatformTypeSafe && input.Type != "" && input.Type != AccountTypeAPIKey {
@@ -1084,6 +1118,18 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
+	if input.ProxyIDs != nil && len(*input.ProxyIDs) == 1 && s.managedProxyID(ctx, &(*input.ProxyIDs)[0]) {
+		input.ProxyID = &(*input.ProxyIDs)[0]
+		input.ProxyIDs = nil
+	}
+	if input.ProxyMode == "" && s.managedProxyID(ctx, input.ProxyID) {
+		safe := *input
+		safe.ProxyMode = "specified"
+		return s.bulkUpdateManagedProxyAccounts(ctx, &safe)
+	}
+	if input.ProxyMode != "" {
+		return s.bulkUpdateManagedProxyAccounts(ctx, input)
+	}
 	if input.ProxyIDs != nil {
 		ids, err := s.validateAccountProxyIDs(ctx, *input.ProxyIDs)
 		if err != nil {
@@ -1152,6 +1198,22 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			return nil, err
 		}
 		cachedTargets = loaded
+	}
+	if input.ProxyID != nil {
+		for _, a := range cachedTargets {
+			if a != nil && a.IsOVHIPv6Bound() {
+				if input.ProxyIDs != nil && len(*input.ProxyIDs) > 1 {
+					return nil, infraerrors.BadRequest("MANAGED_IPV6_POOL", "请先解除固定 IPv6 绑定，再设置轮转代理池")
+				}
+				safe := *input
+				safe.ProxyIDs = nil
+				safe.ProxyMode = "specified"
+				if *input.ProxyID == 0 {
+					safe.ProxyMode = "direct"
+				}
+				return s.bulkUpdateManagedProxyAccounts(ctx, &safe)
+			}
+		}
 	}
 	targetsByID := make(map[int64]*Account, len(cachedTargets))
 	for _, account := range cachedTargets {
@@ -1474,6 +1536,18 @@ func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filte
 }
 
 func (s *adminServiceImpl) DeleteAccount(ctx context.Context, id int64) error {
+	if a, err := s.accountRepo.GetByID(ctx, id); err == nil && a.IsOVHIPv6Bound() {
+		if dbent.TxFromContext(ctx) == nil {
+			_, err := s.scopedAdminTransaction(ctx, id, true, func(txctx context.Context) (*Account, error) { return a, s.DeleteAccount(txctx, id) })
+			return err
+		}
+		if a.IsCredentialShadow() {
+			return infraerrors.Conflict("MANAGED_IPV6_SHADOW", "请先在母账号上解除固定 IPv6 后再删除影子账号")
+		}
+		if err := s.managedIPv6Drain(ctx, a); err != nil {
+			return err
+		}
+	}
 	// 级联删除 spark 影子账号（先删影子，再删母账号）
 	shadows, err := s.accountRepo.ListShadowsByParent(ctx, id)
 	if err != nil {

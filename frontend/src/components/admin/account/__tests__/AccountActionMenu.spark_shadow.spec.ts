@@ -160,7 +160,7 @@ describe('AccountActionMenu — spark shadow 按钮可见性', () => {
     const body = getBodyText()
     expect(body).toContain('admin.accounts.reAuthorize')
     expect(body).toContain('admin.accounts.setPrivacy')
-    expect(body).toContain('admin.accounts.openaiVm.title')
+    expect(body).not.toContain('admin.accounts.openaiVm.title')
     wrapper.unmount()
   })
 
@@ -175,17 +175,6 @@ describe('AccountActionMenu — spark shadow 按钮可见性', () => {
     wrapper.unmount()
   })
 
-  it('专属槽位按钮传递账号并关闭菜单', async () => {
-    const account = makeAccount({ parent_account_id: null })
-    const wrapper = mount(AccountActionMenu, { props: { show: true, account, anchorRect }, attachTo: document.body })
-    const button = getBodyButtons().find(b => b.textContent?.includes('admin.accounts.openaiVm.title'))
-    expect(button).toBeDefined()
-    button!.click()
-    await wrapper.vm.$nextTick()
-    expect(wrapper.emitted('openai-vm')?.[0]).toEqual([account])
-    expect(wrapper.emitted('close')).toHaveLength(1)
-    wrapper.unmount()
-  })
 
   it('点击按钮触发 create-spark-shadow 事件并携带 account', async () => {
     const account = makeAccount({ platform: 'openai', type: 'oauth', parent_account_id: null })

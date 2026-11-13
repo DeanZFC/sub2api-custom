@@ -1932,7 +1932,12 @@
           <label class="input-label mb-0">{{ t('admin.accounts.proxy') }}</label>
           <ProxyAdBanner />
         </div>
-        <ProxySelector v-model="form.proxy_ids" :proxies="proxies" multiple />
+        <p v-if="legacyIPv6Bound" class="input-hint text-amber-600">{{ t('ovhIPv6.legacyBinding') }}</p>
+        <template v-else>
+          <AccountProxyModeSelect v-model="proxyMode" :allow-managed="allowManagedIPv6" />
+          <ProxySelector v-if="!proxyMode" v-model="form.proxy_ids" :proxies="allowManagedIPv6 ? proxies : proxies.filter(proxy => !isManagedIPv6Proxy(proxy))" multiple />
+          <p v-if="currentManagedIPv6" class="input-hint">{{ t('ovhIPv6.currentBinding', { address: currentManagedIPv6 }) }} {{ t('ovhIPv6.drainHint') }}</p>
+        </template>
         <p class="input-hint">{{ t('admin.accounts.proxyPoolHint') }}</p>
       </div>
 
@@ -3441,6 +3446,10 @@ import {
 } from '@/components/account/openaiImageSizeTiers'
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { OPENAI_EXCEL_OAUTH_CLIENT_ID } from '@/composables/useOpenAIOAuth'
+import AccountProxyModeSelect from '@/components/common/AccountProxyModeSelect.vue'
+import { accountProxyPayload, isManagedIPv6Proxy } from '@/utils/accountProxySelection'
+import type { AccountProxyMode } from '@/types'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
@@ -4520,6 +4529,11 @@ const mixedChannelWarningMessageText = computed(() => {
   return mixedChannelWarningRawMessage.value
 })
 
+const proxyMode = ref<AccountProxyMode>('')
+const allowManagedIPv6 = computed(() => props.account?.platform === 'openai' && props.account.type === 'oauth' && !props.account.parent_account_id && props.account.credentials?.client_id !== OPENAI_EXCEL_OAUTH_CLIENT_ID && String(props.account.credentials?.auth_mode || '').trim().toLowerCase() !== 'agentidentity' && !excelBPSConfig.value.enabled && !excelBPSConfig.value.recoveryPending && !props.account.extra?.openai_vm_bound && !props.account.extra?.openai_vm_retired)
+watch(allowManagedIPv6, allowed => { if (!allowed && proxyMode.value === 'ovh_ipv6') proxyMode.value = '' })
+const legacyIPv6Bound = computed(() => props.account?.extra?.openai_ipv6_bound === true)
+const currentManagedIPv6 = computed(() => props.proxies.find(proxy => proxy.id === props.account?.proxy_id)?.managed_ipv6)
 const form = reactive({
   name: '',
   notes: '',
@@ -4637,6 +4651,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   mixedChannelWarningAction.value = null
   form.name = newAccount.name
   form.notes = newAccount.notes || ''
+  proxyMode.value = ''
   form.proxy_id = newAccount.proxy_id
   form.proxy_ids = newAccount.proxy_ids?.length ? [...newAccount.proxy_ids] : (newAccount.proxy_id ? [newAccount.proxy_id] : [])
   form.concurrency = newAccount.concurrency
@@ -5704,8 +5719,14 @@ const handleSubmit = async () => {
     if (updatePayload.proxy_id === null) {
       updatePayload.proxy_id = 0
     }
-    updatePayload.proxy_id = form.proxy_ids[0] ?? 0
-    updatePayload.proxy_ids = [...form.proxy_ids]
+    if (legacyIPv6Bound.value) {
+      delete updatePayload.proxy_id
+      delete updatePayload.proxy_ids
+      delete updatePayload.proxy_mode
+    } else {
+      Object.assign(updatePayload, accountProxyPayload(proxyMode.value, form.proxy_ids, true))
+      if (proxyMode.value && !['direct', 'specified'].includes(proxyMode.value)) delete updatePayload.proxy_ids
+    }
     if (form.expires_at === null) {
       updatePayload.expires_at = 0
     }

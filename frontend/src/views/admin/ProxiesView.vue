@@ -94,6 +94,7 @@
             </button>
           </div>
         </div>
+        <OvhIPv6Control ref="ovhIPv6Control" @changed="loadProxies" />
       </template>
 
       <template #table>
@@ -133,6 +134,7 @@
 
           <template #cell-name="{ value, row }">
             <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+            <span v-if="isManagedIPv6Proxy(row)" class="badge badge-primary ml-2" :title="t('ovhIPv6.managedHint')">{{ t(row.managed_ipv6 || row.username?.startsWith('ovh6_') ? 'ovhIPv6.source' : 'ovhIPv6.legacySource') }}</span>
             <span v-if="row.mihomo_node_id" class="badge badge-primary ml-2">Mihomo</span>
           </template>
 
@@ -148,8 +150,8 @@
 
           <template #cell-address="{ row }">
             <div class="flex items-center gap-1.5">
-              <code class="code text-xs">{{ row.host }}:{{ row.port }}</code>
-              <div class="relative">
+              <code class="code text-xs">{{ row.managed_ipv6 || `${row.host}:${row.port}` }}</code>
+              <div v-if="!isManagedIPv6Proxy(row)" class="relative">
                 <button
                   type="button"
                   class="rounded p-0.5 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
@@ -178,7 +180,8 @@
           </template>
 
           <template #cell-auth="{ row }">
-            <div v-if="row.username || row.password" class="flex items-center gap-1.5">
+            <span v-if="isManagedIPv6Proxy(row)" class="text-xs text-gray-500">{{ t(row.managed_ipv6_state === 'reserved' ? 'ovhIPv6.reserved' : 'ovhIPv6.exclusive') }}</span>
+            <div v-else-if="row.username || row.password" class="flex items-center gap-1.5">
               <div class="flex flex-col text-xs">
                 <span v-if="row.username" class="text-gray-700 dark:text-gray-200">{{ row.username }}</span>
                 <span v-if="row.password" class="font-mono text-gray-500 dark:text-gray-400">
@@ -340,6 +343,7 @@
                 <span class="text-xs">{{ t('admin.proxies.qualityCheck') }}</span>
               </button>
               <button
+                v-if="!isManagedIPv6Proxy(row)"
                 @click="handleEdit(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
@@ -347,6 +351,7 @@
                 <span class="text-xs">{{ t('common.edit') }}</span>
               </button>
               <button
+                v-if="!isManagedIPv6Proxy(row) || row.managed_ipv6_state === 'reserved'"
                 @click="handleDelete(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
@@ -430,6 +435,7 @@
             </svg>
             {{ t('admin.proxies.batchAdd') }}
           </button>
+          <button type="button" data-testid="add-ovh-ipv6-tab" :disabled="submitting" @click="createMode = 'ovh_ipv6'" class="-mb-px border-b-2 px-4 py-2 text-sm font-medium" :class="createMode === 'ovh_ipv6' ? 'border-primary-500 text-primary-600' : 'border-transparent text-gray-500'">{{ t('ovhIPv6.addSingle') }}</button>
         </div>
         <ProxyAdBanner />
       </div>
@@ -545,7 +551,7 @@
       </form>
 
       <!-- Batch Add Form -->
-      <div v-else class="space-y-5">
+      <div v-else-if="createMode === 'batch'" class="space-y-5">
         <div>
           <label class="input-label">{{ t('admin.proxies.batchInput') }}</label>
           <textarea
@@ -603,6 +609,12 @@
 
       </div>
 
+      <form v-if="createMode === 'ovh_ipv6'" id="allocate-ovh-ipv6-form" class="space-y-4" @submit.prevent="allocateIPv6">
+        <p class="text-sm text-gray-600 dark:text-gray-300">{{ t('ovhIPv6.addSingleHint') }}</p>
+        <label class="block"><span class="input-label">{{ t('ovhIPv6.optionalName') }}</span><input v-model="allocateIPv6Name" type="text" maxlength="100" :disabled="submitting" class="input" /></label>
+        <p v-if="allocateIPv6Error" role="alert" class="text-sm text-red-600">{{ allocateIPv6Error }}</p>
+      </form>
+
       <template #footer>
         <div class="flex justify-end gap-3">
           <button @click="closeCreateModal" type="button" class="btn btn-secondary">
@@ -638,7 +650,7 @@
             {{ submitting ? t('admin.proxies.creating') : t('common.create') }}
           </button>
           <button
-            v-else
+            v-else-if="createMode === 'batch'"
             @click="handleBatchCreate"
             type="button"
             :disabled="submitting || batchParseResult.valid === 0"
@@ -670,6 +682,7 @@
                 : t('admin.proxies.importProxies', { count: batchParseResult.valid })
             }}
           </button>
+          <button v-else type="submit" form="allocate-ovh-ipv6-form" class="btn btn-primary" :disabled="submitting" data-testid="allocate-ovh-ipv6">{{ t(submitting ? 'admin.proxies.creating' : 'ovhIPv6.addSingle') }}</button>
         </div>
       </template>
     </BaseDialog>
@@ -908,6 +921,7 @@
         </div>
       </template>
     </BaseDialog>
+    <TotpStepUpDialog :controller="ipv6StepUp" />
   </AppLayout>
 </template>
 
@@ -929,6 +943,12 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import ImportDataModal from '@/components/admin/proxy/ImportDataModal.vue'
+import OvhIPv6Control from '@/components/admin/proxy/OvhIPv6Control.vue'
+import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
+import { useStepUp, isStepUpCancelled, StepUpCancelledError } from '@/composables/useStepUp'
+import { isManagedIPv6Proxy } from '@/utils/accountProxySelection'
+import { ovhIPv6API } from '@/api/admin/ovhIPv6'
+import { extractApiErrorMessage } from '@/utils/apiError'
 import ProxyQualityReportDialog from '@/components/admin/proxy/ProxyQualityReportDialog.vue'
 import Select from '@/components/common/Select.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
@@ -1016,6 +1036,7 @@ const editStatusOptions = computed(() => [
 ])
 
 const proxies = ref<Proxy[]>([])
+const nonDeletableManagedProxyIds = new Set<number>()
 const visiblePasswordIds = reactive(new Set<number>())
 const copyMenuProxyId = ref<number | null>(null)
 const loading = ref(false)
@@ -1083,7 +1104,11 @@ const qualityReportProxy = ref<Proxy | null>(null)
 const qualityReport = ref<ProxyQualityCheckResult | null>(null)
 
 // Batch import state
-const createMode = ref<'standard' | 'batch'>('standard')
+const createMode = ref<'standard' | 'batch' | 'ovh_ipv6'>('standard')
+const ovhIPv6Control = ref<InstanceType<typeof OvhIPv6Control> | null>(null)
+const ipv6StepUp = useStepUp()
+const allocateIPv6Name = ref('')
+const allocateIPv6Error = ref('')
 const batchInput = ref('')
 const batchParseResult = reactive({
   total: 0,
@@ -1132,7 +1157,7 @@ const loadBackupProxyOptions = async () => {
 }
 const backupProxyOptions = (excludeId?: number) =>
   allProxiesForBackup.value
-    .filter(p => p.id !== excludeId)
+    .filter(p => p.id !== excludeId && !isManagedIPv6Proxy(p))
     .map(p => ({ label: `${p.name} (${p.host}:${p.port})`, value: p.id }))
 
 let abortController: AbortController | null = null
@@ -1183,6 +1208,10 @@ const loadProxies = async () => {
       return
     }
     proxies.value = response.items
+    for (const proxy of response.items) {
+      if (isManagedIPv6Proxy(proxy) && proxy.managed_ipv6_state !== 'reserved') nonDeletableManagedProxyIds.add(proxy.id)
+      else nonDeletableManagedProxyIds.delete(proxy.id)
+    }
     pagination.total = response.total
     pagination.pages = response.pages
   } catch (error) {
@@ -1232,6 +1261,7 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
 }
 
 const closeCreateModal = () => {
+  ipv6StepUp.onCancel()
   showCreateModal.value = false
   createMode.value = 'standard'
   createForm.name = ''
@@ -1392,7 +1422,30 @@ const handleCreateProxy = async () => {
   }
 }
 
+const allocateIPv6 = async () => {
+  if (submitting.value) return
+  submitting.value = true
+  allocateIPv6Error.value = ''
+  try {
+    const name = allocateIPv6Name.value
+    await ipv6StepUp.run(() => {
+      if (!showCreateModal.value) throw new StepUpCancelledError()
+      return ovhIPv6API.allocate(name)
+    })
+    appStore.showSuccess(t('ovhIPv6.allocated'))
+    closeCreateModal()
+    allocateIPv6Name.value = ''
+    await loadProxies()
+    ovhIPv6Control.value?.refresh()
+  } catch (cause) {
+    if (!isStepUpCancelled(cause)) allocateIPv6Error.value = extractApiErrorMessage(cause, t('ovhIPv6.allocateFailed'))
+  } finally {
+    submitting.value = false
+  }
+}
+
 const handleEdit = (proxy: Proxy) => {
+  if (isManagedIPv6Proxy(proxy)) return
   editingProxy.value = proxy
   editForm.name = proxy.name
   editForm.protocol = proxy.protocol
@@ -1418,7 +1471,7 @@ const closeEditModal = () => {
 }
 
 const handleUpdateProxy = async () => {
-  if (!editingProxy.value) return
+  if (!editingProxy.value || isManagedIPv6Proxy(editingProxy.value)) return
   if (!editForm.name.trim()) {
     appStore.showError(t('admin.proxies.nameRequired'))
     return
@@ -1874,6 +1927,7 @@ const handleExportData = async () => {
 }
 
 const handleDelete = (proxy: Proxy) => {
+  if (isManagedIPv6Proxy(proxy) && proxy.managed_ipv6_state !== 'reserved') return
   if ((proxy.account_count || 0) > 0) {
     appStore.showError(t('admin.proxies.deleteBlockedInUse'))
     return
@@ -1890,7 +1944,7 @@ const openBatchDelete = () => {
 }
 
 const confirmDelete = async () => {
-  if (!deletingProxy.value) return
+  if (!deletingProxy.value || (isManagedIPv6Proxy(deletingProxy.value) && deletingProxy.value.managed_ipv6_state !== 'reserved')) return
 
   try {
     await adminAPI.proxies.delete(deletingProxy.value.id)
@@ -1906,7 +1960,7 @@ const confirmDelete = async () => {
 }
 
 const confirmBatchDelete = async () => {
-  const ids = Array.from(selectedProxyIds.value)
+  const ids = Array.from(selectedProxyIds.value).filter(id => !nonDeletableManagedProxyIds.has(id))
   if (ids.length === 0) {
     showBatchDeleteDialog.value = false
     return
@@ -2007,6 +2061,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  ipv6StepUp.onCancel()
   clearTimeout(searchTimeout)
   abortController?.abort()
   document.removeEventListener('click', closeCopyMenu)

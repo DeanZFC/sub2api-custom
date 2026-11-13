@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/mihomo"
@@ -23,6 +24,9 @@ func (s *adminServiceImpl) ListProxies(ctx context.Context, page, pageSize int, 
 	if err != nil {
 		return nil, 0, err
 	}
+	if err := s.decorateManagedProxyList(ctx, proxies); err != nil {
+		return nil, 0, err
+	}
 	return proxies, result.Total, nil
 }
 
@@ -32,12 +36,19 @@ func (s *adminServiceImpl) ListProxiesWithAccountCount(ctx context.Context, page
 	if err != nil {
 		return nil, 0, err
 	}
+	if err := s.decorateManagedProxyCounts(ctx, proxies); err != nil {
+		return nil, 0, err
+	}
 	s.attachProxyLatency(ctx, proxies)
 	return proxies, result.Total, nil
 }
 
 func (s *adminServiceImpl) GetAllProxies(ctx context.Context) ([]Proxy, error) {
-	return s.proxyRepo.ListActive(ctx)
+	proxies, err := s.proxyRepo.ListActive(ctx)
+	if err == nil {
+		err = s.decorateManagedProxyList(ctx, proxies)
+	}
+	return proxies, err
 }
 
 func (s *adminServiceImpl) GetAllProxiesWithAccountCount(ctx context.Context) ([]ProxyWithAccountCount, error) {
@@ -45,19 +56,33 @@ func (s *adminServiceImpl) GetAllProxiesWithAccountCount(ctx context.Context) ([
 	if err != nil {
 		return nil, err
 	}
+	if err := s.decorateManagedProxyCounts(ctx, proxies); err != nil {
+		return nil, err
+	}
 	s.attachProxyLatency(ctx, proxies)
 	return proxies, nil
 }
 
 func (s *adminServiceImpl) GetProxy(ctx context.Context, id int64) (*Proxy, error) {
-	return s.proxyRepo.GetByID(ctx, id)
+	p, err := s.proxyRepo.GetByID(ctx, id)
+	if err == nil {
+		err = s.attachManagedIPv6(ctx, p)
+	}
+	return p, err
 }
 
 func (s *adminServiceImpl) GetProxiesByIDs(ctx context.Context, ids []int64) ([]Proxy, error) {
-	return s.proxyRepo.ListByIDs(ctx, ids)
+	ps, err := s.proxyRepo.ListByIDs(ctx, ids)
+	if err == nil {
+		err = s.decorateManagedProxyList(ctx, ps)
+	}
+	return ps, err
 }
 
 func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyInput) (*Proxy, error) {
+	if strings.HasPrefix(input.Username, "ovh6_") || strings.HasPrefix(input.Username, "v6-sub2-") {
+		return nil, infraerrors.BadRequest("MANAGED_IPV6_RESERVED_USERNAME", "固定 IPv6 代理须由专用分配入口创建")
+	}
 	if !isJSONTimeInRange(input.ExpiresAt) {
 		return nil, infraerrors.BadRequest("PROXY_EXPIRY_INVALID", "proxy expiry year must be between 0 and 9999")
 	}
@@ -107,6 +132,9 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	proxy, err := s.proxyRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if proxy.IsManagedIPv6() || (input.Username != nil && (&Proxy{Username: *input.Username}).IsManagedIPv6()) {
+		return nil, infraerrors.Conflict("MANAGED_IPV6_IMMUTABLE", "固定 IPv6 代理由出口服务管理，请通过账号更改或解除绑定")
 	}
 	if proxy.MihomoNodeID != "" && ((input.Protocol != "" && input.Protocol != proxy.Protocol) ||
 		(input.Host != "" && input.Host != proxy.Host) || (input.Port != 0 && input.Port != proxy.Port) ||

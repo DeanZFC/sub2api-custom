@@ -103,7 +103,7 @@ func (s *OpenAIGatewayService) refreshExcelBPSIPPool(ctx context.Context) {
 	}
 	urls := make([]string, 0, len(proxies))
 	for i := range proxies {
-		if proxies[i].IsExpired(now) {
+		if proxies[i].IsExpired(now) || proxies[i].IsManagedIPv6() {
 			continue
 		}
 		urls = append(urls, proxies[i].URL())

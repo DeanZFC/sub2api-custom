@@ -87,14 +87,14 @@ func (s *OpenAIGatewayService) ExecuteManualHarvest(ctx context.Context, req Man
 		progress(p)
 	}
 
-	if account.IsOpenAIIPv6Bound() {
+	if account.IsManagedIPv6Bound() {
 		req.CollectLanes = 1
 		req.NodeSwitchRule = ManualHarvestNodeSwitchNever
 	}
 	if req.CollectLanes > 1 {
 		return s.executeParallelHarvest(ctx, req, account, emit)
 	}
-	pool := s.openAICodexTicketHarvestIPPoolEnabled(ctx) && !account.IsOpenAIIPv6Bound()
+	pool := s.openAICodexTicketHarvestIPPoolEnabled(ctx) && !account.IsManagedIPv6Bound()
 	proxy := ""
 	if pool {
 		if _, ok := s.pickHarvestIPPoolExit(ctx, nil); !ok {
@@ -140,7 +140,7 @@ func (s *OpenAIGatewayService) ExecuteManualHarvest(ctx context.Context, req Man
 			return fmt.Errorf("reload account: %w", err)
 		}
 		account = fresh
-		if account.IsOpenAIIPv6Bound() && !account.IsActive() {
+		if account.IsManagedIPv6Bound() && !account.IsActive() {
 			return errors.New("fixed IPv6 account is inactive; collection stopped")
 		}
 		s.markManualHarvestLiveModels(account, req.Models, got)
@@ -466,7 +466,7 @@ func (s *OpenAIGatewayService) acquireManualHarvestPoolExit(ctx context.Context,
 
 func (s *OpenAIGatewayService) acquireManualHarvestNode(ctx context.Context, account *Account, model, proxy, keepID string, tried map[string]bool, forceNew bool) (codexHarvestAttempt, error) {
 	fallback := codexHarvestAttempt{proxy: proxy, release: func() {}}
-	if account.IsOpenAIIPv6Bound() {
+	if account.IsManagedIPv6Bound() {
 		fixed, err := resolveOpenAIAccountProxyURL(ctx, s.proxyRepo, account)
 		fallback.proxy = fixed
 		return fallback, err

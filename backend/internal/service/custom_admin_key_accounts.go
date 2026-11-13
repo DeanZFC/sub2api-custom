@@ -400,6 +400,7 @@ func (s *adminServiceImpl) scopedAdminCreateTransaction(ctx context.Context, inp
 	if safe.ProxyID != nil && *safe.ProxyID == 0 {
 		safe.ProxyID = nil
 	}
+	safe.ProxyMode = ""
 	account, err := s.CreateAccount(txctx, &safe)
 	if err != nil {
 		return nil, err

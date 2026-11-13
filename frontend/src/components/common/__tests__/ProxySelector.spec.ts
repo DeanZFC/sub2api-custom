@@ -42,3 +42,24 @@ describe('ProxySelector', () => {
     wrapper.unmount()
   })
 })
+
+describe('managed IPv6 selection', () => {
+  const managed = [
+    ...proxies,
+    { id: 33, name: 'reserved', protocol: 'http', host: 'private', port: 8080, managed_ipv6: '2001:db8::33', managed_ipv6_state: 'reserved' },
+    { id: 44, name: 'other-owner', protocol: 'http', host: 'private', port: 8080, managed_ipv6: '2001:db8::44', managed_ipv6_state: 'bound' }
+  ] as Proxy[]
+
+  it('keeps an IPv6 exclusive when moving to and from a normal multi-proxy pool', async () => {
+    const wrapper = mount(ProxySelector, { props: { modelValue: [11, 22], multiple: true, proxies: managed }, global: { stubs: { Icon: true } } })
+    await wrapper.get('.select-trigger').trigger('click')
+    expect(wrapper.text()).not.toContain('other-owner')
+    await wrapper.findAll('.select-option').find(option => option.text().includes('reserved'))!.trigger('click')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([[33]])
+    await wrapper.setProps({ modelValue: [33] })
+    expect(wrapper.get('.select-value').text()).toContain('2001:db8::33')
+    await wrapper.findAll('.select-option').find(option => option.text().includes('Proxy A'))!.trigger('click')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([[11]])
+    wrapper.unmount()
+  })
+})

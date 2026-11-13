@@ -147,31 +147,33 @@ type ContentModerationConfig struct {
 	BaseURL  string                         `json:"base_url"`
 	Model    string                         `json:"model"`
 	// ProxyID 指定审计请求使用的代理服务器（IP管理-代理服务器），nil 表示直连。
-	ProxyID              *int64                       `json:"proxy_id,omitempty"`
-	APIKey               string                       `json:"api_key,omitempty"`
-	APIKeys              []string                     `json:"api_keys,omitempty"`
-	TimeoutMS            int                          `json:"timeout_ms"`
-	SampleRate           int                          `json:"sample_rate"`
-	AllGroups            bool                         `json:"all_groups"`
-	GroupIDs             []int64                      `json:"group_ids"`
-	UserWhitelistIDs     []int64                      `json:"user_whitelist_ids"`
-	RecordNonHits        bool                         `json:"record_non_hits"`
-	Thresholds           map[string]float64           `json:"thresholds"`
-	WorkerCount          int                          `json:"worker_count"`
-	QueueSize            int                          `json:"queue_size"`
-	BlockStatus          int                          `json:"block_status"`
-	BlockMessage         string                       `json:"block_message"`
-	EmailOnHit           bool                         `json:"email_on_hit"`
-	AutoBanEnabled       bool                         `json:"auto_ban_enabled"`
-	BanThreshold         int                          `json:"ban_threshold"`
-	ViolationWindowHours int                          `json:"violation_window_hours"`
-	RetryCount           int                          `json:"retry_count"`
-	HitRetentionDays     int                          `json:"hit_retention_days"`
-	NonHitRetentionDays  int                          `json:"non_hit_retention_days"`
-	PreHashCheckEnabled  bool                         `json:"pre_hash_check_enabled"`
-	BlockedKeywords      []string                     `json:"blocked_keywords"`
-	KeywordBlockingMode  string                       `json:"keyword_blocking_mode"`
-	ModelFilter          ContentModerationModelFilter `json:"model_filter"`
+	ProxyID              *int64                              `json:"proxy_id,omitempty"`
+	AutoAssignIPv6       bool                                `json:"auto_assign_ipv6"`
+	KeyIPv6              map[string]ContentModerationKeyIPv6 `json:"key_ipv6,omitempty"`
+	APIKey               string                              `json:"api_key,omitempty"`
+	APIKeys              []string                            `json:"api_keys,omitempty"`
+	TimeoutMS            int                                 `json:"timeout_ms"`
+	SampleRate           int                                 `json:"sample_rate"`
+	AllGroups            bool                                `json:"all_groups"`
+	GroupIDs             []int64                             `json:"group_ids"`
+	UserWhitelistIDs     []int64                             `json:"user_whitelist_ids"`
+	RecordNonHits        bool                                `json:"record_non_hits"`
+	Thresholds           map[string]float64                  `json:"thresholds"`
+	WorkerCount          int                                 `json:"worker_count"`
+	QueueSize            int                                 `json:"queue_size"`
+	BlockStatus          int                                 `json:"block_status"`
+	BlockMessage         string                              `json:"block_message"`
+	EmailOnHit           bool                                `json:"email_on_hit"`
+	AutoBanEnabled       bool                                `json:"auto_ban_enabled"`
+	BanThreshold         int                                 `json:"ban_threshold"`
+	ViolationWindowHours int                                 `json:"violation_window_hours"`
+	RetryCount           int                                 `json:"retry_count"`
+	HitRetentionDays     int                                 `json:"hit_retention_days"`
+	NonHitRetentionDays  int                                 `json:"non_hit_retention_days"`
+	PreHashCheckEnabled  bool                                `json:"pre_hash_check_enabled"`
+	BlockedKeywords      []string                            `json:"blocked_keywords"`
+	KeywordBlockingMode  string                              `json:"keyword_blocking_mode"`
+	ModelFilter          ContentModerationModelFilter        `json:"model_filter"`
 	// CyberPolicyExcludeFromBanCount 为 true 时，cyber_policy 命中不参与自动封号计数：
 	// 当次不判定封号，且历史 cyber 行在 CountFlaggedByUserSince 中被排除。
 	// 默认 false（计入，与历史行为一致；旧配置 JSON 无此字段时反序列化为 false）。
@@ -186,6 +188,7 @@ type ContentModerationConfigView struct {
 	BaseURL                        string                                  `json:"base_url"`
 	Model                          string                                  `json:"model"`
 	ProxyID                        *int64                                  `json:"proxy_id"`
+	AutoAssignIPv6                 bool                                    `json:"auto_assign_ipv6"`
 	APIKeyConfigured               bool                                    `json:"api_key_configured"`
 	APIKeyMasked                   string                                  `json:"api_key_masked"`
 	APIKeyCount                    int                                     `json:"api_key_count"`
@@ -230,6 +233,8 @@ type ContentModerationAPIKeyStatus struct {
 	LastHTTPStatus int        `json:"last_http_status"`
 	LastTested     bool       `json:"last_tested"`
 	Configured     bool       `json:"configured"`
+	ProxyID        *int64     `json:"proxy_id,omitempty"`
+	ManagedIPv6    string     `json:"managed_ipv6,omitempty"`
 }
 
 type ContentModerationAPIKeyLoad struct {
@@ -254,9 +259,10 @@ type TestContentModerationAPIKeysInput struct {
 	Model      string              `json:"model"`
 	TimeoutMS  int                 `json:"timeout_ms"`
 	// ProxyID nil 表示沿用已保存配置的代理；<=0 表示强制直连测试；>0 表示指定代理测试。
-	ProxyID *int64   `json:"proxy_id"`
-	Prompt  string   `json:"prompt"`
-	Images  []string `json:"images"`
+	ProxyID        *int64   `json:"proxy_id"`
+	AutoAssignIPv6 *bool    `json:"auto_assign_ipv6"`
+	Prompt         string   `json:"prompt"`
+	Images         []string `json:"images"`
 }
 
 type TestContentModerationAPIKeysResult struct {
@@ -284,6 +290,7 @@ type UpdateContentModerationConfigInput struct {
 	Model         *string                                       `json:"model"`
 	// ProxyID nil 表示不修改；<=0 表示清除代理（恢复直连）；>0 表示指定代理。
 	ProxyID                        *int64                        `json:"proxy_id"`
+	AutoAssignIPv6                 *bool                         `json:"auto_assign_ipv6"`
 	APIKey                         *string                       `json:"api_key"`
 	APIKeys                        *[]string                     `json:"api_keys"`
 	APIKeysMode                    string                        `json:"api_keys_mode"`
@@ -629,10 +636,15 @@ func (s *ContentModerationService) GetConfig(ctx context.Context) (*ContentModer
 }
 
 func (s *ContentModerationService) UpdateConfig(ctx context.Context, input UpdateContentModerationConfigInput) (*ContentModerationConfigView, error) {
-	cfg, err := s.loadConfig(ctx)
+	return s.updateConfig(ctx, input, nil)
+}
+
+func (s *ContentModerationService) updateConfig(ctx context.Context, input UpdateContentModerationConfigInput, requested map[string][]string) (*ContentModerationConfigView, error) {
+	cfg, previousRaw, err := s.loadConfigValue(ctx)
 	if err != nil {
 		return nil, err
 	}
+	previous := cloneContentModerationConfig(cfg)
 	if input.Engine != nil {
 		if !validModerationEngine(*input.Engine) {
 			return nil, infraerrors.BadRequest("INVALID_CONTENT_MODERATION_ENGINE", "内容审计引擎无效")
@@ -707,7 +719,7 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 	}
 	// Legacy flat updates target the selected engine; explicit profiles preserve both drafts.
 	if err := s.updateEngineProfile(ctx, cfg, cfg.Engine, UpdateContentModerationEngineInput{
-		BaseURL: input.BaseURL, Model: input.Model, ProxyID: input.ProxyID, APIKey: input.APIKey,
+		BaseURL: input.BaseURL, Model: input.Model, ProxyID: input.ProxyID, AutoAssignIPv6: input.AutoAssignIPv6, APIKey: input.APIKey,
 		APIKeys: input.APIKeys, APIKeysMode: input.APIKeysMode, DeleteAPIKeyHashes: input.DeleteAPIKeyHashes,
 		ClearAPIKey: input.ClearAPIKey, TimeoutMS: input.TimeoutMS, RetryCount: input.RetryCount, Thresholds: input.Thresholds,
 	}); err != nil {
@@ -722,6 +734,10 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 		return nil, err
 	}
 	cfg.normalize()
+	return s.saveConfigWithIPv6(ctx, previous, cfg, previousRaw, requested)
+}
+
+func (s *ContentModerationService) saveConfigLegacy(ctx context.Context, cfg *ContentModerationConfig) ([]byte, error) {
 	raw, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("marshal content moderation config: %w", err)
@@ -740,10 +756,7 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 	if err := saveErr; err != nil {
 		return nil, fmt.Errorf("save content moderation config: %w", err)
 	}
-	s.replaceRuntimeConfig(cfg, raw)
-	// 代理选择可能已变化，丢弃已解析的代理 URL 缓存，下次调用即时生效。
-	s.moderationProxyCache.Store(nil)
-	return s.engineConfigView(cfg), nil
+	return raw, nil
 }
 
 func (s *ContentModerationService) TestAPIKeys(ctx context.Context, input TestContentModerationAPIKeysInput) (*TestContentModerationAPIKeysResult, error) {
@@ -785,6 +798,9 @@ func (s *ContentModerationService) TestAPIKeys(ctx context.Context, input TestCo
 			cfg.ProxyID = nil
 		}
 	}
+	if input.AutoAssignIPv6 != nil {
+		cfg.AutoAssignIPv6 = *input.AutoAssignIPv6
+	}
 	cfg.normalize()
 	testInput, imageCount, err := buildModerationTestInput(input.Prompt, input.Images)
 	if err != nil {
@@ -795,7 +811,7 @@ func (s *ContentModerationService) TestAPIKeys(ctx context.Context, input TestCo
 		key, ok := s.nextUsableAPIKey(cfg)
 		if !ok {
 			return &TestContentModerationAPIKeysResult{
-				Items:      s.apiKeyStatuses(keys, cfg.Engine),
+				Items:      s.apiKeyStatusesWithIPv6(cfg, keys),
 				ImageCount: imageCount,
 			}, nil
 		}
@@ -822,6 +838,7 @@ func (s *ContentModerationService) TestAPIKeys(ctx context.Context, input TestCo
 		}
 		status := s.apiKeyStatusForHash(idx, keyHash, maskSecretTail(key), configured)
 		status.LastTested = true
+		attachModerationKeyIPv6(&status, cfg)
 		items = append(items, status)
 	}
 	return &TestContentModerationAPIKeysResult{Items: items, AuditResult: auditResult, ImageCount: imageCount}, nil
@@ -1492,7 +1509,7 @@ func (s *ContentModerationService) GetStatus(ctx context.Context) (*ContentModer
 		PreBlockAPIKeyAvailableCount: s.preBlockAPIKeyAvailableCount(cfg.apiKeys(), cfg.Engine),
 		PreBlockAPIKeyTotalCalls:     s.preBlockAPIKeyTotalCalls(cfg.apiKeys(), cfg.Engine),
 		PreBlockAPIKeyLoads:          s.preBlockAPIKeyLoads(cfg.apiKeys(), cfg.Engine),
-		APIKeyStatuses:               s.apiKeyStatuses(cfg.apiKeys(), cfg.Engine),
+		APIKeyStatuses:               s.apiKeyStatusesWithIPv6(cfg, cfg.apiKeys()),
 		FlaggedHashCount:             flaggedHashCount,
 		LastCleanupAt:                lastCleanupAt,
 		LastCleanupDeletedHit:        s.lastCleanupDeletedHit.Load(),
@@ -1538,14 +1555,20 @@ func (s *ContentModerationService) runCleanupOnce() {
 }
 
 func (s *ContentModerationService) loadConfig(ctx context.Context) (*ContentModerationConfig, error) {
+	cfg, _, err := s.loadConfigValue(ctx)
+	return cfg, err
+}
+
+func (s *ContentModerationService) loadConfigValue(ctx context.Context) (*ContentModerationConfig, string, error) {
 	raw, err := s.settingRepo.GetValue(ctx, SettingKeyContentModerationConfig)
 	if err != nil {
-		if errors.Is(err, ErrSettingNotFound) {
-			return parseContentModerationConfig("")
+		if !errors.Is(err, ErrSettingNotFound) {
+			return nil, "", fmt.Errorf("get content moderation config: %w", err)
 		}
-		return nil, fmt.Errorf("get content moderation config: %w", err)
+		raw = ""
 	}
-	return parseContentModerationConfig(raw)
+	cfg, err := parseContentModerationConfig(raw)
+	return cfg, raw, err
 }
 
 func parseContentModerationConfig(raw string) (*ContentModerationConfig, error) {
@@ -1729,8 +1752,12 @@ func (s *ContentModerationService) validateConfig(ctx context.Context, cfg *Cont
 		return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_BASE_URL", "审计 Base URL 无效")
 	}
 	if cfg.ProxyID != nil && s.proxyRepo != nil {
-		if _, err := s.proxyRepo.GetByID(ctx, *cfg.ProxyID); err != nil {
+		proxy, err := s.proxyRepo.GetByID(ctx, *cfg.ProxyID)
+		if err != nil {
 			return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_PROXY", fmt.Sprintf("代理服务器不存在: %d", *cfg.ProxyID))
+		}
+		if err := s.rejectSharedModerationIPv6(ctx, *cfg.ProxyID, proxy); err != nil {
+			return err
 		}
 	}
 	if cfg.BlockStatus < 400 || cfg.BlockStatus > 599 {
@@ -1828,7 +1855,7 @@ func (s *ContentModerationService) callModerationOnceWithInput(ctx context.Conte
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	client, err := s.moderationHTTPClient(ctx, cfg)
+	client, err := s.moderationHTTPClient(ctx, cfg, apiKey)
 	if err != nil {
 		return nil, err
 	}
@@ -1869,14 +1896,48 @@ const contentModerationProxyURLCacheTTL = time.Minute
 // moderationHTTPClient 返回本次审计调用应使用的 HTTP 客户端。
 // 未配置代理时沿用默认客户端；配置了代理时通过共享客户端池构建，
 // 代理解析/构建失败直接返回错误，绝不回退直连（避免 IP 关联风险）。
-func (s *ContentModerationService) moderationHTTPClient(ctx context.Context, cfg *ContentModerationConfig) (*http.Client, error) {
-	if cfg == nil || cfg.ProxyID == nil {
+func (s *ContentModerationService) moderationHTTPClient(ctx context.Context, cfg *ContentModerationConfig, apiKeys ...string) (*http.Client, error) {
+	var proxyID *int64
+	dedicated := false
+	if cfg != nil {
+		proxyID = cfg.ProxyID
+		if len(apiKeys) > 0 {
+			key := apiKeys[0]
+			if binding, ok := cfg.KeyIPv6[scopedModerationKeyHash(key, cfg.Engine)]; ok {
+				if binding.ProxyID <= 0 || binding.Address == "" {
+					return nil, errors.New("审计 Key IPv6 绑定无效")
+				}
+				checker, ok := s.proxyRepo.(interface {
+					CheckModerationIPv6Route(context.Context, string, int64) error
+				})
+				if !ok {
+					return nil, errors.New("审计 Key IPv6 绑定校验不可用")
+				}
+				if err := checker.CheckModerationIPv6Route(ctx, scopedModerationKeyHash(key, cfg.Engine), binding.ProxyID); err != nil {
+					return nil, err
+				}
+				proxyID, dedicated = &binding.ProxyID, true
+			} else if cfg.AutoAssignIPv6 {
+				configured := false
+				for _, stored := range cfg.apiKeys() {
+					if stored == key {
+						configured = true
+						break
+					}
+				}
+				if !configured {
+					return nil, errors.New("请先保存新增 Key 并完成 IPv6 分配，再测试")
+				}
+			}
+		}
+	}
+	if proxyID == nil {
 		if s.httpClient == nil {
 			return http.DefaultClient, nil
 		}
 		return s.httpClient, nil
 	}
-	proxyURL, err := s.resolveModerationProxyURL(ctx, *cfg.ProxyID)
+	proxyURL, err := s.resolveModerationProxyURL(ctx, *proxyID, dedicated)
 	if err != nil {
 		return nil, err
 	}
@@ -1887,10 +1948,11 @@ func (s *ContentModerationService) moderationHTTPClient(ctx context.Context, cfg
 	return client, nil
 }
 
-func (s *ContentModerationService) resolveModerationProxyURL(ctx context.Context, proxyID int64) (string, error) {
+func (s *ContentModerationService) resolveModerationProxyURL(ctx context.Context, proxyID int64, dedicatedFlags ...bool) (string, error) {
+	dedicated := len(dedicatedFlags) > 0 && dedicatedFlags[0]
 	now := time.Now()
 	prev := s.moderationProxyCache.Load()
-	if prev != nil && prev.proxyID == proxyID && now.Before(prev.expiresAt) {
+	if !dedicated && prev != nil && prev.proxyID == proxyID && now.Before(prev.expiresAt) {
 		return prev.url, nil
 	}
 	if s.proxyRepo == nil {
@@ -1900,7 +1962,15 @@ func (s *ContentModerationService) resolveModerationProxyURL(ctx context.Context
 	if err != nil {
 		return "", fmt.Errorf("resolve moderation proxy %d: %w", proxyID, err)
 	}
+	if !dedicated {
+		if err := s.rejectSharedModerationIPv6(ctx, proxyID, px); err != nil {
+			return "", err
+		}
+	}
 	if !px.IsActive() || px.IsExpired(now) {
+		if dedicated {
+			return "", errors.New("审计 Key 的 IPv6 代理不可用")
+		}
 		slog.Warn("content_moderation.proxy_not_active",
 			"proxy_id", proxyID,
 			"proxy_name", px.Name,
@@ -1915,11 +1985,13 @@ func (s *ContentModerationService) resolveModerationProxyURL(ctx context.Context
 			"proxy_name", px.Name,
 			"proxy_addr", fmt.Sprintf("%s://%s:%d", px.Protocol, px.Host, px.Port))
 	}
-	s.moderationProxyCache.Store(&moderationProxyURLCacheEntry{
-		proxyID:   proxyID,
-		url:       proxyURL,
-		expiresAt: now.Add(contentModerationProxyURLCacheTTL),
-	})
+	if !dedicated {
+		s.moderationProxyCache.Store(&moderationProxyURLCacheEntry{
+			proxyID:   proxyID,
+			url:       proxyURL,
+			expiresAt: now.Add(contentModerationProxyURLCacheTTL),
+		})
+	}
 	return proxyURL, nil
 }
 
@@ -2199,6 +2271,7 @@ func cloneContentModerationConfig(cfg *ContentModerationConfig) *ContentModerati
 		clone.TypeSafe = cfg.engineProfile(ContentModerationEngineTypeSafe)
 	}
 	clone.ProxyID = cloneInt64Ptr(cfg.ProxyID)
+	clone.KeyIPv6 = cloneModerationKeyIPv6(cfg.KeyIPv6)
 	clone.APIKeys = append([]string(nil), cfg.APIKeys...)
 	clone.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
 	clone.UserWhitelistIDs = append([]int64{}, cfg.UserWhitelistIDs...)
@@ -2512,11 +2585,12 @@ func (s *ContentModerationService) configView(cfg *ContentModerationConfig) *Con
 		BaseURL:                        cfg.BaseURL,
 		Model:                          cfg.Model,
 		ProxyID:                        cloneInt64Ptr(cfg.ProxyID),
+		AutoAssignIPv6:                 cfg.AutoAssignIPv6,
 		APIKeyConfigured:               len(keys) > 0,
 		APIKeyMasked:                   apiKeyMasked,
 		APIKeyCount:                    len(keys),
 		APIKeyMasks:                    masks,
-		APIKeyStatuses:                 s.apiKeyStatuses(keys, cfg.Engine),
+		APIKeyStatuses:                 s.apiKeyStatusesWithIPv6(cfg, keys),
 		TimeoutMS:                      cfg.TimeoutMS,
 		SampleRate:                     cfg.SampleRate,
 		AllGroups:                      cfg.AllGroups,

@@ -1451,6 +1451,9 @@ func (s *TokenRefreshService) ensureOpenAIPrivacy(ctx context.Context, account *
 	if shouldSkipOpenAIPrivacyEnsure(account.Extra) {
 		return
 	}
+	if err := rejectRetiredVMAccount(ctx, s.accountRepo, account); err != nil {
+		return
+	}
 
 	token, _ := account.Credentials["access_token"].(string)
 	if token == "" {
@@ -1464,7 +1467,7 @@ func (s *TokenRefreshService) ensureOpenAIPrivacy(ctx context.Context, account *
 		}
 	}
 
-	if account.IsOpenAIVMBound() {
+	if account.IsRetiredVMRoute() || account.IsManagedIPv6Bound() {
 		var err error
 		proxyURL, err = resolveOpenAIAccountProxyURL(ctx, s.proxyRepo, account)
 		if err != nil {

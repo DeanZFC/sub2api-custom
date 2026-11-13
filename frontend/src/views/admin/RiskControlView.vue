@@ -410,7 +410,7 @@
               </div>
               <div>
                 <label class="input-label">{{ t('admin.riskControl.engine') }}</label>
-                <Select data-test="audit-engine-select" :model-value="configForm.engine" :options="engineOptions" :disabled="apiKeyTesting || saving" @update:model-value="switchEngine" />
+                <Select data-test="audit-engine-select" :model-value="configForm.engine" :options="engineOptions" :disabled="apiKeyTesting || saving || !!allocatingIPv6Key" @update:model-value="switchEngine" />
               </div>
               <div v-if="configForm.engine === 'typesafe'" class="lg:col-span-2 text-sm text-amber-700 dark:text-amber-300" role="status">
                 {{ t('admin.riskControl.typeSafeNotice') }}
@@ -443,6 +443,16 @@
                 <ProxySelector v-model="configForm.proxy_id" :proxies="proxies" />
                 <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.proxyHint') }}</p>
               </div>
+              <div class="rounded-xl border border-gray-100 p-4 dark:border-dark-700" data-test="audit-ipv6-settings">
+                <label class="flex cursor-pointer items-start justify-between gap-4">
+                  <span class="min-w-0">
+                    <span class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.riskControl.autoAssignIPv6') }}</span>
+                    <span class="mt-1 block text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.autoAssignIPv6Hint') }}</span>
+                  </span>
+                  <input v-model="configForm.auto_assign_ipv6" data-test="audit-auto-ipv6" type="checkbox" class="mt-1 h-4 w-4 shrink-0 accent-primary-500" :disabled="saving || !!allocatingIPv6Key" />
+                </label>
+                <p v-if="configForm.auto_assign_ipv6" class="mt-2 text-xs leading-5 text-primary-700 dark:text-primary-300">{{ t('admin.riskControl.ipv6SaveBeforeTest') }}</p>
+              </div>
             </div>
 
             <div class="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800">
@@ -462,7 +472,7 @@
                   <button
                     type="button"
                     class="btn btn-secondary inline-flex items-center gap-2"
-                    :disabled="apiKeyTesting || inputApiKeyCount === 0 || configForm.clear_api_key"
+                    :disabled="apiKeyTesting || !!allocatingIPv6Key || inputApiKeyCount === 0 || configForm.clear_api_key || configForm.auto_assign_ipv6"
                     @click="testApiKeys(true)"
                   >
                     <Icon name="beaker" size="sm" :class="apiKeyTesting ? 'animate-pulse' : ''" />
@@ -471,7 +481,7 @@
                   <button
                     type="button"
                     class="btn btn-secondary inline-flex items-center gap-2"
-                    :disabled="apiKeyTesting || effectiveStoredApiKeyCount === 0 || pendingDeletedApiKeyCount > 0 || configForm.clear_api_key || configForm.api_keys_mode === 'replace'"
+                    :disabled="apiKeyTesting || !!allocatingIPv6Key || effectiveStoredApiKeyCount === 0 || pendingDeletedApiKeyCount > 0 || configForm.clear_api_key || configForm.api_keys_mode === 'replace'"
                     @click="testApiKeys(false)"
                   >
                     <Icon name="shield" size="sm" />
@@ -652,6 +662,21 @@
                               @click="toggleDeleteStoredApiKey(row)"
                             >
                               <Icon :name="isStoredApiKeyPendingDelete(row) ? 'refresh' : 'trash'" size="xs" />
+                            </button>
+                          </div>
+                        </div>
+                        <div v-if="row.configured" class="mt-2 border-t border-gray-100 pt-2 dark:border-dark-700" data-test="audit-key-ipv6">
+                          <div v-if="row.managed_ipv6" class="min-w-0">
+                            <span class="text-[11px] font-medium text-primary-700 dark:text-primary-300">{{ t('admin.riskControl.keyIPv6') }}</span>
+                            <code class="mt-0.5 block break-all text-xs text-gray-700 dark:text-gray-200">{{ row.managed_ipv6 }}</code>
+                          </div>
+                          <div v-else class="flex flex-wrap items-center justify-between gap-2">
+                            <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.keyIPv6Unassigned') }}</span>
+                            <button type="button" class="inline-flex items-center gap-1 rounded-md border border-primary-200 px-2.5 py-1.5 text-xs font-medium text-primary-700 transition-colors hover:bg-primary-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-primary-800 dark:text-primary-300 dark:hover:bg-primary-900/20"
+                              :data-allocate-ipv6="row.key_hash" :disabled="saving || apiKeyTesting || !!allocatingIPv6Key || configForm.clear_api_key || configForm.api_keys_mode === 'replace' || isStoredApiKeyPendingDelete(row)"
+                              @click="allocateKeyIPv6(row)">
+                              <Icon :name="allocatingIPv6Key === row.key_hash ? 'refresh' : 'plus'" size="xs" :class="allocatingIPv6Key === row.key_hash ? 'animate-spin' : ''" />
+                              {{ t(allocatingIPv6Key === row.key_hash ? 'admin.riskControl.allocatingIPv6' : 'admin.riskControl.allocateIPv6') }}
                             </button>
                           </div>
                         </div>
@@ -1078,7 +1103,7 @@
         <template #footer>
           <div class="flex justify-end gap-2">
             <button type="button" class="btn btn-secondary" @click="settingsOpen = false">{{ t('common.cancel') }}</button>
-            <button type="button" class="btn btn-primary inline-flex items-center gap-2" :disabled="saving" @click="saveConfig">
+            <button type="button" class="btn btn-primary inline-flex items-center gap-2" :disabled="saving || !!allocatingIPv6Key" @click="saveConfig">
               <Icon v-if="saving" name="refresh" size="sm" class="animate-spin" />
               <Icon v-else name="check" size="sm" />
               {{ saving ? t('common.saving') : t('admin.riskControl.saveConfig') }}
@@ -1152,6 +1177,7 @@
         </template>
       </BaseDialog>
     </div>
+    <TotpStepUpDialog :controller="ipv6StepUp" />
   </AppLayout>
 </template>
 
@@ -1185,6 +1211,9 @@ import type {
 } from '@/api/admin/riskControl'
 import type { AdminGroup, Proxy, SelectOption } from '@/types'
 import { useAppStore } from '@/stores/app'
+import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
+import { useStepUp, isStepUpCancelled, StepUpCancelledError } from '@/composables/useStepUp'
+import { isManagedIPv6Proxy } from '@/utils/accountProxySelection'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime as formatDateTimeValue } from '@/utils/format'
 
@@ -1244,6 +1273,10 @@ const saving = ref(false)
 const logsLoading = ref(false)
 const statusLoading = ref(false)
 const apiKeyTesting = ref(false)
+const ipv6StepUp = useStepUp()
+let ipv6Disposed = false
+const allocatingIPv6Key = ref<string | null>(null)
+let ipv6BindingRevision = 0
 const hashActionLoading = ref(false)
 const unbanningUserID = ref<number | null>(null)
 const settingsOpen = ref(false)
@@ -1273,6 +1306,7 @@ const configForm = reactive({
   base_url: 'https://api.openai.com',
   model: 'omni-moderation-latest',
   proxy_id: null as number | null,
+  auto_assign_ipv6: false,
   api_keys_text: '',
   api_key_configured: false,
   api_key_masked: '',
@@ -1307,7 +1341,7 @@ const configForm = reactive({
   model_filter_models: [] as string[],
 })
 
-const engineFields = ['base_url', 'model', 'proxy_id', 'api_keys_text', 'api_key_configured', 'api_key_masked', 'api_key_count', 'api_key_masks', 'api_key_statuses', 'api_keys_mode', 'clear_api_key', 'timeout_ms', 'retry_count', 'thresholds'] as const
+const engineFields = ['base_url', 'model', 'proxy_id', 'auto_assign_ipv6', 'api_keys_text', 'api_key_configured', 'api_key_masked', 'api_key_count', 'api_key_masks', 'api_key_statuses', 'api_keys_mode', 'clear_api_key', 'timeout_ms', 'retry_count', 'thresholds'] as const
 type EngineDraft = Pick<typeof configForm, typeof engineFields[number]> & { pendingDeletes: string[] }
 const engineDrafts = ref<Partial<Record<ModerationEngine, EngineDraft>>>({})
 
@@ -1316,7 +1350,7 @@ function captureEngineDraft(): EngineDraft {
 }
 
 function switchEngine(value: string | number | boolean | null) {
-  if ((value !== 'openai' && value !== 'typesafe') || apiKeyTesting.value || saving.value) return
+  if ((value !== 'openai' && value !== 'typesafe') || apiKeyTesting.value || saving.value || allocatingIPv6Key.value) return
   engineDrafts.value[configForm.engine] = captureEngineDraft()
   configForm.engine = value
   const draft = engineDrafts.value[value]
@@ -1333,6 +1367,7 @@ function engineDraftFromConfig(config: ContentModerationConfig | undefined, engi
   return {
     base_url: config?.base_url || (engine === 'typesafe' ? 'https://api.typesafe.ai' : 'https://api.openai.com'),
     model: config?.model || (engine === 'typesafe' ? 'jev-latest' : 'omni-moderation-latest'),
+    auto_assign_ipv6: config?.auto_assign_ipv6 ?? false,
     proxy_id: config?.proxy_id ?? null, api_keys_text: '', api_key_configured: config?.api_key_configured ?? false,
     api_key_masked: config?.api_key_masked ?? '', api_key_count: config?.api_key_count ?? 0,
     api_key_masks: [...(config?.api_key_masks ?? [])], api_key_statuses: [...(config?.api_key_statuses ?? [])],
@@ -1347,6 +1382,7 @@ function engineDraftPayload(draft: EngineDraft): UpdateModerationEngineConfig {
   if (!draft.clear_api_key && draft.api_keys_mode === 'replace' && keys.length === 0) throw new Error('empty replacement keys')
   return {
     base_url: draft.base_url, model: draft.model, proxy_id: draft.proxy_id ?? 0,
+    auto_assign_ipv6: draft.auto_assign_ipv6,
     timeout_ms: draft.timeout_ms, retry_count: draft.retry_count,
     thresholds: Object.fromEntries(riskThresholdCategories.map(k => [k, clampPercent(draft.thresholds[k]) / 100])),
     clear_api_key: draft.clear_api_key, api_keys: keys.length ? keys : undefined,
@@ -1856,7 +1892,7 @@ async function loadAll() {
     applyConfig(config)
     groups.value = groupItems
     status.value = runtimeStatus
-    proxies.value = proxyItems
+    proxies.value = proxyItems.filter(proxy => !isManagedIPv6Proxy(proxy) && !proxy.managed_ipv6_state)
     if ((runtimeStatus.engine ?? 'openai') === configForm.engine && Array.isArray(runtimeStatus.api_key_statuses)) {
       configForm.api_key_statuses = [...runtimeStatus.api_key_statuses]
       prunePendingDeleteAPIKeyHashes()
@@ -1870,9 +1906,11 @@ async function loadAll() {
 }
 
 async function loadStatus(silent = true) {
+  const bindingRevision = ipv6BindingRevision
   statusLoading.value = true
   try {
     const runtimeStatus = await adminAPI.riskControl.getStatus()
+    if (allocatingIPv6Key.value || bindingRevision !== ipv6BindingRevision) return
     status.value = runtimeStatus
     if ((runtimeStatus.engine ?? 'openai') === configForm.engine && Array.isArray(runtimeStatus.api_key_statuses)) {
       configForm.api_key_statuses = [...runtimeStatus.api_key_statuses]
@@ -1888,6 +1926,7 @@ async function loadStatus(silent = true) {
 }
 
 async function saveConfig() {
+  if (saving.value || allocatingIPv6Key.value) return
   saving.value = true
   try {
     const modelFilterPayload = buildModelFilterPayload()
@@ -2092,6 +2131,7 @@ function setModelFilterType(type: ContentModerationModelFilterType) {
 }
 
 async function testApiKeys(useInputKeys: boolean) {
+  if (allocatingIPv6Key.value || (useInputKeys && configForm.auto_assign_ipv6)) return
   const keys = useInputKeys ? parseApiKeys(configForm.api_keys_text) : []
   if (useInputKeys && keys.length === 0) {
     appStore.showError(t('admin.riskControl.apiKeyTestNoInput'))
@@ -2103,6 +2143,7 @@ async function testApiKeys(useInputKeys: boolean) {
       engine: configForm.engine,
       thresholds: buildRiskThresholdPayload(),
       api_keys: keys,
+      auto_assign_ipv6: configForm.auto_assign_ipv6,
       base_url: configForm.base_url,
       model: configForm.model,
       timeout_ms: Number(configForm.timeout_ms) || 3000,
@@ -2138,6 +2179,41 @@ function mergeConfiguredAPIKeyStatuses(items: ContentModerationAPIKeyStatus[]) {
   }
   const updates = new Map(items.map((item) => [item.key_hash, item]))
   configForm.api_key_statuses = configForm.api_key_statuses.map((item) => updates.get(item.key_hash) ?? item)
+}
+
+async function allocateKeyIPv6(row: ContentModerationAPIKeyStatus) {
+  if (!row.configured || row.managed_ipv6 || allocatingIPv6Key.value || saving.value || apiKeyTesting.value || configForm.clear_api_key || configForm.api_keys_mode === 'replace' || isStoredApiKeyPendingDelete(row)) return
+  const engine = configForm.engine
+  ipv6BindingRevision++
+  allocatingIPv6Key.value = row.key_hash
+  try {
+    const updated = await ipv6StepUp.run(() => {
+      if (ipv6Disposed || configForm.engine !== engine) throw new StepUpCancelledError()
+      return adminAPI.riskControl.allocateAPIKeyIPv6(engine, row.key_hash)
+    })
+    const profile = updated.engine_configs?.[engine] ?? (updated.engine === engine || (!updated.engine && engine === 'openai') ? updated : undefined)
+    if (!profile) throw new Error('Missing moderation engine configuration')
+    // Preserve unsaved form fields; this button saves only the selected binding.
+    configForm.api_key_statuses = [...profile.api_key_statuses]
+    if (engineDrafts.value[engine]) engineDrafts.value[engine]!.api_key_statuses = [...profile.api_key_statuses]
+    if (status.value && (status.value.engine ?? 'openai') === engine) status.value.api_key_statuses = [...profile.api_key_statuses]
+    appStore.showSuccess(t('admin.riskControl.ipv6Assigned'))
+  } catch (err: unknown) {
+    if (isStepUpCancelled(err) || ipv6Disposed) return
+    appStore.showError(extractApiErrorMessage(err, t('admin.riskControl.ipv6AllocationFailed')))
+    // A timeout may happen after commit. Refresh bindings before allowing retry.
+    try {
+      const latest = await adminAPI.riskControl.getConfig()
+      const profile = latest.engine_configs?.[engine] ?? ((latest.engine ?? 'openai') === engine ? latest : undefined)
+      if (!profile) return
+      configForm.api_key_statuses = [...profile.api_key_statuses]
+      if (engineDrafts.value[engine]) engineDrafts.value[engine]!.api_key_statuses = [...profile.api_key_statuses]
+      if (status.value && (status.value.engine ?? 'openai') === engine) status.value.api_key_statuses = [...profile.api_key_statuses]
+    } catch { /* Keep the existing rows; repeated allocation is idempotent. */ }
+  } finally {
+    ipv6BindingRevision++
+    allocatingIPv6Key.value = null
+  }
 }
 
 function toggleDeleteStoredApiKey(row: ContentModerationAPIKeyStatus) {
@@ -2477,6 +2553,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  ipv6Disposed = true
+  ipv6StepUp.onCancel()
   if (statusTimer !== null) {
     window.clearInterval(statusTimer)
     statusTimer = null

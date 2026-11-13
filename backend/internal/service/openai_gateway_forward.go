@@ -45,20 +45,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if c != nil && c.GetBool(bpsAccountProbeRequiredContextKey) && (!bpsGloballyEnabled || !account.IsExcelBPSEnabledForModel(gjson.GetBytes(body, "model").String()) || gjson.GetBytes(body, `tools.#(type=="image_generation")`).Exists()) {
 		return nil, errors.New("bps probe path is unavailable")
 	}
+	if err := rejectRetiredVMAccount(ctx, s.accountRepo, account); err != nil {
+		return nil, err
+	}
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
-	if s.openaiVM != nil {
-		bound, err := s.openaiVM.RouteBound(ctx, account)
-		if err != nil {
-			return nil, err
-		}
-		if bound {
-			if c != nil && c.GetBool(bpsAccountProbeRequiredContextKey) {
-				return nil, errors.New("BPS diagnostic is unavailable for VM-bound accounts")
-			}
-			return s.forwardOpenAIVMResponses(ctx, c, account, body)
-		}
-	}
+
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
 	}

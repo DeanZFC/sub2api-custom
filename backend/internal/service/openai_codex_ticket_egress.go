@@ -274,7 +274,7 @@ func (s *OpenAIGatewayService) pinCodexTicketEgressFromHeader(ctx context.Contex
 	if ticket == nil {
 		return proxyURL, noop, nil
 	}
-	if account.IsOpenAIIPv6Bound() {
+	if account.IsManagedIPv6Bound() {
 		if ticket.HarvestProxyURL != proxyURL || ticket.HarvestNodeID != "" || ticket.HarvestNodeName != "" {
 			return "", noop, ErrOpenAICodexTicketUnavailable
 		}
@@ -299,7 +299,7 @@ func (s *OpenAIGatewayService) pinStoredCodexTicketEgress(ctx context.Context, t
 		if !codexTicketMatchesIPv6Route(a, ticket) {
 			return "", noop, ErrOpenAICodexTicketUnavailable
 		}
-		if a.IsOpenAIIPv6Bound() {
+		if a.IsManagedIPv6Bound() {
 			fixed, err := resolveOpenAIAccountProxyURL(ctx, s.proxyRepo, a)
 			if err != nil {
 				return "", noop, err

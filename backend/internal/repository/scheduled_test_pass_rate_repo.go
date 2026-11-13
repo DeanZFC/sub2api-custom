@@ -148,7 +148,7 @@ func recordScheduledTestPassRate(ctx context.Context, tx *sql.Tx, state *protect
 		// Only an explicit administrator correction of this exact visual result
 		// may reverse its recorded verdict. Successful execution retries retain
 		// the existing conservative, one-observation-per-round behavior.
-		if state.rule.UsesAutoReview() && state.evidenceSource == "administrator" {
+		if (result.OutputKind == "html" || state.rule.UsesAutoReview()) && state.evidenceSource == "administrator" {
 			changed, err := tx.ExecContext(ctx, `UPDATE scheduled_test_pass_rate_evidence SET verdict=$8
  WHERE plan_id=$1 AND account_id=$2 AND test_definition_id=$3 AND model_key=$4 AND rule_version=$5 AND run_key=$6 AND result_id=$7 AND verdict<>$8`, state.planID, state.accountID, state.definitionID, result.ModelID, version, run, state.resultID, verdict)
 			if err != nil {

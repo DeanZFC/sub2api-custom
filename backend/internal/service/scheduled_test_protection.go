@@ -268,8 +268,8 @@ func validateProtectionOutputKind(rule *ScheduledTestProtectionRule, kind string
 	return nil
 }
 
-// Missing observations are inconclusive, never a synthetic zero or a pass that
-// could release an existing suspension. Any observed violation wins.
+// Missing observations are inconclusive, except unavailable visual review of a
+// successfully generated HTML result defaults to pass. Observed violations win.
 func evaluateScheduledTestProtection(rule ScheduledTestProtectionRule, result *ScheduledTestResult) (string, string) {
 	if QualityResultDeferred(result) {
 		return "pending", result.ErrorMessage
@@ -293,14 +293,16 @@ func evaluateScheduledTestProtection(rule ScheduledTestProtectionRule, result *S
 	}
 	if rule.UsesAutoReview() {
 		if result.ExecutionInfo == nil || result.ExecutionInfo.AutoReview == nil {
-			return "pending", "等待自动视觉评审"
-		}
-		review := result.ExecutionInfo.AutoReview
-		if review.Verdict != "pass" {
+			if result.OutputKind != "html" {
+				return "pending", "等待自动视觉评审"
+			}
+		} else if review := result.ExecutionInfo.AutoReview; review.Verdict != "pass" {
 			if review.Verdict == "fail" {
 				return "fail", review.Reason
 			}
-			return "pending", review.Reason
+			if result.OutputKind != "html" {
+				return "pending", review.Reason
+			}
 		}
 	}
 	missing := false

@@ -70,7 +70,7 @@ func groupSmartWSIdentity(ctx context.Context) (int64, string) {
 
 func (s *OpenAIGatewayService) tryGroupSmartWS(request *http.Request, proxyURL string, account *Account) (*http.Response, bool, error) {
 	if s == nil || s.settingService == nil || request == nil || account == nil ||
-		account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth || account.IsOpenAIVMBound() ||
+		account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth || account.IsRetiredVMRoute() ||
 		account.IsOpenAIWSForceHTTPEnabled() ||
 		!account.IsOpenAIResponsesWebSocketV2Enabled() {
 		return nil, false, nil

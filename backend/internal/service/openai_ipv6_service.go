@@ -37,7 +37,7 @@ type ipv6Config struct{ control, proxy, token string }
 func loadIPv6Config() (ipv6Config, error) {
 	var c ipv6Config
 	var err error
-	c.control, err = validateOpenAIVMEndpoint(os.Getenv("OPENAI_IPV6_EGRESS_CONTROL_URL"))
+	c.control, err = validateManagedEgressEndpoint(os.Getenv("OPENAI_IPV6_EGRESS_CONTROL_URL"))
 	if err != nil {
 		return c, errors.New("IPv6 control endpoint is missing or invalid")
 	}
@@ -45,7 +45,7 @@ func loadIPv6Config() (ipv6Config, error) {
 	if !strings.Contains(raw, "://") {
 		raw = "http://" + raw
 	}
-	c.proxy, err = validateOpenAIVMEndpoint(raw)
+	c.proxy, err = validateManagedEgressEndpoint(raw)
 	if err != nil {
 		return c, errors.New("IPv6 proxy endpoint is missing or invalid")
 	}
@@ -60,7 +60,7 @@ func loadIPv6Config() (ipv6Config, error) {
 	return c, nil
 }
 func ipv6Eligible(a *Account) bool {
-	return a != nil && a.IsOpenAIOAuth() && !a.IsShadow() && !a.IsOpenAIAgentIdentity() && !a.IsOpenAIVMBound() && !a.IsExcelBPSEnabled()
+	return a != nil && a.IsOpenAIOAuth() && !a.IsShadow() && !a.IsOpenAIAgentIdentity() && !a.IsRetiredVMRoute() && !a.IsExcelBPSEnabled() && !a.IsOVHIPv6Bound()
 }
 
 type OpenAIIPv6Status struct {
@@ -74,7 +74,7 @@ func (s *OpenAIIPv6Service) Status(ctx context.Context, id int64) (*OpenAIIPv6St
 	if err != nil {
 		return nil, err
 	}
-	b, err := s.repo.GetBinding(ctx, openAIVMOwnerID(a))
+	b, err := s.repo.GetBinding(ctx, managedAccountOwnerID(a))
 	if err != nil {
 		return nil, err
 	}
@@ -274,16 +274,19 @@ func (s *OpenAIIPv6Service) refresh(ctx context.Context, id int64) {
 	}
 }
 func validateOpenAIIPv6Proxy(a *Account, p *Proxy) error {
-	if !a.IsOpenAIIPv6Bound() {
+	if !a.IsManagedIPv6Bound() {
 		return nil
 	}
-	if p == nil || a.ProxyID == nil || p.ID != *a.ProxyID || !strings.HasPrefix(p.Username, "v6-sub2-") || len(p.Password) < 32 || !p.IsActive() || p.IsExpired(time.Now()) || p.FallbackMode != FallbackModeNone {
+	if p == nil || a.ProxyID == nil || p.ID != *a.ProxyID || !p.IsManagedIPv6() || len(p.Password) < 32 || !p.IsActive() || p.IsExpired(time.Now()) || p.FallbackMode != FallbackModeNone || p.BackupProxyID != nil {
 		return errors.New("fixed IPv6 proxy unavailable; fallback is disabled")
+	}
+	if a.IsOpenAIIPv6Bound() && !strings.HasPrefix(p.Username, "v6-sub2-") || a.IsOVHIPv6Bound() && !p.IsOVHIPv6() {
+		return errors.New("fixed IPv6 provider changed; refresh the account route")
 	}
 	return nil
 }
 func validateOpenAIIPv6Route(a *Account, route string) error {
-	if !a.IsOpenAIIPv6Bound() {
+	if !a.IsManagedIPv6Bound() {
 		return nil
 	}
 	if err := validateOpenAIIPv6Proxy(a, a.Proxy); err != nil {
@@ -301,7 +304,15 @@ func (s *OpenAIIPv6Service) CheckRoute(ctx context.Context, a *Account, route st
 	if s == nil || a == nil || a.Platform != PlatformOpenAI {
 		return nil
 	}
-	b, err := s.repo.GetBinding(ctx, openAIVMOwnerID(a))
+	if check, ok := s.proxies.(ovhIPv6RouteChecker); ok {
+		if err := check.CheckOVHIPv6Route(ctx, a); err != nil {
+			return err
+		}
+	}
+	if err := validateOpenAIIPv6Route(a, route); err != nil {
+		return err
+	}
+	b, err := s.repo.GetBinding(ctx, managedAccountOwnerID(a))
 	if err != nil {
 		return err
 	}

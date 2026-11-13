@@ -468,7 +468,7 @@ func (s *OpenAIGatewayService) refreshHarvestIPPool(ctx context.Context) {
 	}
 	exits := make([]harvestIPPoolExit, 0, len(proxies))
 	for i := range proxies {
-		if proxies[i].IsExpired(now) || strings.HasPrefix(proxies[i].Username, "v6-sub2-") {
+		if proxies[i].IsExpired(now) || proxies[i].IsManagedIPv6() {
 			continue
 		}
 		exits = append(exits, harvestIPPoolExit{url: proxies[i].URL(), name: strings.TrimSpace(proxies[i].Name)})
@@ -1399,7 +1399,7 @@ func IsMaskedProxyURL(raw string) bool {
 // Credential shadows do not own tickets. Keep their existing forwarding policy
 // instead of imposing a gate for a key the harvester never populates.
 func isOpenAICodexTicketAccount(account *Account, upstreamModels ...string) bool {
-	if account == nil || !account.IsOpenAIOAuthLike() || account.IsShadow() || account.IsOpenAIVMBound() ||
+	if account == nil || !account.IsOpenAIOAuthLike() || account.IsShadow() || account.IsRetiredVMRoute() ||
 		account.IsOpenAIPersonalAccessToken() || account.IsOpenAIAgentIdentity() || account.IsExcelOAuth() || account.isExcelBPSAllModelsEnabled() {
 		return false
 	}
@@ -1433,7 +1433,7 @@ func IsOpenAICodexTicketHarvestAccount(account *Account, bpsEnabled ...bool) boo
 }
 
 func isNativeOpenAICodexTicketAccount(account *Account) bool {
-	return account != nil && account.IsOpenAIOAuthLike() && !account.IsShadow() && !account.IsOpenAIVMBound() && !account.IsOpenAIPersonalAccessToken() && !account.IsOpenAIAgentIdentity() && !account.IsExcelOAuth()
+	return account != nil && account.IsOpenAIOAuthLike() && !account.IsShadow() && !account.IsRetiredVMRoute() && !account.IsOpenAIPersonalAccessToken() && !account.IsOpenAIAgentIdentity() && !account.IsExcelOAuth()
 }
 
 func (s *OpenAIGatewayService) isOpenAICodexTicketAccount(ctx context.Context, account *Account, models ...string) bool {
@@ -1447,9 +1447,9 @@ func codexTicketMatchesIPv6Route(a *Account, ticket *openAICodexTicket) bool {
 	if ticket == nil {
 		return true
 	}
-	if a.IsOpenAIIPv6Bound() {
+	if a.IsManagedIPv6Bound() {
 		return validateOpenAIIPv6Proxy(a, a.Proxy) == nil && ticket.HarvestProxyURL == a.Proxy.URL() && ticket.HarvestNodeID == "" && ticket.HarvestNodeName == ""
 	}
 	u, err := url.Parse(ticket.HarvestProxyURL)
-	return err == nil && (u.User == nil || !strings.HasPrefix(u.User.Username(), "v6-sub2-"))
+	return err == nil && (u.User == nil || (!strings.HasPrefix(u.User.Username(), "v6-sub2-") && !strings.HasPrefix(u.User.Username(), "ovh6_")))
 }

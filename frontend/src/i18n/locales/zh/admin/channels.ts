@@ -243,6 +243,15 @@ export default {
     },
 
     riskControl: {
+      autoAssignIPv6: '新增 Key 自动分配 OVH IPv6',
+      autoAssignIPv6Hint: '保存新增 Key 时，每个 Key 领取一个独立地址。已有 Key 可在下方单独分配；关闭此项会保留已分配地址。',
+      ipv6SaveBeforeTest: '新增 Key 请先保存并完成分配，再测试已保存 Key。',
+      keyIPv6: '独立 OVH IPv6',
+      keyIPv6Unassigned: '未分配独立 IPv6',
+      allocateIPv6: '分配 IPv6',
+      allocatingIPv6: '分配中…',
+      ipv6Assigned: '已分配独立 IPv6，立即生效',
+      ipv6AllocationFailed: '分配结果未确认，请刷新 Key 状态后重试',
       engine: '审计引擎',
       activeEngine: '当前生效引擎：{engine}',
       engineUnavailable: '当前引擎没有可用 Key，API 审计不可用；失败请求按现有策略放行。',

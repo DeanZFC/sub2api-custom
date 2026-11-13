@@ -16,6 +16,7 @@ const {
   searchUsers,
   getUser,
   testAPIKeys,
+  allocateAPIKeyIPv6,
   showError,
   showSuccess,
 } = vi.hoisted(() => ({
@@ -28,6 +29,7 @@ const {
   searchUsers: vi.fn(),
   getUser: vi.fn(),
   testAPIKeys: vi.fn(),
+  allocateAPIKeyIPv6: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
 }))
@@ -40,6 +42,7 @@ vi.mock('@/api/admin', () => ({
       getStatus,
       listLogs,
       testAPIKeys,
+      allocateAPIKeyIPv6,
       deleteFlaggedHash: vi.fn(),
       clearFlaggedHashes: vi.fn(),
       unbanUser: vi.fn(),
@@ -212,6 +215,7 @@ describe('admin RiskControlView', () => {
     showError.mockReset()
     showSuccess.mockReset()
     testAPIKeys.mockReset()
+    allocateAPIKeyIPv6.mockReset()
 
     getConfig.mockResolvedValue(baseConfig())
     getStatus.mockResolvedValue(runtimeStatus())
@@ -232,6 +236,39 @@ describe('admin RiskControlView', () => {
     }))
   })
 
+
+  it('assigns a saved key IPv6 without saving or replacing unsaved settings', async () => {
+    const row: ContentModerationAPIKeyStatus = { index: 1, key_hash: 'key-hash', masked: 'masked-key', status: 'unknown', failure_count: 0, success_count: 0, last_error: '', last_latency_ms: 0, last_http_status: 0, last_tested: false, configured: true }
+    getConfig.mockResolvedValue({ ...baseConfig(), api_key_configured: true, api_key_count: 1, api_key_statuses: [row] })
+    getStatus.mockResolvedValue({ ...runtimeStatus(), api_key_statuses: [row] })
+    allocateAPIKeyIPv6.mockResolvedValue({ ...baseConfig(), api_key_statuses: [{ ...row, managed_ipv6: '2001:db8::123' }] })
+    const wrapper = mount(RiskControlView, { global: { stubs: { AppLayout: AppLayoutStub, BaseDialog: BaseDialogStub, Icon: true, Select: true, Toggle: true, Pagination: true, ModelWhitelistSelector: ModelWhitelistSelectorStub, ProxySelector: true } } })
+    await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await wrapper.get('[data-test="audit-base-url"]').setValue('https://unsaved.example')
+    await wrapper.get('[data-allocate-ipv6="key-hash"]').trigger('click')
+    await flushPromises()
+    expect(allocateAPIKeyIPv6).toHaveBeenCalledWith('openai', 'key-hash')
+    expect(wrapper.get('[data-test="audit-key-ipv6"]').text()).toContain('2001:db8::123')
+    expect((wrapper.get('[data-test="audit-base-url"]').element as HTMLInputElement).value).toBe('https://unsaved.example')
+    expect(updateConfig).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-allocate-ipv6="key-hash"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('saves new-key IPv6 allocation per engine and blocks premature input-key tests', async () => {
+    const wrapper = mount(RiskControlView, { global: { stubs: { AppLayout: AppLayoutStub, BaseDialog: BaseDialogStub, Icon: true, Select: true, Toggle: true, Pagination: true, ModelWhitelistSelector: ModelWhitelistSelectorStub, ProxySelector: true } } })
+    await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await wrapper.get('[data-test="audit-auto-ipv6"]').setValue(true)
+    await wrapper.get('textarea[autocomplete="new-password"]').setValue('new-key')
+    expect(findButtonByText(wrapper, 'admin.riskControl.testInputApiKeys').attributes('disabled')).toBeDefined()
+    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
+    await flushPromises()
+    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({ engine_configs: { openai: expect.objectContaining({ auto_assign_ipv6: true }), typesafe: expect.objectContaining({ auto_assign_ipv6: false }) } }))
+    expect(testAPIKeys).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
   it.each(['openai', 'typesafe'] as const)('shows the selected draft engine keys while %s remains active', async (activeEngine) => {
     const openaiKey: ContentModerationAPIKeyStatus = {
       index: 1, key_hash: 'openai-hash', masked: '********oa01', status: 'frozen',

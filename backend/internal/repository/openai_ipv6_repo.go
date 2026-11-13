@@ -89,7 +89,7 @@ func (r *openAIIPv6Repository) Reserve(ctx context.Context, id int64, leaseID, c
 	var platform, kind, status string
 	var vm bool
 	var parent, original, fallback *int64
-	err = tx.QueryRowContext(ctx, `SELECT platform,type,status,COALESCE((extra->>'openai_vm_bound')::boolean,false),parent_account_id,proxy_id,proxy_fallback_origin_id FROM accounts WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, id).Scan(&platform, &kind, &status, &vm, &parent, &original, &fallback)
+	err = tx.QueryRowContext(ctx, `SELECT platform,type,status,(COALESCE(extra->>'openai_vm_bound','false')='true' OR COALESCE(extra->>'openai_vm_retired','false')='true' OR COALESCE(extra->>'ovh_ipv6_bound','false')='true'),parent_account_id,proxy_id,proxy_fallback_origin_id FROM accounts WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, id).Scan(&platform, &kind, &status, &vm, &parent, &original, &fallback)
 	if err != nil {
 		return nil, err
 	}

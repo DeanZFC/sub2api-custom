@@ -33,7 +33,7 @@ describe('Pelican automatic review status', () => {
     expect(wrapper.get('[data-auto-review-judge-not-called]').text()).toContain('no judge review requests were used')
     expect(wrapper.get('[data-auto-review-render-attempts]').text()).toBe('This round completed 3 capture attempts.')
     expect(wrapper.get('[data-auto-review-render-complete]').text()).toContain('have ended')
-    expect(wrapper.get('[data-auto-review-pending]').text()).toContain('do not enter the capability pass rate')
+    expect(wrapper.get('[data-auto-review-pending]').text()).toContain('defaults to pass and enters the capability pass rate')
     expect(wrapper.find('.animate-spin').exists()).toBe(false)
     expect(wrapper.get('iframe').attributes('srcdoc')).toContain('<circle')
     expect(wrapper.get('iframe').attributes('sandbox')).toBe('allow-scripts')

@@ -726,10 +726,13 @@
           />
         </div>
         <div id="bulk-edit-proxy-body" :class="!enableProxy && 'pointer-events-none opacity-50'">
+          <AccountProxyModeSelect v-model="proxyMode" :disabled="!enableProxy" />
+          <p v-if="proxyMode === 'ovh_ipv6'" class="input-hint">{{ t('ovhIPv6.batchHint') }} {{ t('ovhIPv6.drainHint') }}</p>
           <ProxySelector
+            v-if="!proxyMode"
             v-model="proxyIds"
             multiple
-            :proxies="proxies"
+            :proxies="proxies.filter(proxy => !isManagedIPv6Proxy(proxy))"
             aria-labelledby="bulk-edit-proxy-label"
           />
         </div>
@@ -1535,6 +1538,9 @@ import type {
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
+import AccountProxyModeSelect from '@/components/common/AccountProxyModeSelect.vue'
+import { accountProxyPayload, isManagedIPv6Proxy } from '@/utils/accountProxySelection'
+import type { AccountProxyMode } from '@/types'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
@@ -1741,6 +1747,7 @@ const customErrorCodeInput = ref<number | null>(null)
 const interceptWarmupRequests = ref(false)
 const headerOverrideEnabled = ref(false)
 const headerOverrideRows = ref<HeaderOverrideRow[]>([])
+const proxyMode = ref<AccountProxyMode>('')
 const proxyIds = ref<number[]>([])
 const concurrency = ref(1)
 const loadFactor = ref<number | null>(null)
@@ -2000,8 +2007,7 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
 
   if (enableProxy.value) {
     // 后端期望 proxy_id: 0 表示清除代理，而不是 null
-    updates.proxy_id = proxyIds.value[0] ?? 0
-    updates.proxy_ids = [...proxyIds.value]
+    Object.assign(updates, accountProxyPayload(proxyMode.value, proxyIds.value, true))
   }
 
   if (enableConcurrency.value) {
@@ -2479,6 +2485,7 @@ watch(
       headerOverrideEnabled.value = false
       headerOverrideRows.value = []
       proxyIds.value = []
+      proxyMode.value = ''
       concurrency.value = 1
       loadFactor.value = null
       priority.value = 1

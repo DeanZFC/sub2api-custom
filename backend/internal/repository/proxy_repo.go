@@ -10,6 +10,7 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ovhipv6"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -19,14 +20,18 @@ import (
 // sqlQuerier 已替换为 sqlExecutor（定义在 group_repo.go），
 // proxyRepository 使用同一接口以支持 ExecContext。
 type proxyRepository struct {
-	client *dbent.Client
-	sql    sqlExecutor
+	ipv6          *ovhipv6.Client
+	ipv6Supported bool
+	client        *dbent.Client
+	sql           sqlExecutor
 }
 
 const proxyProbeOutboxAccountChunkSize = 500
 
 func NewProxyRepository(client *dbent.Client, sqlDB *sql.DB) service.ProxyRepository {
-	return newProxyRepositoryWithSQL(client, sqlDB)
+	r := newProxyRepositoryWithSQL(client, sqlDB)
+	r.ipv6, r.ipv6Supported = ovhipv6.FromEnv(), true
+	return r
 }
 
 func newProxyRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *proxyRepository {
@@ -66,7 +71,11 @@ func (r *proxyRepository) Create(ctx context.Context, proxyIn *service.Proxy) er
 }
 
 func (r *proxyRepository) GetByID(ctx context.Context, id int64) (*service.Proxy, error) {
-	m, err := r.client.Proxy.Get(ctx, id)
+	client := r.client
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		client = tx.Client()
+	}
+	m, err := client.Proxy.Get(ctx, id)
 	if err != nil {
 		if dbent.IsNotFound(err) {
 			return nil, service.ErrProxyNotFound
@@ -444,9 +453,7 @@ func proxyListOrder(params pagination.PaginationParams) []func(*entsql.Selector)
 }
 
 func (r *proxyRepository) ListActive(ctx context.Context) ([]service.Proxy, error) {
-	proxies, err := r.client.Proxy.Query().
-		Where(proxy.StatusEQ(service.StatusActive)).
-		All(ctx)
+	proxies, err := r.sharedActiveProxyQuery().All(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -455,6 +462,20 @@ func (r *proxyRepository) ListActive(ctx context.Context) ([]service.Proxy, erro
 		outProxies = append(outProxies, *proxyEntityToService(proxies[i]))
 	}
 	return outProxies, nil
+}
+
+// Active lists feed shared BPS/harvest pools as well as account selectors. A
+// retired VM proxy remains in the database for recovery, but must never become
+// an ordinary shared exit. VM usernames are account IDs, not a reserved prefix.
+func (r *proxyRepository) sharedActiveProxyQuery() *dbent.ProxyQuery {
+	query := r.client.Proxy.Query().Where(proxy.StatusEQ(service.StatusActive))
+	if r.ipv6Supported {
+		query.Where(func(s *entsql.Selector) {
+			bindings := entsql.Table("openai_vm_bindings")
+			s.Where(entsql.NotIn(s.C(proxy.FieldID), entsql.Select(bindings.C("managed_proxy_id")).From(bindings)))
+		})
+	}
+	return query
 }
 
 // ExistsByHostPortAuth checks if a proxy with the same host, port, username, and password exists
@@ -557,8 +578,7 @@ func (r *proxyRepository) GetAccountCountsForProxies(ctx context.Context) (count
 
 // ListActiveWithAccountCount returns all active proxies with account count, sorted by creation time descending
 func (r *proxyRepository) ListActiveWithAccountCount(ctx context.Context) ([]service.ProxyWithAccountCount, error) {
-	proxies, err := r.client.Proxy.Query().
-		Where(proxy.StatusEQ(service.StatusActive)).
+	proxies, err := r.sharedActiveProxyQuery().
 		Order(dbent.Desc(proxy.FieldCreatedAt)).
 		All(ctx)
 	if err != nil {

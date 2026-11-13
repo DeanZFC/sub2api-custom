@@ -889,6 +889,9 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	if account == nil || !account.IsOAuth() {
 		return nil, nil
 	}
+	if err := rejectRetiredVMAccount(ctx, s.accountRepo, account); err != nil {
+		return nil, err
+	}
 	accessToken := ""
 	if !account.IsOpenAIAgentIdentity() {
 		accessToken = account.GetOpenAIAccessToken()
@@ -945,7 +948,7 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	if err := validateOpenAIVMProxy(account, account.Proxy); err != nil {
+	if err := validateManagedAccountProxy(account, account.Proxy); err != nil {
 		return nil, err
 	}
 	client, err := httppool.GetClient(httppool.Options{
@@ -956,14 +959,7 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	if err != nil {
 		return nil, fmt.Errorf("build openai probe client: %w", err)
 	}
-	var resp *http.Response
-	handled := false
-	if gateway, ok := s.agentIdentityWS.(*OpenAIGatewayService); ok && gateway.openaiVM != nil {
-		resp, handled, err = gateway.openaiVM.RoundTrip(req, account)
-	}
-	if !handled {
-		resp, err = client.Do(req)
-	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("openai codex probe request failed: %w", err)
 	}

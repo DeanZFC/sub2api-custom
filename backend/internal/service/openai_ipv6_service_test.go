@@ -148,7 +148,7 @@ func TestOpenAIIPv6DrainAndRouteFailClosed(t *testing.T) {
 	a.Proxy = p
 	require.NoError(t, validateOpenAIIPv6Route(a, p.URL()))
 	require.Error(t, validateOpenAIIPv6Route(a, "http://other:80"))
-	_, err := resolveOpenAIAccountProxyURL(context.Background(), &vmTestProxies{err: errors.New("missing")}, a)
+	_, err := resolveOpenAIAccountProxyURL(context.Background(), &managedTestProxies{err: errors.New("missing")}, a)
 	require.Error(t, err)
 	expiry := time.Now().Add(-time.Second)
 	p.ExpiresAt = &expiry
@@ -158,7 +158,7 @@ func TestOpenAIIPv6HarvestIgnoresGlobalPool(t *testing.T) {
 	id := int64(7)
 	p := &Proxy{ID: id, Protocol: "http", Host: "127.0.0.1", Port: 18080, Username: "v6-sub2-test", Password: strings.Repeat("p", 32), Status: StatusActive, FallbackMode: FallbackModeNone}
 	a := &Account{ID: 1, ProxyID: &id, Proxy: p, Extra: map[string]any{"openai_ipv6_bound": true}}
-	s := &OpenAIGatewayService{proxyRepo: &vmTestProxies{p: p}}
+	s := &OpenAIGatewayService{proxyRepo: &managedTestProxies{p: p}}
 	attempt, ok := s.prepareHarvestAttempt(context.Background(), a, "model", "http://unrelated:80", nil, CodexHarvestControls{})
 	require.True(t, ok)
 	require.Equal(t, p.URL(), attempt.proxy)
@@ -198,3 +198,11 @@ func TestOpenAIIPv6TicketRouteAfterDetach(t *testing.T) {
 	ticket.HarvestProxyURL = "http://other:80"
 	require.True(t, codexTicketMatchesIPv6Route(a, ticket))
 }
+
+type managedTestProxies struct {
+	ProxyRepository
+	p   *Proxy
+	err error
+}
+
+func (r *managedTestProxies) GetByID(context.Context, int64) (*Proxy, error) { return r.p, r.err }

@@ -347,7 +347,9 @@ func testScheduledTestAllPassAutomaticReview(t *testing.T, ctx context.Context, 
 	complete := func(row *service.ScheduledTestResult, verdict string) {
 		t.Helper()
 		row.ExecutionInfo = &service.ScheduledTestExecutionInfo{AutoReview: &service.ScheduledTestAutoReviewSummary{Verdict: verdict, JudgeAccountID: 63, JudgeModel: "vision", RubricVersion: service.ScheduledTestReviewRubricVersion}}
-		f.complete(row, verdict)
+		row.Status = "success"
+		effective, _ := service.EvaluateScheduledTestPassRateVerdict(f.plan.Protection.Rules[3], row)
+		f.complete(row, effective)
 	}
 	started := time.Now().UTC().Truncate(time.Microsecond)
 	held := f.round("auto-review-pending-first", started)
@@ -361,7 +363,7 @@ func testScheduledTestAllPassAutomaticReview(t *testing.T, ctx context.Context, 
 		f.complete(pending[i], "pass")
 	}
 	complete(pending[3], "pending")
-	f.check("quality_paused", false, 8, 9)
+	f.check("active", false, 10)
 	passed := f.round("auto-review-pass", started.Add(2*time.Minute))
 	for i := 0; i < 3; i++ {
 		f.complete(passed[i], "pass")

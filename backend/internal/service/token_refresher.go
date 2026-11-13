@@ -92,6 +92,9 @@ func (r *OpenAITokenRefresher) CacheKey(account *Account) string {
 
 // CanRefresh 检查是否能处理此账号
 func (r *OpenAITokenRefresher) CanRefresh(account *Account) bool {
+	if account.IsRetiredVMRoute() {
+		return false
+	}
 	if account.IsCredentialShadow() {
 		return false
 	}
@@ -118,6 +121,9 @@ func (r *OpenAITokenRefresher) NeedsRefresh(account *Account, refreshWindow time
 // Refresh 执行token刷新
 // 保留原有credentials中的所有字段，只更新token相关字段
 func (r *OpenAITokenRefresher) Refresh(ctx context.Context, account *Account) (map[string]any, error) {
+	if err := rejectRetiredVMAccount(ctx, r.accountRepo, account); err != nil {
+		return nil, err
+	}
 	tokenInfo, err := r.openaiOAuthService.RefreshAccountToken(ctx, account)
 	if err != nil {
 		return nil, err

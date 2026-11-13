@@ -94,6 +94,14 @@ func TestAutomaticVisualReview(t *testing.T) {
 			runner.runAutomaticVisualReview(context.Background(), plan, result)
 			require.NotNil(t, result.ExecutionInfo.AutoReview)
 			require.Equal(t, tc.verdict, result.ExecutionInfo.AutoReview.Verdict)
+			want := "pass"
+			if tc.verdict == "fail" {
+				want = "fail"
+			}
+			actual, _ := evaluateScheduledTestProtection(plan.Protection.Rules[0], result)
+			require.Equal(t, want, actual, "unavailable visual review defaults to pass after successful generation")
+			actual, _ = EvaluateScheduledTestPassRateVerdict(plan.Protection.Rules[0], result)
+			require.Equal(t, want, actual, "the default verdict must also enter the pass-rate window")
 			require.Equal(t, tc.calls, judge.calls)
 			require.Equal(t, tc.calls, result.ExecutionInfo.AutoReview.Attempts)
 			require.False(t, result.ExecutionInfo.AutoReview.ReviewedAt.IsZero())
@@ -154,11 +162,38 @@ func TestAutomaticReviewProtectionAndPrivacy(t *testing.T) {
 	r.ExecutionInfo.AutoReview.Verdict = "pending"
 	rule.Thresholds = nil
 	verdict, _ = EvaluateScheduledTestPassRateVerdict(rule, r)
-	require.Equal(t, "pending", verdict)
+	require.Equal(t, "pass", verdict)
 	decision, _ := EvaluateScheduledTestAllPass(p.Protection, map[int64]string{id: "pending"}, nil, true)
 	require.Equal(t, "pause", decision.Action.Scheduling)
 	private := r.ExecutionInfo
 	normalizePublicTestResults([]*ScheduledTestResult{r})
 	require.Nil(t, r.ExecutionInfo.AutoReview)
 	require.NotNil(t, private.AutoReview, "public serialization must not mutate private result info")
+}
+
+func TestVisualReviewDefaultPassRequiresCompletedGeneration(t *testing.T) {
+	for _, tc := range []struct {
+		name, status, want string
+		autoReview         bool
+		review             *ScheduledTestAutoReviewSummary
+	}{
+		{name: "not configured", status: "success", want: "pass"},
+		{name: "review missing", status: "success", autoReview: true, want: "pass"},
+		{name: "configuration unavailable", status: "success", autoReview: true, review: &ScheduledTestAutoReviewSummary{Verdict: "pending", FailureStage: "configuration"}, want: "pass"},
+		{name: "render failed", status: "success", autoReview: true, review: &ScheduledTestAutoReviewSummary{Verdict: "pending", FailureStage: "render"}, want: "pass"},
+		{name: "judge failed", status: "success", autoReview: true, review: &ScheduledTestAutoReviewSummary{Verdict: "pending", FailureStage: "judge"}, want: "pass"},
+		{name: "confirmed rejection", status: "success", autoReview: true, review: &ScheduledTestAutoReviewSummary{Verdict: "fail"}, want: "fail"},
+		{name: "disabled review ignores old rejection", status: "success", review: &ScheduledTestAutoReviewSummary{Verdict: "fail"}, want: "pass"},
+		{name: "still generating", status: "running", autoReview: true, want: "pending"},
+		{name: "generation failed", status: "failed", autoReview: true, want: "pending"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rule := ScheduledTestProtectionRule{AutoReview: &ScheduledTestAutoReviewConfig{Enabled: tc.autoReview}, Vote: &ScheduledTestVoteConfig{Enabled: true, PassAtLeast: 1}}
+			result := &ScheduledTestResult{Status: tc.status, OutputKind: "html", OutputHTML: "<svg/>", ExecutionInfo: &ScheduledTestExecutionInfo{AutoReview: tc.review}}
+			verdict, _ := evaluateScheduledTestProtection(rule, result)
+			require.Equal(t, tc.want, verdict)
+			verdict, _ = EvaluateScheduledTestPassRateVerdict(rule, result)
+			require.Equal(t, tc.want, verdict)
+		})
+	}
 }

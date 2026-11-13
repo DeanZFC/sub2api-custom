@@ -49,12 +49,17 @@ func (h *ProxyHandler) ExportData(c *gin.Context) {
 	// 构建 id→name 映射，用于导出备用代理 name
 	proxyNameByID := make(map[int64]string, len(proxies))
 	for i := range proxies {
-		proxyNameByID[proxies[i].ID] = proxies[i].Name
+		if !isManagedProxyForData(proxies[i]) {
+			proxyNameByID[proxies[i].ID] = proxies[i].Name
+		}
 	}
 
 	dataProxies := make([]DataProxy, 0, len(proxies))
 	for i := range proxies {
 		p := proxies[i]
+		if isManagedProxyForData(p) {
+			continue
+		}
 		key := buildProxyKey(p.Protocol, p.Host, p.Port, p.Username, p.Password)
 
 		var expiresAt *int64
@@ -118,11 +123,16 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 	}
 
 	proxyByKey := make(map[string]service.Proxy, len(existingProxies))
+	managedProxyKeys := make(map[string]bool)
 	// proxyNameToID 用于 backup_proxy_name 反查：DB 已有 + 本批次新建均会写入
 	proxyNameToID := make(map[string]int64, len(existingProxies))
 	for i := range existingProxies {
 		p := existingProxies[i]
 		key := buildProxyKey(p.Protocol, p.Host, p.Port, p.Username, p.Password)
+		if isManagedProxyForData(p) {
+			managedProxyKeys[key] = true
+			continue
+		}
 		proxyByKey[key] = p
 		if p.Name != "" {
 			proxyNameToID[p.Name] = p.ID
@@ -137,6 +147,12 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 			key = buildProxyKey(item.Protocol, item.Host, item.Port, item.Username, item.Password)
 		}
 
+		canonicalKey := buildProxyKey(item.Protocol, item.Host, item.Port, item.Username, item.Password)
+		if isManagedDataProxy(item) || managedProxyKeys[key] || managedProxyKeys[canonicalKey] {
+			result.ProxyFailed++
+			result.Errors = append(result.Errors, DataImportError{Kind: "proxy", Name: item.Name, ProxyKey: managedIPv6DataProxyKey, Message: managedIPv6ImportError})
+			continue
+		}
 		if err := validateDataProxy(item); err != nil {
 			result.ProxyFailed++
 			result.Errors = append(result.Errors, DataImportError{

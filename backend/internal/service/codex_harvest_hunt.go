@@ -60,7 +60,7 @@ func (s *OpenAIGatewayService) huntCodexHarvestTicket(ctx context.Context, accou
 	for n := 0; ; n++ {
 		current, configured := s.harvestControls(ctx)
 		controls = current
-		pool := s.openAICodexTicketHarvestIPPoolEnabled(ctx) && !account.IsOpenAIIPv6Bound()
+		pool := s.openAICodexTicketHarvestIPPoolEnabled(ctx) && !account.IsManagedIPv6Bound()
 		maxAttempts := harvestMaxNodeAttempts(controls, pool)
 		if n >= maxAttempts || round.AccountStopped(account.ID) || round.Used() >= min(round.limit, controls.Speed.MaxRequestsPerRound) || ctx.Err() != nil {
 			break
@@ -72,7 +72,7 @@ func (s *OpenAIGatewayService) huntCodexHarvestTicket(ctx context.Context, accou
 		account = fresh
 		var poolExit harvestIPPoolExit
 		proxy := ""
-		if account.IsOpenAIIPv6Bound() {
+		if account.IsManagedIPv6Bound() {
 			var routeErr error
 			proxy, routeErr = resolveOpenAIAccountProxyURL(ctx, s.proxyRepo, account)
 			if routeErr != nil {

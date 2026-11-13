@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import {
   BUILTIN_PLATFORM_CATALOG,
   resetPlatformCatalog,
@@ -2249,6 +2249,29 @@ describe('EditAccountModal temp-unschedulable rule scope', () => {
     await addRule!.trigger('click')
 
     expect(checkedScopes(wrapper)).toEqual(['temp-unsched-scope-model'])
+    wrapper.unmount()
+  })
+})
+
+describe('legacy fixed IPv6 edit safety', () => {
+  it('preserves the legacy route when saving unrelated account settings', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = { openai_ipv6_bound: true, custom_policy: 'keep' }
+    account.proxy_id = 99
+    account.proxy_ids = [99]
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    expect(wrapper.find('[data-testid="account-proxy-mode"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('ovhIPv6.legacyBinding')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledOnce()
+    const update = updateAccountMock.mock.calls[0]?.[1]
+    expect(update).not.toHaveProperty('proxy_id')
+    expect(update).not.toHaveProperty('proxy_ids')
+    expect(update).not.toHaveProperty('proxy_mode')
+    expect(update.extra).toMatchObject({ openai_ipv6_bound: true, custom_policy: 'keep' })
     wrapper.unmount()
   })
 })

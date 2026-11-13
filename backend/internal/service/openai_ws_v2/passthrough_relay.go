@@ -75,10 +75,6 @@ type RelayExit struct {
 }
 
 type RelayOptions struct {
-	// VM upstreams acknowledge an abort without a synthetic Responses terminal.
-	// This is opt-in; ordinary OpenAI passthrough semantics remain unchanged.
-	CompleteOnInterruptAccepted     bool
-	AcceptInterruptCompletion       func([]byte) bool
 	WriteTimeout                    time.Duration
 	IdleTimeout                     time.Duration
 	UpstreamDrainTimeout            time.Duration
@@ -113,24 +109,22 @@ type RelayTraceEvent struct {
 }
 
 type relayState struct {
-	completeOnInterruptAccepted bool
-	acceptInterruptCompletion   func([]byte) bool
-	usage                       Usage
-	turnUsage                   Usage
-	turnWroteDownstream         atomic.Bool
-	requestModelMu              sync.RWMutex
-	requestModel                string
-	pendingTurnStart            atomic.Pointer[time.Time]
-	lastResponseID              string
-	lastResponseModel           string
-	lastResponseServiceTier     string
-	responseConflict            bool
-	terminalEventType           string
-	firstTokenMs                *int
-	turnTimingByID              map[string]*relayTurnTiming
-	activeTurn                  *relayTurnTiming
-	pendingBareError            *observedUpstreamEvent
-	isFirstTokenEvent           func(eventType string, message []byte) bool
+	usage                   Usage
+	turnUsage               Usage
+	turnWroteDownstream     atomic.Bool
+	requestModelMu          sync.RWMutex
+	requestModel            string
+	pendingTurnStart        atomic.Pointer[time.Time]
+	lastResponseID          string
+	lastResponseModel       string
+	lastResponseServiceTier string
+	responseConflict        bool
+	terminalEventType       string
+	firstTokenMs            *int
+	turnTimingByID          map[string]*relayTurnTiming
+	activeTurn              *relayTurnTiming
+	pendingBareError        *observedUpstreamEvent
+	isFirstTokenEvent       func(eventType string, message []byte) bool
 }
 
 type relayExitSignal struct {
@@ -196,7 +190,7 @@ func Relay(
 		firstMessageType = coderws.MessageText
 	}
 	startAt := nowFn()
-	state := &relayState{requestModel: result.RequestModel, completeOnInterruptAccepted: options.CompleteOnInterruptAccepted, acceptInterruptCompletion: options.AcceptInterruptCompletion, isFirstTokenEvent: options.IsFirstTokenEvent}
+	state := &relayState{requestModel: result.RequestModel, isFirstTokenEvent: options.IsFirstTokenEvent}
 	if isClientResponseCreateFrame(firstMessageType, firstClientMessage) {
 		firstTurnStartedAt := options.FirstTurnStartedAt
 		if firstTurnStartedAt.IsZero() {
@@ -796,25 +790,6 @@ func observeUpstreamMessage(
 		responseID = strings.TrimSpace(values[3].String())
 	}
 	now := nowFn()
-	if state.completeOnInterruptAccepted && eventType == "response.interrupt.accepted" {
-		if state.acceptInterruptCompletion != nil && !state.acceptInterruptCompletion(message) {
-			return observedUpstreamEvent{}
-		}
-		if !state.hasUnfinishedTurn() {
-			return observedUpstreamEvent{}
-		}
-		activeID := openAIWSRelayActiveTurnID(state)
-		targetID := strings.TrimSpace(gjson.GetBytes(message, "previous_response_id").String())
-		if targetID == "" {
-			targetID = strings.TrimSpace(gjson.GetBytes(message, "response_id").String())
-		}
-		if targetID != "" && targetID != activeID {
-			return observedUpstreamEvent{}
-		}
-		state.pendingBareError = nil
-		state.terminalEventType = eventType
-		return finalizeObservedRelayTerminal(state, observedUpstreamEvent{eventType: eventType, responseID: activeID}, now)
-	}
 
 	if state.firstTokenMs == nil && state.startsFirstToken(eventType, message) {
 		ms := int(now.Sub(startAt).Milliseconds())
@@ -849,18 +824,7 @@ func observeUpstreamMessage(
 	observeRelayTurnResponseServiceTier(turnTiming, firstRelayResponseServiceTier(message))
 	state.terminalEventType = eventType
 	if eventType == "error" {
-		// vm2api's own request validation/replay errors are standalone 4xx
-		// frames. Waiting for response.failed would deadlock its next turn.
-		if state.completeOnInterruptAccepted && gjson.GetBytes(message, "error.type").String() == "invalid_request_error" && gjson.GetBytes(message, "status").Int() == 400 {
-			if !state.hasUnfinishedTurn() {
-				return observedUpstreamEvent{}
-			}
-			if observed.responseID == "" {
-				observed.responseID = openAIWSRelayActiveTurnID(state)
-			}
-			state.pendingBareError = nil
-			return finalizeObservedRelayTerminal(state, observed, now)
-		}
+
 		// Some Responses servers emit error immediately before response.failed.
 		// Defer turn settlement so the authoritative failed usage can replace
 		// this fallback instead of billing both terminal frames.
@@ -945,8 +909,7 @@ func emitTurnComplete(
 		return
 	}
 	responseID := strings.TrimSpace(observed.responseID)
-	isInterruptCompletion := state != nil && state.completeOnInterruptAccepted && observed.eventType == "response.interrupt.accepted"
-	if responseID == "" && strings.TrimSpace(observed.eventType) != "error" && !isInterruptCompletion {
+	if responseID == "" && strings.TrimSpace(observed.eventType) != "error" {
 		return
 	}
 	requestModel := ""

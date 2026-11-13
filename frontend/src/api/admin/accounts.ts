@@ -11,6 +11,7 @@ export { getCodexHarvestControls, saveCodexHarvestControls, getCodexHarvestNodes
 import type { OpenAIReferralRefreshResult, OpenAIReferralSendResult } from '@/types/openaiReferrals'
 import type {
   Account,
+  AccountProxyMode,
   AccountListItem,
   CreateAccountRequest,
   UpdateAccountRequest,
@@ -793,12 +794,15 @@ export async function exportData(options?: {
 }
 
 export async function importData(payload: {
+  proxy_mode?: AccountProxyMode
+  proxy_id?: number | null
   data: AdminDataPayload
   skip_default_group_bind?: boolean
 }): Promise<AdminDataImportResult> {
   const { data } = await apiClient.post<AdminDataImportResult>('/admin/accounts/data', {
     data: payload.data,
-    skip_default_group_bind: payload.skip_default_group_bind
+    skip_default_group_bind: payload.skip_default_group_bind,
+    ...(payload.proxy_mode ? { proxy_mode: payload.proxy_mode, proxy_id: payload.proxy_id ?? null } : {})
   })
   return data
 }

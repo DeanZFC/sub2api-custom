@@ -125,6 +125,7 @@ func NewAccountHandler(
 
 // CreateAccountRequest represents create account request
 type CreateAccountRequest struct {
+	ProxyMode               string         `json:"proxy_mode" binding:"omitempty,oneof=direct specified random least_used ovh_ipv6"`
 	Name                    string         `json:"name" binding:"required"`
 	Notes                   *string        `json:"notes"`
 	Platform                string         `json:"platform" binding:"required"`
@@ -147,6 +148,7 @@ type CreateAccountRequest struct {
 // UpdateAccountRequest represents update account request
 // 使用指针类型来区分"未提供"和"设置为0"
 type UpdateAccountRequest struct {
+	ProxyMode               string         `json:"proxy_mode" binding:"omitempty,oneof=direct specified random least_used ovh_ipv6"`
 	Name                    string         `json:"name"`
 	Notes                   *string        `json:"notes"`
 	Type                    string         `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream bedrock service_account"`
@@ -169,6 +171,7 @@ type UpdateAccountRequest struct {
 
 // BulkUpdateAccountsRequest represents the payload for bulk editing accounts
 type BulkUpdateAccountsRequest struct {
+	ProxyMode               string                    `json:"proxy_mode" binding:"omitempty,oneof=direct specified random least_used ovh_ipv6"`
 	AccountIDs              []int64                   `json:"account_ids"`
 	Filters                 *BulkUpdateAccountFilters `json:"filters"`
 	Name                    string                    `json:"name"`
@@ -1091,6 +1094,7 @@ func (h *AccountHandler) Create(c *gin.Context) {
 			Type:                  req.Type,
 			Credentials:           req.Credentials,
 			Extra:                 req.Extra,
+			ProxyMode:             req.ProxyMode,
 			ProxyID:               req.ProxyID,
 			ProxyIDs:              req.ProxyIDs,
 			Concurrency:           req.Concurrency,
@@ -1223,6 +1227,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		Type:                  req.Type,
 		Credentials:           req.Credentials,
 		Extra:                 req.Extra,
+		ProxyMode:             req.ProxyMode,
 		ProxyID:               req.ProxyID,
 		ProxyIDs:              req.ProxyIDs,
 		Concurrency:           req.Concurrency, // 指针类型，nil 表示未提供
@@ -2194,6 +2199,7 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 				Credentials:           item.Credentials,
 				Extra:                 item.Extra,
 				ProxyID:               item.ProxyID,
+				ProxyMode:             item.ProxyMode,
 				ProxyIDs:              item.ProxyIDs,
 				Concurrency:           item.Concurrency,
 				Priority:              item.Priority,
@@ -2408,6 +2414,7 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		AccountIDs:            req.AccountIDs,
 		Filters:               toServiceBulkUpdateAccountFilters(req.Filters),
 		Name:                  req.Name,
+		ProxyMode:             req.ProxyMode,
 		ProxyID:               req.ProxyID,
 		ProxyIDs:              req.ProxyIDs,
 		Concurrency:           req.Concurrency,

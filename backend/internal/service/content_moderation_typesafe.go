@@ -60,7 +60,7 @@ func (s *ContentModerationService) callTypeSafeModeration(ctx context.Context, c
 	if strings.TrimSpace(text) == "" {
 		return nil, errors.New("typesafe text-only: no text to audit; images were not audited")
 	}
-	client, err := s.moderationHTTPClient(ctx, cfg)
+	client, err := s.moderationHTTPClient(ctx, cfg, key)
 	if err != nil {
 		return nil, err
 	}

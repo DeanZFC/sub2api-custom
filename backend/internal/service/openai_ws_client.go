@@ -132,9 +132,7 @@ func (d *coderOpenAIWSClientDialer) Dial(
 			return true
 		},
 	}
-	if vmClient := openAIVMWSHTTPClientFromContext(ctx); vmClient != nil {
-		opts.HTTPClient = vmClient
-	} else if proxy := strings.TrimSpace(proxyURL); proxy != "" {
+	if proxy := strings.TrimSpace(proxyURL); proxy != "" {
 		proxyClient, err := d.proxyHTTPClient(proxy)
 		if err != nil {
 			return nil, 0, nil, err

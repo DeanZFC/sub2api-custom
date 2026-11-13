@@ -35,6 +35,9 @@ func (s *adminServiceImpl) validateAccountProxyIDs(ctx context.Context, ids []in
 		if p == nil || !p.IsActive() || p.IsExpired(time.Now()) {
 			return nil, infraerrors.BadRequest("INVALID_PROXY_POOL", "selected proxy is inactive or expired")
 		}
+		if p.IsManagedIPv6() && len(ids) > 1 {
+			return nil, infraerrors.BadRequest("MANAGED_IPV6_POOL", "固定 IPv6 不能加入轮转代理池")
+		}
 		out = append(out, id)
 	}
 	return out, nil

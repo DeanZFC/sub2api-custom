@@ -13,7 +13,7 @@ import (
 )
 
 func TestOpenAIIPv6RepositoryLifecycle(t *testing.T) {
-	f := newOpenAIVMFixture(t)
+	f := newManagedRouteFixture(t)
 	ctx := context.Background()
 	repo := &openAIIPv6Repository{db: integrationDB}
 	t.Cleanup(func() { _, _ = integrationDB.Exec("DELETE FROM openai_ipv6_bindings WHERE account_id=$1", f.parent) })
@@ -38,7 +38,7 @@ func TestOpenAIIPv6RepositoryLifecycle(t *testing.T) {
 	// A new shadow inherits the reserved route even from a stale caller snapshot.
 	_, err = integrationDB.Exec("DELETE FROM accounts WHERE id=$1", f.shadow)
 	require.NoError(t, err)
-	f.shadow = f.insertShadow(t, f.original, false)
+	f.shadow = f.insertShadow(t, f.original)
 	var shadowProxy int64
 	var shadowMarker bool
 	require.NoError(t, integrationDB.QueryRow("SELECT proxy_id,(extra->>'openai_ipv6_bound')::boolean FROM accounts WHERE id=$1", f.shadow).Scan(&shadowProxy, &shadowMarker))
@@ -46,7 +46,7 @@ func TestOpenAIIPv6RepositoryLifecycle(t *testing.T) {
 	require.True(t, shadowMarker)
 	_, err = integrationDB.Exec("UPDATE accounts SET status='inactive' WHERE id=$1", f.shadow)
 	require.NoError(t, err)
-	foreign := newOpenAIVMFixture(t)
+	foreign := newManagedRouteFixture(t)
 	_, err = integrationDB.Exec("UPDATE accounts SET proxy_id=$2 WHERE id=$1", foreign.parent, b.ManagedProxyID)
 	require.Error(t, err)
 	_, err = integrationDB.Exec("INSERT INTO account_proxies(account_id,proxy_id,position) VALUES($1,$2,0)", foreign.parent, b.ManagedProxyID)
@@ -87,14 +87,14 @@ func TestOpenAIIPv6RepositoryLifecycle(t *testing.T) {
 	require.True(t, deleted)
 }
 func TestOpenAIIPv6RepositoryRequiresDisabledFamily(t *testing.T) {
-	f := newOpenAIVMFixture(t)
+	f := newManagedRouteFixture(t)
 	repo := &openAIIPv6Repository{db: integrationDB}
 	_, err := repo.Reserve(context.Background(), f.parent, fmt.Sprint(f.parent), "http://127.0.0.1", &service.Proxy{})
 	require.Error(t, err)
 }
 
 func TestOpenAIIPv6RepositoryRestoreRequiresOriginalFallback(t *testing.T) {
-	f := newOpenAIVMFixture(t)
+	f := newManagedRouteFixture(t)
 	ctx := context.Background()
 	repo := &openAIIPv6Repository{db: integrationDB}
 	_, err := integrationDB.Exec("UPDATE accounts SET status='inactive' WHERE id=$1 OR parent_account_id=$1", f.parent)

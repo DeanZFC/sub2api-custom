@@ -1445,12 +1445,19 @@ func (s *AccountTestService) fetchAntigravityOAuthUpstreamModels(ctx context.Con
 }
 
 func (s *AccountTestService) doUpstreamModelsRequest(req *http.Request, proxyURL string, account *Account) (*http.Response, error) {
-	if s.openaiVM != nil {
-		if response, handled, err := s.openaiVM.RoundTrip(req, account); handled {
-			return response, err
+	if err := rejectRetiredVMAccount(req.Context(), s.accountRepo, account); err != nil {
+		return nil, err
+	}
+	if s.openaiGatewayService != nil && s.openaiGatewayService.openaiIPv6 != nil {
+		if err := s.openaiGatewayService.openaiIPv6.CheckRoute(req.Context(), account, proxyURL); err != nil {
+			return nil, err
 		}
 	}
-	if err := validateOpenAIVMProxy(account, account.Proxy); err != nil {
+	if err := validateOpenAIIPv6Route(account, proxyURL); err != nil {
+		return nil, err
+	}
+
+	if err := validateManagedAccountProxy(account, account.Proxy); err != nil {
 		return nil, err
 	}
 	if s.tlsFPProfileService == nil {

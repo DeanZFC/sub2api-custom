@@ -515,7 +515,6 @@ type OpenAIGatewayService struct {
 	userGroupRateResolver   *userGroupRateResolver
 	httpUpstream            HTTPUpstream
 	pluginManager           *PluginManager
-	openaiVM                *OpenAIVMService
 	deferredService         *DeferredService
 	openAITokenProvider     *OpenAITokenProvider
 	grokTokenProvider       *GrokTokenProvider
@@ -1289,20 +1288,8 @@ func hashSensitiveValueForLog(raw string) string {
 
 // GetAccessToken gets the access token for an OpenAI account
 func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Account) (string, string, error) {
-	if s.openaiVM != nil && account.IsOpenAIOAuth() {
-		bound, err := s.openaiVM.RouteBound(ctx, account)
-		if err != nil {
-			return "", "", err
-		}
-		// Keep the original shadow identity until the credential resolver below
-		// has validated its parent, including the Excel-only credential boundary.
-		if bound && !account.IsShadow() {
-			current, err := s.accountRepo.GetByID(ctx, openAIVMOwnerID(account))
-			if err != nil {
-				return "", "", err
-			}
-			account = current
-		}
+	if err := rejectRetiredVMAccount(ctx, s.accountRepo, account); err != nil {
+		return "", "", err
 	}
 	if account.IsShadow() {
 		credAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
@@ -1310,6 +1297,9 @@ func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Acco
 			return "", "", err
 		}
 		account = credAccount
+	}
+	if err := rejectRetiredVMAccount(ctx, s.accountRepo, account); err != nil {
+		return "", "", err
 	}
 	switch account.Type {
 	case AccountTypeOAuth:

@@ -55,7 +55,7 @@
       <ExcelBPSProtocolSettings v-if="activeTab === 'features'" />
       <ExcelBPSImageSettings v-if="activeTab === 'features'" />
       <!-- Independently saved settings stay outside this form. -->
-      <form v-show="activeTab !== 'openai-vm'" @submit.prevent="saveSettings" class="space-y-6" novalidate>
+      <form @submit.prevent="saveSettings" class="space-y-6" novalidate>
         <!-- Tab: Security — Admin API Key -->
         <div v-show="activeTab === 'security'" class="space-y-6">
           <AdminAccessKeysSettings />
@@ -8995,7 +8995,6 @@
         </div>
       </form>
 
-      <OpenAIVMSettings v-if="activeTab === 'openai-vm'" />
       </div>
 
       <!-- Provider dialogs placed outside the settings form to prevent form submission bubbling -->
@@ -9041,7 +9040,6 @@ import CodexTicketFeatureSettings from '@/components/admin/settings/CodexTicketF
 import { FeatureFlags, resolveFeatureFlag } from '@/utils/featureFlags'
 import ExcelBPSImageSettings from '@/components/admin/settings/ExcelBPSImageSettings.vue'
 import GPTDirectSettings from "@/components/admin/settings/GPTDirectSettings.vue";
-import OpenAIVMSettings from "@/components/admin/settings/OpenAIVMSettings.vue";
 import { ref, reactive, computed, onMounted, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { listPlatformIds } from "@/constants/platformCatalog";
@@ -9171,7 +9169,6 @@ type SettingsTab =
   | "security"
   | "users"
   | "gateway"
-  | "openai-vm"
   | "payment"
   | "email"
   | "backup";
@@ -9186,7 +9183,6 @@ const settingsTabs = [
   { key: "security" as SettingsTab, icon: "shield" as const },
   { key: "users" as SettingsTab, icon: "user" as const },
   { key: "gateway" as SettingsTab, icon: "server" as const },
-  { key: "openai-vm" as SettingsTab, icon: "server" as const },
   { key: "payment" as SettingsTab, icon: "creditCard" as const },
   { key: "email" as SettingsTab, icon: "mail" as const },
   { key: "backup" as SettingsTab, icon: "database" as const },

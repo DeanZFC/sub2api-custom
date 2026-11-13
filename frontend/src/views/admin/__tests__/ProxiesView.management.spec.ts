@@ -16,7 +16,7 @@ vi.mock('vue-i18n', async () => ({
   useI18n: () => ({ t: (key: string) => key })
 }))
 
-const mountView = () => shallowMount(ProxiesView, { global: { stubs: {
+const mountView = () => shallowMount(ProxiesView, { global: { stubs: { OvhIPv6Control: true,
   AppLayout: { template: '<div><slot /></div>' },
   TablePageLayout: { template: '<div><slot name="actions" /><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>' },
   DataTable: { template: '<div data-testid="existing-proxy-list" />' },

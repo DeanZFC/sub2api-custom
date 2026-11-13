@@ -51,6 +51,14 @@
         />
       </div>
 
+      <div class="space-y-2">
+        <label class="flex items-center gap-2 text-sm"><input v-model="overrideProxy" type="checkbox" :disabled="importing" data-testid="import-override-proxy" />{{ t('ovhIPv6.overrideFileProxy') }}</label>
+        <p class="input-hint">{{ t(overrideProxy ? 'ovhIPv6.importHint' : 'ovhIPv6.keepFileProxy') }}</p>
+        <template v-if="overrideProxy">
+          <AccountProxyModeSelect v-model="proxyMode" :disabled="importing" />
+          <ProxySelector v-if="!proxyMode" v-model="proxyID" :proxies="proxies" :disabled="importing" />
+        </template>
+      </div>
       <div
         v-if="result"
         class="space-y-2 rounded-xl border border-gray-200 p-4 dark:border-dark-700"
@@ -98,6 +106,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import AccountProxyModeSelect from '@/components/common/AccountProxyModeSelect.vue'
+import ProxySelector from '@/components/common/ProxySelector.vue'
+import { accountProxyPayload, isManagedIPv6Proxy } from '@/utils/accountProxySelection'
+import type { AccountProxyMode, Proxy } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
@@ -118,7 +130,16 @@ const emit = defineEmits<Emits>()
 const { t } = useI18n()
 const appStore = useAppStore()
 
+const overrideProxy = ref(false)
+const proxyMode = ref<AccountProxyMode>('')
+const proxyID = ref<number | null>(null)
+const proxies = ref<Proxy[]>([])
 const importing = ref(false)
+watch(overrideProxy, async enabled => {
+  if (!enabled) return
+  try { proxies.value = (await adminAPI.proxies.getAllWithCount()).filter(proxy => !isManagedIPv6Proxy(proxy)) }
+  catch { proxies.value = [] }
+})
 const files = ref<File[]>([])
 const dragDepth = ref(0)
 const dragActive = computed(() => dragDepth.value > 0)
@@ -140,6 +161,9 @@ watch(
   (open) => {
     if (open) {
       files.value = []
+      overrideProxy.value = false
+      proxyMode.value = ''
+      proxyID.value = null
       dragDepth.value = 0
       hasCreatedData.value = false
       result.value = null
@@ -295,7 +319,8 @@ const handleImport = async () => {
 
     const res = await adminAPI.accounts.importData({
       data: dataPayload,
-      skip_default_group_bind: true
+      skip_default_group_bind: true,
+      ...(overrideProxy.value ? accountProxyPayload(proxyMode.value || (proxyID.value ? 'specified' : 'direct'), proxyID.value ? [proxyID.value] : []) : {})
     })
 
     result.value = res

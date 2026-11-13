@@ -114,7 +114,7 @@
                 </template>
               </div>
               <div class="truncate text-xs text-gray-500 dark:text-gray-400">
-                {{ proxy.protocol }}://{{ proxy.host }}:{{ proxy.port }}
+                {{ proxy.managed_ipv6 || `${proxy.protocol}://${proxy.host}:${proxy.port}` }}
               </div>
             </div>
 
@@ -172,6 +172,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import Icon from '@/components/icons/Icon.vue'
+import { isManagedIPv6Proxy } from '@/utils/accountProxySelection'
 import type { Proxy } from '@/types'
 
 const { t } = useI18n()
@@ -225,18 +226,20 @@ const selectedLabel = computed(() => {
     return t('admin.accounts.noProxy')
   }
   const proxy = selectedProxy.value
-  return `${proxy.name} (${proxy.protocol}://${proxy.host}:${proxy.port})`
+  return `${proxy.name} (${proxy.managed_ipv6 || `${proxy.protocol}://${proxy.host}:${proxy.port}`})`
 })
 
+const selectableProxies = computed(() => props.proxies.filter(proxy => !isManagedIPv6Proxy(proxy) ||
+  proxy.managed_ipv6_state === 'reserved' || (Array.isArray(props.modelValue) ? props.modelValue.includes(proxy.id) : props.modelValue === proxy.id)))
 const filteredProxies = computed(() => {
   if (!searchQuery.value) {
-    return props.proxies
+    return selectableProxies.value
   }
   const query = searchQuery.value.toLowerCase()
-  return props.proxies.filter((proxy) => {
+  return selectableProxies.value.filter((proxy) => {
     const name = proxy.name.toLowerCase()
     const host = proxy.host.toLowerCase()
-    return name.includes(query) || host.includes(query)
+    return name.includes(query) || host.includes(query) || !!proxy.managed_ipv6?.toLowerCase().includes(query)
   })
 })
 
@@ -258,13 +261,20 @@ watch(() => props.disabled, (disabled) => {
 })
 
 const selectOption = (value: number | null) => {
+  if (props.disabled) return
+  if (value !== null && !selectableProxies.value.some(proxy => proxy.id === value)) return
   if (props.multiple) {
     const current = Array.isArray(props.modelValue) ? [...props.modelValue] : []
     if (value === null) current.splice(0)
     else {
       const i = current.indexOf(value)
       if (i >= 0) current.splice(i, 1)
-      else current.push(value)
+      else {
+        // Managed IPv6 is exclusive; selecting it replaces a regular pool, and vice versa.
+        const managed = props.proxies.some(proxy => proxy.id === value && isManagedIPv6Proxy(proxy))
+        if (managed || current.some(id => props.proxies.some(proxy => proxy.id === id && isManagedIPv6Proxy(proxy)))) current.splice(0)
+        current.push(value)
+      }
     }
     emit('update:modelValue', current)
   } else {
@@ -301,7 +311,7 @@ const handleBatchTest = async () => {
   batchTesting.value = true
 
   // Test all proxies in parallel
-  const testPromises = props.proxies.map(handleTestProxy)
+  const testPromises = selectableProxies.value.map(handleTestProxy)
 
   await Promise.all(testPromises)
   batchTesting.value = false

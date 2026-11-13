@@ -539,20 +539,22 @@ func ProxyFromService(p *service.Proxy) *Proxy {
 		return nil
 	}
 	return &Proxy{
-		ID:             p.ID,
-		Name:           p.Name,
-		Protocol:       p.Protocol,
-		Host:           p.Host,
-		Port:           p.Port,
-		Username:       p.Username,
-		MihomoNodeID:   p.MihomoNodeID,
-		Status:         p.Status,
-		CreatedAt:      p.CreatedAt,
-		UpdatedAt:      p.UpdatedAt,
-		ExpiresAt:      p.ExpiresAt,
-		FallbackMode:   p.FallbackMode,
-		BackupProxyID:  p.BackupProxyID,
-		ExpiryWarnDays: p.ExpiryWarnDays,
+		ManagedIPv6:      p.ManagedIPv6,
+		ManagedIPv6State: p.ManagedIPv6State,
+		ID:               p.ID,
+		Name:             p.Name,
+		Protocol:         p.Protocol,
+		Host:             p.Host,
+		Port:             p.Port,
+		Username:         p.Username,
+		MihomoNodeID:     p.MihomoNodeID,
+		Status:           p.Status,
+		CreatedAt:        p.CreatedAt,
+		UpdatedAt:        p.UpdatedAt,
+		ExpiresAt:        p.ExpiresAt,
+		FallbackMode:     p.FallbackMode,
+		BackupProxyID:    p.BackupProxyID,
+		ExpiryWarnDays:   p.ExpiryWarnDays,
 	}
 }
 
@@ -589,9 +591,13 @@ func ProxyFromServiceAdmin(p *service.Proxy) *AdminProxy {
 	if base == nil {
 		return nil
 	}
+	password := p.Password
+	if p.IsManagedIPv6() {
+		password = ""
+	}
 	return &AdminProxy{
 		Proxy:    *base,
-		Password: p.Password,
+		Password: password,
 	}
 }
 

@@ -50,6 +50,13 @@ func (s *ProxyExpiryService) Stop() {
 }
 
 func (s *ProxyExpiryService) runOnce() {
+	if worker, ok := s.proxyRepo.(interface{ SyncOVHIPv6(context.Context) error }); ok {
+		syncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := worker.SyncOVHIPv6(syncCtx); err != nil {
+			log.Printf("[OVHIPv6] reconcile failed: %v", err)
+		}
+		cancel()
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	changed, err := s.proxyRepo.SweepExpiredProxies(ctx, time.Now())

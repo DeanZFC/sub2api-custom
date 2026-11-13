@@ -28,7 +28,7 @@ func (s *OpenAIGatewayService) refreshCodexTicketAccountForSend(ctx context.Cont
 	if fresh.ID != account.ID || fresh.Platform != account.Platform || fresh.Type != account.Type ||
 		ticketIdentity(fresh) != ticketIdentity(account) || !codexTicketSendCredentialsMatch(account, fresh, authorization) ||
 		!slices.Equal(fresh.GroupIDs, account.GroupIDs) || !slices.Equal(fresh.ProxyIDs, account.ProxyIDs) ||
-		fresh.IsOpenAIVMBound() != account.IsOpenAIVMBound() {
+		fresh.IsRetiredVMRoute() != account.IsRetiredVMRoute() {
 		return nil, denyOpenAITurn("account_route_changed")
 	}
 	// A pool reservation chooses a request-local ProxyID; retain that same

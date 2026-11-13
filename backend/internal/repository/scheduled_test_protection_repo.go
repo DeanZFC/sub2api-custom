@@ -168,6 +168,7 @@ type protectionState struct {
 	modelKey                                              string
 	latencyMs                                             sql.NullInt64
 	resultStatus                                          sql.NullString
+	outputKind                                            string
 	adminVerdict                                          string
 	roundStarted                                          time.Time
 	planID, accountID, definitionID, resultID, generation int64
@@ -187,10 +188,11 @@ func loadProtectionState(ctx context.Context, tx *sql.Tx, resultID int64) (*prot
 	err := tx.QueryRowContext(ctx, `SELECT plan_id,account_id,test_definition_id,result_id,generation,result_started_at,
 		automated_verdict,verdict,reason,blocked,completed,rule_config,round_started_at,admin_verdict,
 		(SELECT latency_ms FROM scheduled_test_results WHERE id=$1),
-		(SELECT status FROM scheduled_test_results WHERE id=$1),model_key
+		(SELECT status FROM scheduled_test_results WHERE id=$1),model_key,
+		(SELECT output_kind FROM scheduled_test_results WHERE id=$1)
 		FROM scheduled_test_protection_states WHERE result_id=$1 FOR UPDATE`, resultID).Scan(
 		&s.planID, &s.accountID, &s.definitionID, &s.resultID, &s.generation, &s.started, &s.automated, &s.verdict, &s.reason, &s.blocked, &s.completed, &raw, &s.roundStarted, &s.adminVerdict,
-		&s.latencyMs, &s.resultStatus, &s.modelKey)
+		&s.latencyMs, &s.resultStatus, &s.modelKey, &s.outputKind)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +236,11 @@ func combineProtectionVerdict(state *protectionState, pass, fail int) (string, b
 		if fail > vote.RejectAbove {
 			return "fail", true, "渠道质量检测不通过票数超过阈值"
 		}
-		if state.automated == "pass" && (pass >= vote.PassAtLeast || state.rule.UsesAutoReview()) {
+		// Completed HTML reviews use human votes as a veto: absent approval
+		// votes must not discard an otherwise passing generated result.
+		visualDefault := state.outputKind == "html" && state.completed &&
+			(state.resultStatus.String == "success" || state.resultStatus.String == "passed")
+		if state.automated == "pass" && (pass >= vote.PassAtLeast || state.rule.UsesAutoReview() || visualDefault) {
 			return "pass", false, ""
 		}
 		return "pending", state.blocked, state.reason
@@ -356,7 +362,7 @@ func (r *scheduledTestResultRepository) CompleteProtection(ctx context.Context, 
 			if settings == nil || !settings.Enabled || review.RubricVersion != service.ScheduledTestReviewRubricVersion ||
 				review.JudgeAccountID != settings.JudgeAccountID || review.JudgeModel != strings.TrimSpace(settings.JudgeModel) {
 				review.Verdict = "pending"
-				review.Reason = "视觉裁判配置已变化或不可用，本轮结论不计入通过率，等待复核"
+				review.Reason = "视觉裁判配置已变化或不可用，默认通过，可人工复核"
 				raw, err := json.Marshal(result.ExecutionInfo)
 				if err != nil {
 					return err
@@ -366,7 +372,7 @@ func (r *scheduledTestResultRepository) CompleteProtection(ctx context.Context, 
 				}
 				// Duration remains independent, including when the visual evidence is stale.
 				if duration, _ := service.EvaluateScheduledTestDuration(state.rule, result); duration == "pass" {
-					verdict, reason = "pending", review.Reason
+					verdict, reason = service.EvaluateScheduledTestPassRateVerdict(state.rule, result)
 				}
 			}
 		}

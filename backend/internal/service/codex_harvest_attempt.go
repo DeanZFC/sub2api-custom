@@ -77,7 +77,7 @@ func (s *OpenAIGatewayService) harvestTicketConfig(ctx context.Context) config.O
 }
 
 func (s *OpenAIGatewayService) freshHarvestAccount(ctx context.Context, account *Account, model string) (*Account, bool) {
-	if ctx.Err() != nil || account == nil || (account.IsOpenAIIPv6Bound() && !account.IsActive()) || openAICodexSkipHarvest(account) || !s.openAICodexTicketEnabledContext(ctx) {
+	if ctx.Err() != nil || account == nil || (account.IsManagedIPv6Bound() && !account.IsActive()) || openAICodexSkipHarvest(account) || !s.openAICodexTicketEnabledContext(ctx) {
 		return nil, false
 	}
 	if s.codexHarvest != nil {
@@ -138,7 +138,7 @@ func pinnedHarvestNode(nodes []mihomo.HarvestNode, ticket *openAICodexTicket, tr
 
 func (s *OpenAIGatewayService) prepareHarvestAttempt(ctx context.Context, account *Account, model, proxy string, tried map[string]bool, controls CodexHarvestControls) (codexHarvestAttempt, bool) {
 	a := codexHarvestAttempt{proxy: proxy, release: func() {}}
-	if account.IsOpenAIIPv6Bound() {
+	if account.IsManagedIPv6Bound() {
 		fixed, err := resolveOpenAIAccountProxyURL(ctx, s.proxyRepo, account)
 		a.proxy = fixed
 		return a, err == nil
