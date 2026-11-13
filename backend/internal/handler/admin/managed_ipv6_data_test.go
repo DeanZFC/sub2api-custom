@@ -51,7 +51,7 @@ func TestManagedIPv6DataExportDoesNotTransferLeaseCredentials(t *testing.T) {
 			var resp proxyDataResponse
 			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 			require.Empty(t, resp.Data.Proxies)
-			require.True(t, svc.accounts[0].Extra["openai_ipv6_bound"].(bool), "export must not mutate live account state")
+			require.Equal(t, true, svc.accounts[0].Extra["openai_ipv6_bound"], "export must not mutate live account state")
 		})
 	}
 }
@@ -113,7 +113,7 @@ func TestManagedIPv6AccountImportRequiresExplicitNewSelection(t *testing.T) {
 			require.NotContains(t, input.Extra, "openai_ipv6_bound")
 			require.NotContains(t, input.Extra, "ovh_ipv6_bound")
 			require.Equal(t, "policy", input.Extra["keep"])
-			require.True(t, originalExtra["openai_ipv6_bound"].(bool))
+			require.Equal(t, true, originalExtra["openai_ipv6_bound"])
 		})
 	}
 }

@@ -13,7 +13,7 @@ func (r *accountRepository) HasRetiredVMRoute(ctx context.Context, id int64) (bo
 	if err != nil {
 		return false, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var blocked bool
 	if rows.Next() {
 		err = rows.Scan(&blocked)
@@ -29,7 +29,7 @@ func (r *proxyRepository) IsRetiredVMProxy(ctx context.Context, id int64) (bool,
 	if err != nil {
 		return false, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var blocked bool
 	if rows.Next() {
 		err = rows.Scan(&blocked)

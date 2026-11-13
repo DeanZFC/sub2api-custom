@@ -61,7 +61,7 @@ func LoadFromEnv() (*Client, error) {
 		return nil, nil
 	}
 	if file != "" {
-		f, err := os.Open(file)
+		f, err := os.Open(file) // #nosec G703 -- Operator-configured secret file path, never derived from a request.
 		if err != nil {
 			return nil, errors.New("OVH IPv6 control token file is unavailable")
 		}
