@@ -31,6 +31,27 @@ const requestTime = (time: string) => new Intl.DateTimeFormat('zh', {
 }).format(new Date(time))
 
 describe('channel health cards', () => {
+  it('shows each group’s own multiplier, including free groups, without inventing a rate for platform totals', () => {
+    const wrapper = mount(ChannelHealthCards, {
+      props: {
+        rows: [
+          { ...row, group_rate_multiplier: 0.035 },
+          { ...row, group_id: 8, group_name: 'Free', group_rate_multiplier: 0 },
+          { ...row, group_id: 9, group_name: 'Unknown rate' },
+          { ...row, group_id: undefined, group_name: undefined },
+        ],
+        coverage, groupBy: 'platform_group', healthMode: 'overall',
+      },
+      global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: { ProviderIcon: true } },
+    })
+    const cards = wrapper.findAll('[data-testid=channel-health-card]')
+    expect(cards[0].get('[data-testid=group-rate-multiplier]').text()).toBe('倍率 0.035×')
+    expect(cards[1].get('[data-testid=group-rate-multiplier]').text()).toBe('倍率 0×')
+    expect(cards[2].find('[data-testid=group-rate-multiplier]').exists()).toBe(false)
+    expect(cards[3].find('[data-testid=group-rate-multiplier]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('shows each channel’s own model metrics and switches details without changing overall metrics', async () => {
     const modelRows: MonitorMatrixRow[] = [
       { ...row, model: 'gpt-6.1', metrics: { ...metrics, cache_rate: 0.9 }, recent_requests: [request('error', 10)] },

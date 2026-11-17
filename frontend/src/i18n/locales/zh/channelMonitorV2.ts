@@ -36,7 +36,7 @@ export default {
       expandModels: '展开其余 {count} 个模型', collapseModels: '收起模型',
       noModels: '当前范围内暂无模型调用', currentScope: '状态明细：{model}', backToOverall: '返回整体',
       title: '渠道健康', description: '汇总覆盖所选窗口，近 20 次仅为近期样本 · 悬停色块查看详情',
-      passive: '被动健康', availability: '可用率',
+      passive: '被动健康', availability: '可用率', groupRateMultiplier: '倍率 {rate}×',
       latestRequest: '最近请求：{time}', past: '过去', now: '最近',
       requestTime: '请求时间：{value}', requestTTFT: '首字：{value}', requestDuration: '总耗时：{value}',
       requestErrorType: '错误类型：{value}', requestErrorMessage: '具体错误：{value}', viewErrorLog: '查看完整错误日志',

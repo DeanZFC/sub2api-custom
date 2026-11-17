@@ -165,6 +165,8 @@ export interface MonitorMatrixRow {
   platform: string
   group_id?: number
   group_name?: string
+  /** Default group multiplier; omitted for platform totals or unavailable groups. */
+  group_rate_multiplier?: number
   model?: string
   /** Preserved when absolute request counts are redacted for ordinary users. */
   has_traffic?: boolean

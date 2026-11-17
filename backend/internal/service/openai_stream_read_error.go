@@ -17,11 +17,20 @@ const (
 	// no transport error, so without this classification a truncated generation is
 	// indistinguishable from a successful one.
 	OpenAIUpstreamStreamTruncatedCode = "upstream_stream_truncated"
+	OpenAIUpstreamEmptyResponseCode   = "upstream_empty_response"
+	OpenAIUpstreamStreamErrorCode     = "upstream_stream_error"
+	OpenAIUpstreamInvalidStreamCode   = "upstream_invalid_stream"
 )
 
 // ErrOpenAIUpstreamStreamTruncated marks an upstream SSE stream that ended at
 // EOF — without a read error — before any terminal signal arrived.
 var ErrOpenAIUpstreamStreamTruncated = errors.New("upstream stream ended before any terminal chunk")
+
+var (
+	errOpenAIUpstreamEmptyResponse = errors.New("upstream stream ended without any output")
+	errOpenAIUpstreamStreamError   = errors.New("upstream returned an error event")
+	errOpenAIUpstreamInvalidStream = errors.New("upstream returned an invalid stream chunk")
+)
 
 type openAIUpstreamStreamReadError struct {
 	cause         error
@@ -70,6 +79,14 @@ func OpenAIUpstreamStreamReadErrorDetails(err error) (code, message string, ok b
 
 func classifyOpenAIUpstreamStreamReadError(err error) (code, message string) {
 	if err != nil {
+		switch {
+		case errors.Is(err, errOpenAIUpstreamEmptyResponse):
+			return OpenAIUpstreamEmptyResponseCode, "Upstream response ended without any output"
+		case errors.Is(err, errOpenAIUpstreamStreamError):
+			return OpenAIUpstreamStreamErrorCode, "Upstream response stream reported an error"
+		case errors.Is(err, errOpenAIUpstreamInvalidStream):
+			return OpenAIUpstreamInvalidStreamCode, "Upstream response stream contained an invalid event"
+		}
 		if errors.Is(err, ErrOpenAIUpstreamStreamTruncated) {
 			return OpenAIUpstreamStreamTruncatedCode, "Upstream response stream ended before completion"
 		}

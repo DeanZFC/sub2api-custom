@@ -255,15 +255,16 @@ type ChannelMonitorV2ModelRow struct {
 }
 
 type ChannelMonitorV2MatrixRow struct {
-	HasTraffic     bool                            `json:"has_traffic"`
-	RecentRequests []ChannelMonitorV2RecentRequest `json:"recent_requests,omitempty"`
-	Platform       string                          `json:"platform"`
-	GroupID        *int64                          `json:"group_id,omitempty"`
-	GroupName      string                          `json:"group_name,omitempty"`
-	Model          string                          `json:"model,omitempty"`
-	Metrics        ChannelMonitorV2Metric          `json:"metrics"`
-	Health         ChannelMonitorV2Health          `json:"health"`
-	Buckets        []ChannelMonitorV2TrendPoint    `json:"buckets"`
+	HasTraffic          bool                            `json:"has_traffic"`
+	RecentRequests      []ChannelMonitorV2RecentRequest `json:"recent_requests,omitempty"`
+	Platform            string                          `json:"platform"`
+	GroupID             *int64                          `json:"group_id,omitempty"`
+	GroupName           string                          `json:"group_name,omitempty"`
+	GroupRateMultiplier *float64                        `json:"group_rate_multiplier,omitempty"`
+	Model               string                          `json:"model,omitempty"`
+	Metrics             ChannelMonitorV2Metric          `json:"metrics"`
+	Health              ChannelMonitorV2Health          `json:"health"`
+	Buckets             []ChannelMonitorV2TrendPoint    `json:"buckets"`
 }
 
 // ChannelMonitorV2RecentRequest exposes diagnostics only to administrators.

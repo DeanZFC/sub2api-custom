@@ -112,9 +112,9 @@ func TestOpenAICacheUsageCCFallbackRequiresCompletedGeneration(t *testing.T) {
 				var result *OpenAIForwardResult
 				var err error
 				if protocol == "responses" {
-					result, err = svc.streamChatCompletionsAsResponses(c, resp, "gpt-5.4", nil, nil, false, nil, "gpt-5.4", "gpt-5.4", nil, nil, time.Now())
+					result, err = svc.streamChatCompletionsAsResponses(c, resp, rawChatCompletionsTestAccount(), "gpt-5.4", nil, nil, false, nil, "gpt-5.4", "gpt-5.4", nil, nil, time.Now())
 				} else {
-					result, err = svc.streamChatCompletionsAsAnthropic(c, resp, "gpt-5.4", "gpt-5.4", "gpt-5.4", nil, nil, time.Now())
+					result, err = svc.streamChatCompletionsAsAnthropic(c, resp, rawChatCompletionsTestAccount(), "gpt-5.4", "gpt-5.4", "gpt-5.4", nil, nil, time.Now())
 				}
 				require.NoError(t, err)
 				require.NotNil(t, result)

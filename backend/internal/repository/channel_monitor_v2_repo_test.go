@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -51,6 +52,61 @@ func TestChannelMonitorV2MatrixDimensionKey(t *testing.T) {
 	require.Equal(t, channelMonitorV2MatrixKey{platform: "openai", model: "unlisted"}, key)
 	key = channelMonitorV2MatrixDimensionKey(service.ChannelMonitorV2GroupByPlatform, cfg, "openai", 7, "gpt-5")
 	require.Equal(t, channelMonitorV2MatrixKey{platform: "openai"}, key)
+}
+
+func TestChannelMonitorV2MatrixIncludesCorrespondingGroupRateWithoutTraffic(t *testing.T) {
+	for _, groupBy := range []service.ChannelMonitorV2GroupBy{service.ChannelMonitorV2GroupByPlatformGroup, service.ChannelMonitorV2GroupByPlatform} {
+		t.Run(string(groupBy), func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = db.Close() })
+			start := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)
+			filter := service.ChannelMonitorV2Filter{Start: start, End: start.Add(time.Hour), Bucket: 5 * time.Minute}
+			cfg := service.ChannelMonitorV2Config{
+				Platforms: []service.ChannelMonitorV2PlatformConfig{{Platform: "openai", Enabled: true}},
+				GroupIDs:  []int64{7, 8, 9},
+			}
+			mock.ExpectQuery("SELECT usage_coverage_start").WillReturnRows(sqlmock.NewRows([]string{"usage", "error", "through", "computed", "backfill"}).AddRow(start, start, filter.End, filter.End, start))
+			// An inactive historical group can still have traffic while it no longer has current group metadata.
+			mock.ExpectQuery("SELECT .*m.platform,m.group_id").WillReturnRows(sqlmock.NewRows([]string{
+				"bucket", "platform", "group_id", "group_name", "model", "success", "errors", "upstream_affected", "upstream_attempts", "input", "cache_eligible_input", "output", "cache_creation", "cache_read", "cache_eligible_creation", "cache_eligible_read", "ttft_sum", "ttft_count", "duration_sum", "duration_count", "tps_output", "tps_generation", "tps_samples",
+			}).AddRow(start, "openai", 9, "Historical", "gpt-5", 1, 0, 0, 1, 10, 10, 5, 0, 0, 0, 0, 100, 1, 200, 1, 5, 100, 1))
+			mock.ExpectQuery("SELECT .*h.platform,h.group_id").WillReturnRows(sqlmock.NewRows([]string{"bucket", "platform", "group_id", "model", "user_id", "metric", "upper_bound", "count"}))
+			mock.ExpectQuery("SELECT id, COALESCE.*rate_multiplier FROM groups").WithArgs(pq.Array([]int64{7, 8, 9})).WillReturnRows(sqlmock.NewRows([]string{"id", "name", "platform", "rate_multiplier"}).
+				AddRow(7, "Discount", "openai", .5).
+				AddRow(8, "Free", "openai", 0))
+
+			repo := &channelMonitorV2Repository{db: db}
+			matrix, err := repo.GetMatrix(context.Background(), filter, cfg, groupBy, false)
+			require.NoError(t, err)
+			if groupBy == service.ChannelMonitorV2GroupByPlatform {
+				require.Len(t, matrix.Items, 1)
+				require.Nil(t, matrix.Items[0].GroupID)
+				require.Nil(t, matrix.Items[0].GroupRateMultiplier)
+				raw, err := json.Marshal(matrix.Items[0])
+				require.NoError(t, err)
+				require.NotContains(t, string(raw), "group_rate_multiplier")
+			} else {
+				require.Len(t, matrix.Items, 3)
+				byID := map[int64]service.ChannelMonitorV2MatrixRow{}
+				for _, row := range matrix.Items {
+					require.NotNil(t, row.GroupID)
+					byID[*row.GroupID] = row
+				}
+				require.False(t, byID[7].HasTraffic)
+				require.False(t, byID[8].HasTraffic)
+				require.NotNil(t, byID[7].GroupRateMultiplier)
+				require.Equal(t, .5, *byID[7].GroupRateMultiplier)
+				require.NotNil(t, byID[8].GroupRateMultiplier)
+				require.Zero(t, *byID[8].GroupRateMultiplier)
+				require.Nil(t, byID[9].GroupRateMultiplier)
+				raw, err := json.Marshal(byID[8])
+				require.NoError(t, err)
+				require.Contains(t, string(raw), `"group_rate_multiplier":0`)
+			}
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
 }
 
 func TestChannelMonitorV2ModelDimensionsAreObservedAndFilterable(t *testing.T) {

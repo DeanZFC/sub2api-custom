@@ -116,12 +116,19 @@ func TestChatFallbackResponseObservationReachesUsage(t *testing.T) {
 					account = forceChatResponsesFallbackAccount()
 					result, err = svc.Forward(context.Background(), c, account, body)
 				}
-				if tt.readError || tt.invalidTool {
+				if tt.disconnect {
+					require.ErrorIs(t, err, context.Canceled)
+					_, _, upstreamFailure := OpenAIUpstreamStreamReadErrorDetails(err)
+					require.False(t, upstreamFailure, "client departure is not an upstream failure")
+					_, hasUpstreamError := c.Get(OpsUpstreamErrorsKey)
+					require.False(t, hasUpstreamError)
+				} else if tt.readError || tt.invalidTool {
 					require.Error(t, err)
 				} else {
 					require.NoError(t, err)
 				}
 				require.NotNil(t, result)
+				require.Equal(t, tt.disconnect, result.ClientDisconnect)
 				require.Equal(t, "/v1/chat/completions", upstream.lastReq.URL.Path)
 				require.Equal(t, "gpt-5.4", gjson.GetBytes(upstream.lastBody, "model").String())
 				require.Equal(t, "gpt-5.4", result.Model)

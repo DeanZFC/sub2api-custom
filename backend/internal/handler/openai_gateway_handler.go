@@ -1029,7 +1029,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				upstreamErrorAlreadyCommunicated := openAIForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 				wroteFallback := false
 				if !upstreamErrorAlreadyCommunicated {
-					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+					wroteFallback = h.ensureOpenAIStreamReadErrorResponse(c, err, streamStarted)
+					if !wroteFallback {
+						wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+					}
 				}
 				fields := []zap.Field{
 					zap.Int64("account_id", account.ID),
@@ -1599,7 +1602,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					)
 					continue
 				}
-				if result != nil && result.ClientDisconnect {
+				if (result != nil && result.ClientDisconnect) || failoverClientGone(c) {
 					reqLog.Info("openai_messages.client_disconnected",
 						zap.Int64("account_id", account.ID),
 						zap.Error(err),
@@ -1610,7 +1613,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					return
 				}
 				h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, result), false, nil, err)
-				wroteFallback := h.ensureAnthropicErrorResponse(c, streamStarted)
+				wroteFallback := h.ensureAnthropicStreamReadErrorResponse(c, err, streamStarted)
+				if !wroteFallback {
+					wroteFallback = h.ensureAnthropicErrorResponse(c, streamStarted)
+				}
 				reqLog.Warn("openai_messages.forward_failed",
 					zap.Int64("account_id", account.ID),
 					zap.Bool("fallback_error_response_written", wroteFallback),
@@ -1730,6 +1736,40 @@ func (h *OpenAIGatewayHandler) ensureAnthropicErrorResponse(c *gin.Context, stre
 		return false
 	}
 	h.anthropicStreamingAwareError(c, http.StatusBadGateway, "api_error", "Upstream request failed", streamStarted || c.Writer.Written())
+	return true
+}
+
+// A typed stream failure can arrive after partial content has already committed
+// the HTTP 200 response. It still needs an Anthropic error event; the generic
+// fallback above intentionally only handles an entirely unwritten response.
+func (h *OpenAIGatewayHandler) ensureAnthropicStreamReadErrorResponse(c *gin.Context, err error, streamStarted bool) bool {
+	code, message, ok := service.OpenAIUpstreamStreamReadErrorDetails(err)
+	if !ok || c == nil || c.Writer == nil || service.IsResponseCommitted(c) {
+		return false
+	}
+	if c.Request != nil && c.Request.Context().Err() != nil {
+		return false
+	}
+	payload, marshalErr := json.Marshal(gin.H{
+		"type": "error",
+		"error": gin.H{
+			"type": "api_error", "code": code, "message": message,
+		},
+	})
+	if marshalErr != nil {
+		_ = c.Error(marshalErr)
+		return false
+	}
+	if streamStarted || c.Writer.Written() {
+		service.MarkOpsStreamFailure(c, "api_error", code, message, http.StatusBadGateway)
+		if _, writeErr := fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", payload); writeErr != nil {
+			_ = c.Error(writeErr)
+		}
+		c.Writer.Flush()
+	} else {
+		c.Data(http.StatusBadGateway, "application/json", payload)
+	}
+	service.MarkResponseCommitted(c)
 	return true
 }
 
@@ -4066,12 +4106,16 @@ func (h *OpenAIGatewayHandler) ensureOpenAIStreamReadErrorResponse(c *gin.Contex
 	if !ok || c == nil || c.Writer == nil || service.IsResponseCommitted(c) {
 		return false
 	}
+	if c.Request != nil && c.Request.Context().Err() != nil {
+		return false
+	}
 	if c.Writer.Written() {
 		streamStarted = true
 	}
 	h.handleStreamingAwareErrorWithCode(
 		c, http.StatusBadGateway, "upstream_error", code, message, streamStarted, true,
 	)
+	service.MarkResponseCommitted(c)
 	return true
 }
 

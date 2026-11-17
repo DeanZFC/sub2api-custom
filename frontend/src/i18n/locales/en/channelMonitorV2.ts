@@ -36,7 +36,7 @@ export default {
       expandModels: 'Show {count} more models', collapseModels: 'Show fewer models',
       noModels: 'No model traffic in this range', currentScope: 'Status: {model}', backToOverall: 'Back to overall',
       title: 'Channel health', description: 'Totals cover the selected window; the last 20 requests are recent samples · Hover for details',
-      passive: 'Passive health', availability: 'Availability',
+      passive: 'Passive health', availability: 'Availability', groupRateMultiplier: 'Rate {rate}×',
       latestRequest: 'Latest request: {time}', past: 'Past', now: 'Latest',
       requestTime: 'Request time: {value}', requestTTFT: 'First token: {value}', requestDuration: 'Total duration: {value}',
       requestErrorType: 'Error type: {value}', requestErrorMessage: 'Error message: {value}', viewErrorLog: 'View full error log',

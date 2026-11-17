@@ -23,7 +23,14 @@
                 <ProviderIcon :provider="row.platform" :size="25" />
               </span>
               <div class="min-w-0 flex-1">
-                <h3 class="truncate text-base font-bold leading-5 text-gray-900 dark:text-white" :title="cardTitle(row)">{{ cardTitle(row) }}</h3>
+                <div class="flex min-w-0 items-center gap-2">
+                  <h3 class="min-w-0 truncate text-base font-bold leading-5 text-gray-900 dark:text-white" :title="cardTitle(row)">{{ cardTitle(row) }}</h3>
+                  <span
+                    v-if="row.group_id && row.group_rate_multiplier != null"
+                    class="shrink-0 rounded-md bg-blue-50 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                    data-testid="group-rate-multiplier"
+                  >{{ t('channelMonitorV2.cards.groupRateMultiplier', { rate: row.group_rate_multiplier }) }}</span>
+                </div>
                 <div class="mt-1 flex gap-1.5 overflow-hidden whitespace-nowrap text-[11px]">
                   <span class="rounded-md bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">{{ platformDisplayName(row.platform) }}</span>
                   <span class="rounded-md bg-gray-100 px-1.5 py-0.5 text-gray-500 dark:bg-dark-700 dark:text-gray-400">{{ t('channelMonitorV2.cards.passive') }}</span>
