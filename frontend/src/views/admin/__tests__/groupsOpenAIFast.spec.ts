@@ -23,16 +23,39 @@ describe("groupsOpenAIFast", () => {
     expect(normalizeGroupOpenAIFast("openai", false)).toBe(false);
   });
 
-  it("reads legacy Fast groups and honors an explicitly cleared tier", () => {
+  it("reads legacy flags and gives a nonempty explicit tier precedence", () => {
     expect(getGroupOpenAIServiceTier({ platform: "openai", force_openai_fast: true })).toBe("priority");
-    expect(getGroupOpenAIServiceTier({ platform: "openai", force_openai_fast: true, force_openai_service_tier: "" })).toBe("");
+    expect(getGroupOpenAIServiceTier({ platform: "openai", force_openai_fast: true, force_openai_service_tier: "" })).toBe("priority");
     expect(getGroupOpenAIServiceTier({ platform: "openai", force_openai_fast: true, force_openai_service_tier: "ultrafast" })).toBe("ultrafast");
   });
 
   it("keeps the legacy flag synchronized and clears unsupported platforms", () => {
-    expect(groupOpenAIServiceTierToAPI("openai", "priority")).toEqual({ force_openai_service_tier: "priority", force_openai_fast: true });
-    expect(groupOpenAIServiceTierToAPI("composite", "ultrafast")).toEqual({ force_openai_service_tier: "ultrafast", force_openai_fast: false });
-    expect(groupOpenAIServiceTierToAPI("anthropic", "ultrafast")).toEqual({ force_openai_service_tier: "", force_openai_fast: false });
+    expect(groupOpenAIServiceTierToAPI("openai", "priority")).toEqual({ force_openai_service_tier: "priority", force_openai_fast: true, force_openai_ultrafast: false });
+    expect(groupOpenAIServiceTierToAPI("composite", "ultrafast")).toEqual({ force_openai_service_tier: "ultrafast", force_openai_fast: false, force_openai_ultrafast: true });
+    expect(groupOpenAIServiceTierToAPI("anthropic", "ultrafast")).toEqual({ force_openai_service_tier: "", force_openai_fast: false, force_openai_ultrafast: false });
+  });
+
+  it("round-trips official Ultra Fast groups and their Fast fallback without losing flags", () => {
+    const officialGroup = { platform: "openai", force_openai_service_tier: "" as const, force_openai_fast: true, force_openai_ultrafast: true };
+    const selected = getGroupOpenAIServiceTier(officialGroup);
+    expect(selected).toBe("ultrafast_with_fast_fallback");
+    expect(groupOpenAIServiceTierToAPI(officialGroup.platform, selected)).toEqual({ force_openai_fast: true, force_openai_ultrafast: true });
+    expect(getGroupOpenAIServiceTier({ ...officialGroup, force_openai_fast: false })).toBe("supported_ultrafast");
+    expect(groupOpenAIServiceTierToAPI("openai", "supported_ultrafast")).toEqual({ force_openai_fast: false, force_openai_ultrafast: true });
+    expect(getGroupOpenAIServiceTier({ ...officialGroup, force_openai_service_tier: "priority" })).toBe("priority");
+    expect(groupOpenAIServiceTierToAPI("openai", "")).toEqual({ force_openai_service_tier: "", force_openai_fast: false, force_openai_ultrafast: false });
+    expect(groupOpenAIServiceTierToAPI("anthropic", selected)).toEqual({ force_openai_service_tier: "", force_openai_fast: false, force_openai_ultrafast: false });
+  });
+
+  it("provides localized Ultra Fast switch labels naming the supported models", () => {
+    for (const locale of [zh, en]) {
+      expect(locale.groups.openaiFast).toMatchObject({
+        forceUltrafast: expect.stringContaining("ultrafast"),
+        ultrafastHint: expect.stringContaining("service_tier=ultrafast"),
+      });
+      expect(locale.groups.openaiFast.ultrafastHint).toContain("GPT-6 Astra");
+      expect(locale.groups.openaiFast.ultrafastHint).toContain("GPT-6.1 Sol");
+    }
   });
 
   it("provides localized tier labels and states protocol and billing limits", () => {

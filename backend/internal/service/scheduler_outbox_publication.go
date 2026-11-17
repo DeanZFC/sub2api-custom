@@ -10,6 +10,25 @@ type outboxAuthoritativeSchedulerCache struct {
 	source LatestSchedulerAccountsRepository
 }
 
+// GetSnapshotValues preserves the underlying cache's allocation-saving read path.
+// Legacy caches still expose caller-owned account values through GetSnapshot.
+func (c *outboxAuthoritativeSchedulerCache) GetSnapshotValues(ctx context.Context, bucket SchedulerBucket) ([]Account, bool, error) {
+	if reader, ok := c.SchedulerCache.(schedulerSnapshotValuesReader); ok {
+		return reader.GetSnapshotValues(ctx, bucket)
+	}
+	cached, hit, err := c.SchedulerCache.GetSnapshot(ctx, bucket)
+	if err != nil || !hit {
+		return nil, hit, err
+	}
+	accounts := make([]Account, 0, len(cached))
+	for _, account := range cached {
+		if account != nil {
+			accounts = append(accounts, *account)
+		}
+	}
+	return accounts, true, nil
+}
+
 func (c *outboxAuthoritativeSchedulerCache) GetAccounts(ctx context.Context, ids []int64) (map[int64]*Account, error) {
 	if r, ok := c.SchedulerCache.(schedulerAccountBatchReader); ok {
 		return r.GetAccounts(ctx, ids)

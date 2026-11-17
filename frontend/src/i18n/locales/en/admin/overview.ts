@@ -1316,7 +1316,11 @@ export default {
         noForce: 'Do not force (use request tier)',
         priority: 'Fast (priority)',
         ultrafast: 'Ultrafast',
+        supportedUltrafast: 'Ultra Fast (supported models only)',
+        ultrafastWithFastFallback: 'Ultra Fast (Fast fallback for other models)',
         hint: 'Requests from this group to OpenAI-compatible upstreams use the selected tier. Does not apply to Excel BPS channels. The global Fast/Flex policy and upstream model and account support still apply. New requests update immediately after saving; existing WebSocket sessions must reconnect.',
+        forceUltrafast: 'Force Ultra Fast (ultrafast)',
+        ultrafastHint: 'The original Ultrafast selection forces the tier on all models. The supported-model options force service_tier=ultrafast only on models that support Ultra Fast (GPT-6 Astra, GPT-6.1 Sol), taking precedence over Fast. The Fast fallback option uses priority for other models; the supported-model option without fallback follows the client for other models. Ultra Fast is billed at 6x the Standard price, is not covered by "Free Fast", and requires upstream accounts with Ultra Fast access.',
         free: 'Free Fast',
         freeHint: 'Applies only to Fast (priority): customers are charged the equivalent Standard price. Does not apply to Ultrafast.'
       },

@@ -91,7 +91,7 @@ func TestGroupForceUltrafastRequiresTrustedOpenAIGroup(t *testing.T) {
 				// The explicit tier takes precedence over legacy snapshots with both set.
 				ForceOpenAIFast: true,
 			})
-			require.Equal(t, tt.want, openAIGroupForcedServiceTier(ctx, &Account{Platform: tt.accountPlatform}))
+			require.Equal(t, tt.want, openAIGroupForcedServiceTier(ctx, &Account{Platform: tt.accountPlatform}, "gpt-6-astra"))
 		})
 	}
 }
@@ -197,6 +197,28 @@ func TestMessagesChatFallback_GroupForceUltrafast(t *testing.T) {
 				require.NotNil(t, result.ServiceTier)
 				require.Equal(t, OpenAIFastTierUltrafast, *result.ServiceTier)
 			}
+		})
+	}
+}
+
+func TestGroupForcedServiceTierPreservesExplicitAndModelScopedModes(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI}
+	for _, tt := range []struct {
+		name, tier, model, want string
+		fast, ultrafast         bool
+	}{
+		{name: "explicit ultrafast retains custom model override", tier: "ultrafast", model: "gpt-6-sol", want: "ultrafast"},
+		{name: "explicit priority wins over boolean ultrafast", tier: "priority", ultrafast: true, model: "gpt-6.1-sol", want: "priority"},
+		{name: "boolean ultrafast respects supported models", ultrafast: true, model: "gpt-6-sol"},
+		{name: "boolean pair falls back to fast", fast: true, ultrafast: true, model: "gpt-6-sol", want: "priority"},
+		{name: "boolean pair selects ultrafast when supported", fast: true, ultrafast: true, model: "gpt-6.1-sol", want: "ultrafast"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.WithValue(context.Background(), ctxkey.Group, &Group{
+				ID: 7, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true,
+				ForceOpenAIServiceTier: tt.tier, ForceOpenAIFast: tt.fast, ForceOpenAIUltrafast: tt.ultrafast,
+			})
+			require.Equal(t, tt.want, openAIGroupForcedServiceTier(ctx, account, tt.model))
 		})
 	}
 }

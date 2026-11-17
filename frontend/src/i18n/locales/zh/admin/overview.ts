@@ -1314,7 +1314,11 @@ export default {
         noForce: '不强制（使用请求档位）',
         priority: 'Fast（priority）',
         ultrafast: 'Ultrafast',
+        supportedUltrafast: 'Ultra Fast（仅支持模型）',
+        ultrafastWithFastFallback: 'Ultra Fast（其他模型使用 Fast）',
         hint: '此分组发往 OpenAI 协议上游的请求将统一使用所选档位，不适用于 Excel BPS 通道；仍受全局 Fast/Flex 策略和上游模型、账号支持范围限制。保存后新请求立即生效，已建立的 WebSocket 会话需重连。',
+        forceUltrafast: '强制使用 Ultra Fast（ultrafast）',
+        ultrafastHint: '原 Ultrafast 选项仍对所有模型强制档位；“仅支持模型”与“其他模型使用 Fast”选项仅对支持 Ultra Fast 的模型（GPT-6 Astra、GPT-6.1 Sol）强制写入 service_tier=ultrafast，优先于 Fast；选择“其他模型使用 Fast”时，不支持 Ultra Fast 的模型写入 priority，选择“仅支持模型”时其他模型跟随客户端。Ultra Fast 按标准价 6 倍计费，不受"免费 Fast"影响，且需要上游账号具备 Ultra Fast 权限。',
         free: '免费 Fast',
         freeHint: '仅适用于 Fast（priority）：客户实际费用按同一请求的 Standard 价格计算，不适用于 Ultrafast。'
       },

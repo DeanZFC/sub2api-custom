@@ -16,14 +16,21 @@ func TestAdminService_CreateGroupForcedServiceTier(t *testing.T) {
 		name, platform string
 		tier           *string
 		legacy         bool
+		ultrafast      bool
 		want           string
+		wantFast       bool
+		wantUltrafast  bool
 	}{
 		{name: "off", platform: PlatformOpenAI},
-		{name: "legacy fast", platform: PlatformOpenAI, legacy: true, want: "priority"},
+		{name: "legacy fast", platform: PlatformOpenAI, legacy: true, wantFast: true},
 		{name: "explicit off overrides legacy", platform: PlatformOpenAI, tier: ptrString(""), legacy: true},
-		{name: "priority", platform: PlatformOpenAI, tier: ptrString("priority"), want: "priority"},
-		{name: "ultrafast overrides legacy", platform: PlatformOpenAI, tier: ptrString("ultrafast"), legacy: true, want: "ultrafast"},
-		{name: "composite", platform: PlatformComposite, tier: ptrString("ultrafast"), want: "ultrafast"},
+		{name: "priority", platform: PlatformOpenAI, tier: ptrString("priority"), want: "priority", wantFast: true},
+		{name: "ultrafast overrides legacy", platform: PlatformOpenAI, tier: ptrString("ultrafast"), legacy: true, want: "ultrafast", wantUltrafast: true},
+		{name: "composite", platform: PlatformComposite, tier: ptrString("ultrafast"), want: "ultrafast", wantUltrafast: true},
+		{name: "upstream ultrafast", platform: PlatformOpenAI, ultrafast: true, wantUltrafast: true},
+		{name: "upstream ultrafast with fast fallback", platform: PlatformOpenAI, legacy: true, ultrafast: true, wantFast: true, wantUltrafast: true},
+		{name: "explicit off overrides both flags", platform: PlatformOpenAI, tier: ptrString(""), legacy: true, ultrafast: true},
+		{name: "explicit priority overrides ultrafast flag", platform: PlatformOpenAI, tier: ptrString("priority"), ultrafast: true, want: "priority", wantFast: true},
 		{name: "unsupported platform", platform: PlatformAnthropic, tier: ptrString("ultrafast")},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -31,11 +38,12 @@ func TestAdminService_CreateGroupForcedServiceTier(t *testing.T) {
 			svc := &adminServiceImpl{groupRepo: repo}
 			group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
 				Name: tt.name, Platform: tt.platform, RateMultiplier: 1,
-				ForceOpenAIServiceTier: tt.tier, ForceOpenAIFast: tt.legacy,
+				ForceOpenAIServiceTier: tt.tier, ForceOpenAIFast: tt.legacy, ForceOpenAIUltrafast: tt.ultrafast,
 			})
 			require.NoError(t, err)
 			require.Equal(t, tt.want, repo.created.ForceOpenAIServiceTier)
-			require.Equal(t, tt.want == "priority", group.ForceOpenAIFast)
+			require.Equal(t, tt.wantFast, group.ForceOpenAIFast)
+			require.Equal(t, tt.wantUltrafast, group.ForceOpenAIUltrafast)
 		})
 	}
 }
@@ -46,13 +54,20 @@ func TestAdminService_UpdateGroupForcedServiceTier(t *testing.T) {
 		name, platform, want string
 		tier                 *string
 		legacy               *bool
+		ultrafast            *bool
+		wantFast             bool
+		wantUltrafast        bool
 	}{
 		{name: "omitted retains ultrafast", want: "ultrafast"},
-		{name: "legacy enable", legacy: &truth, want: "priority"},
+		{name: "legacy enable", legacy: &truth, wantFast: true},
 		{name: "legacy disable", legacy: &falsity},
 		{name: "explicit off overrides legacy", tier: ptrString(""), legacy: &truth},
-		{name: "priority overrides legacy", tier: ptrString("priority"), legacy: &falsity, want: "priority"},
-		{name: "ultrafast overrides legacy", tier: ptrString("ultrafast"), legacy: &truth, want: "ultrafast"},
+		{name: "priority overrides legacy", tier: ptrString("priority"), legacy: &falsity, want: "priority", wantFast: true},
+		{name: "ultrafast overrides legacy", tier: ptrString("ultrafast"), legacy: &truth, want: "ultrafast", wantUltrafast: true},
+		{name: "upstream ultrafast clears legacy enum", ultrafast: &truth, wantUltrafast: true},
+		{name: "upstream both flags", legacy: &truth, ultrafast: &truth, wantFast: true, wantUltrafast: true},
+		{name: "upstream off clears legacy enum", ultrafast: &falsity},
+		{name: "explicit off overrides both flags", tier: ptrString(""), legacy: &truth, ultrafast: &truth},
 		{name: "platform change clears", platform: PlatformAnthropic},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -63,11 +78,12 @@ func TestAdminService_UpdateGroupForcedServiceTier(t *testing.T) {
 			invalidator := &authCacheInvalidatorStub{}
 			svc := &adminServiceImpl{groupRepo: repo, authCacheInvalidator: invalidator}
 			group, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{
-				Platform: tt.platform, ForceOpenAIServiceTier: tt.tier, ForceOpenAIFast: tt.legacy,
+				Platform: tt.platform, ForceOpenAIServiceTier: tt.tier, ForceOpenAIFast: tt.legacy, ForceOpenAIUltrafast: tt.ultrafast,
 			})
 			require.NoError(t, err)
 			require.Equal(t, tt.want, repo.updated.ForceOpenAIServiceTier)
-			require.Equal(t, tt.want == "priority", group.ForceOpenAIFast)
+			require.Equal(t, tt.wantFast, group.ForceOpenAIFast)
+			require.Equal(t, tt.wantUltrafast, group.ForceOpenAIUltrafast)
 			require.Equal(t, []int64{1}, invalidator.groupIDs)
 		})
 	}

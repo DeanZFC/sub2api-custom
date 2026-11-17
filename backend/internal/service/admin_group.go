@@ -365,20 +365,17 @@ func groupSupportsOpenAIFast(platform string) bool {
 	return platform == PlatformOpenAI || platform == PlatformComposite
 }
 
-// normalizeGroupForcedOpenAIServiceTier keeps the legacy boolean request API
-// compatible while an explicitly supplied tier (including empty) takes precedence.
-func normalizeGroupForcedOpenAIServiceTier(tier *string, legacyFast bool) (string, error) {
+// normalizeGroupForcedOpenAIServiceTier preserves both upstream flags when no
+// explicit tier is supplied. An explicit tier (including empty) owns all flags.
+func normalizeGroupForcedOpenAIServiceTier(tier *string, fast, ultrafast bool) (string, bool, bool, error) {
 	if tier == nil {
-		if legacyFast {
-			return OpenAIFastTierPriority, nil
-		}
-		return "", nil
+		return "", fast, ultrafast, nil
 	}
 	switch *tier {
 	case "", OpenAIFastTierPriority, OpenAIFastTierUltrafast:
-		return *tier, nil
+		return *tier, *tier == OpenAIFastTierPriority, *tier == OpenAIFastTierUltrafast, nil
 	default:
-		return "", infraerrors.BadRequest("INVALID_FORCE_OPENAI_SERVICE_TIER", "force_openai_service_tier must be empty, priority, or ultrafast")
+		return "", false, false, infraerrors.BadRequest("INVALID_FORCE_OPENAI_SERVICE_TIER", "force_openai_service_tier must be empty, priority, or ultrafast")
 	}
 }
 
@@ -387,6 +384,7 @@ func sanitizeGroupOpenAIFast(group *Group) {
 		if group != nil {
 			group.ForceOpenAIFast = false
 			group.ForceOpenAIServiceTier = ""
+			group.ForceOpenAIUltrafast = false
 			group.FreeOpenAIFast = false
 		}
 	}
@@ -431,7 +429,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	}
 
 	platform := NormalizeGroupPlatform(input.Platform)
-	forcedOpenAIServiceTier, err := normalizeGroupForcedOpenAIServiceTier(input.ForceOpenAIServiceTier, input.ForceOpenAIFast)
+	forcedOpenAIServiceTier, forceOpenAIFast, forceOpenAIUltrafast, err := normalizeGroupForcedOpenAIServiceTier(input.ForceOpenAIServiceTier, input.ForceOpenAIFast, input.ForceOpenAIUltrafast)
 	if err != nil {
 		return nil, err
 	}
@@ -664,8 +662,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		SupportedModelScopes:            input.SupportedModelScopes,
 		AllowMessagesDispatch:           input.AllowMessagesDispatch,
 		AllowLive:                       input.AllowLive,
-		ForceOpenAIFast:                 forcedOpenAIServiceTier == OpenAIFastTierPriority,
+		ForceOpenAIFast:                 forceOpenAIFast,
 		ForceOpenAIServiceTier:          forcedOpenAIServiceTier,
+		ForceOpenAIUltrafast:            forceOpenAIUltrafast,
 		FreeOpenAIFast:                  input.FreeOpenAIFast,
 		RequireOAuthOnly:                input.RequireOAuthOnly,
 		RequirePrivacySet:               input.RequirePrivacySet,
@@ -824,12 +823,15 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 
 	forcedOpenAIServiceTier := group.ForceOpenAIServiceTier
-	if input.ForceOpenAIServiceTier != nil || input.ForceOpenAIFast != nil {
-		legacyFast := group.ForceOpenAIFast
+	forceOpenAIFast, forceOpenAIUltrafast := group.ForceOpenAIFast, group.ForceOpenAIUltrafast
+	if input.ForceOpenAIServiceTier != nil || input.ForceOpenAIFast != nil || input.ForceOpenAIUltrafast != nil {
 		if input.ForceOpenAIFast != nil {
-			legacyFast = *input.ForceOpenAIFast
+			forceOpenAIFast = *input.ForceOpenAIFast
 		}
-		forcedOpenAIServiceTier, err = normalizeGroupForcedOpenAIServiceTier(input.ForceOpenAIServiceTier, legacyFast)
+		if input.ForceOpenAIUltrafast != nil {
+			forceOpenAIUltrafast = *input.ForceOpenAIUltrafast
+		}
+		forcedOpenAIServiceTier, forceOpenAIFast, forceOpenAIUltrafast, err = normalizeGroupForcedOpenAIServiceTier(input.ForceOpenAIServiceTier, forceOpenAIFast, forceOpenAIUltrafast)
 		if err != nil {
 			return nil, err
 		}
@@ -1078,10 +1080,10 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if input.AllowLive != nil {
 		group.AllowLive = *input.AllowLive
 	}
-	if input.ForceOpenAIServiceTier != nil || input.ForceOpenAIFast != nil {
-		group.ForceOpenAIServiceTier = forcedOpenAIServiceTier
-		group.ForceOpenAIFast = forcedOpenAIServiceTier == OpenAIFastTierPriority
-	}
+	group.ForceOpenAIServiceTier = forcedOpenAIServiceTier
+	group.ForceOpenAIFast = forceOpenAIFast
+	group.ForceOpenAIUltrafast = forceOpenAIUltrafast
+
 	if input.FreeOpenAIFast != nil {
 		group.FreeOpenAIFast = *input.FreeOpenAIFast
 	}

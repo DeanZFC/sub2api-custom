@@ -70,6 +70,25 @@ type schedulerGroupAwareOpenAIAccountRepo struct {
 	schedulerTestOpenAIAccountRepo
 }
 
+func (r schedulerGroupAwareOpenAIAccountRepo) ListModelAvailabilityCandidates(_ context.Context, groupID *int64, platforms []string, includeGrouped bool) ([]Account, error) {
+	var result []Account
+	for _, acc := range r.accounts {
+		if acc.Status != StatusActive || !acc.Schedulable {
+			continue
+		}
+		if (groupID != nil || !includeGrouped) && !openAIStickyAccountMatchesGroup(&acc, groupID) {
+			continue
+		}
+		for _, platform := range platforms {
+			if acc.Platform == platform {
+				result = append(result, acc)
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
 func (r schedulerGroupAwareOpenAIAccountRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
 	var result []Account
 	for _, acc := range r.accounts {

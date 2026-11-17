@@ -311,7 +311,7 @@ func prepareNonTransactionalMigration(ctx context.Context, db migrationConnectio
 		return nil
 	case usageLogsUpstreamRequestIDIndexMigration:
 		return dropInvalidIndexIfPresent(ctx, db, usageLogsUpstreamRequestIDIndex)
-	case usageLogsAPIKeyCostIndexMigration:
+	case usageLogsAPIKeyCostIndexMigration, "249_add_usage_logs_api_key_cost_index_notx.sql":
 		return dropInvalidIndexIfPresent(ctx, db, usageLogsAPIKeyCostIndex)
 	default:
 		return nil

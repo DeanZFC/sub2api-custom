@@ -130,6 +130,8 @@ const (
 	FieldForceOpenaiFast = "force_openai_fast"
 	// FieldForceOpenaiServiceTier holds the string denoting the force_openai_service_tier field in the database.
 	FieldForceOpenaiServiceTier = "force_openai_service_tier"
+	// FieldForceOpenaiUltrafast holds the string denoting the force_openai_ultrafast field in the database.
+	FieldForceOpenaiUltrafast = "force_openai_ultrafast"
 	// FieldFreeOpenaiFast holds the string denoting the free_openai_fast field in the database.
 	FieldFreeOpenaiFast = "free_openai_fast"
 	// FieldRequireOauthOnly holds the string denoting the require_oauth_only field in the database.
@@ -301,6 +303,7 @@ var Columns = []string{
 	FieldAllowLive,
 	FieldForceOpenaiFast,
 	FieldForceOpenaiServiceTier,
+	FieldForceOpenaiUltrafast,
 	FieldFreeOpenaiFast,
 	FieldRequireOauthOnly,
 	FieldRequirePrivacySet,
@@ -437,6 +440,8 @@ var (
 	DefaultForceOpenaiServiceTier string
 	// ForceOpenaiServiceTierValidator is a validator for the "force_openai_service_tier" field. It is called by the builders before save.
 	ForceOpenaiServiceTierValidator func(string) error
+	// DefaultForceOpenaiUltrafast holds the default value on creation for the "force_openai_ultrafast" field.
+	DefaultForceOpenaiUltrafast bool
 	// DefaultFreeOpenaiFast holds the default value on creation for the "free_openai_fast" field.
 	DefaultFreeOpenaiFast bool
 	// DefaultRequireOauthOnly holds the default value on creation for the "require_oauth_only" field.
@@ -736,6 +741,11 @@ func ByForceOpenaiFast(opts ...sql.OrderTermOption) OrderOption {
 // ByForceOpenaiServiceTier orders the results by the force_openai_service_tier field.
 func ByForceOpenaiServiceTier(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldForceOpenaiServiceTier, opts...).ToFunc()
+}
+
+// ByForceOpenaiUltrafast orders the results by the force_openai_ultrafast field.
+func ByForceOpenaiUltrafast(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldForceOpenaiUltrafast, opts...).ToFunc()
 }
 
 // ByFreeOpenaiFast orders the results by the free_openai_fast field.

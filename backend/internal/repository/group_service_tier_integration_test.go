@@ -91,3 +91,65 @@ func TestGroupForcedServiceTierMigrationBackfillAndIdempotency(t *testing.T) {
 	_, err = tx.ExecContext(ctx, "UPDATE groups SET force_openai_service_tier='flex' WHERE id=1")
 	require.Error(t, err, "database rejects unsupported forced service tiers")
 }
+
+func TestGroupUpstreamUltrafastPersistenceAndAuthInvalidation(t *testing.T) {
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+	groups := NewGroupRepository(integrationEntClient, integrationDB)
+	group := &service.Group{
+		Name: fmt.Sprintf("upstream-ultrafast-%d", suffix), Platform: service.PlatformOpenAI,
+		RateMultiplier: 1, ImageRateMultiplier: 1, Status: service.StatusActive, SubscriptionType: service.SubscriptionTypeStandard,
+		ForceOpenAIUltrafast: true, ForceOpenAIFast: true,
+	}
+	require.NoError(t, groups.Create(ctx, group))
+	t.Cleanup(func() { _, _ = integrationDB.ExecContext(ctx, "DELETE FROM groups WHERE id=$1", group.ID) })
+	user := mustCreateUser(t, integrationEntClient, &service.User{Email: fmt.Sprintf("upstream-tier-%d@example.com", suffix), Concurrency: 5})
+	t.Cleanup(func() { _, _ = integrationDB.ExecContext(ctx, "DELETE FROM users WHERE id=$1", user.ID) })
+	keys := NewAPIKeyRepository(integrationEntClient, integrationDB)
+	for _, fallback := range []bool{false, true} {
+		keyValue := fmt.Sprintf("sk-upstream-tier-%d-%t", suffix, fallback)
+		key := &service.APIKey{UserID: user.ID, Key: keyValue, Name: "ultrafast", Status: service.StatusActive}
+		if fallback {
+			key.FallbackGroupID = &group.ID
+		} else {
+			key.GroupID = &group.ID
+		}
+		require.NoError(t, keys.Create(ctx, key))
+		t.Cleanup(func() {
+			_, _ = integrationDB.ExecContext(ctx, "DELETE FROM api_keys WHERE id=$1", key.ID)
+			_, _ = integrationDB.ExecContext(ctx, "DELETE FROM auth_cache_invalidation_outbox WHERE cache_key=api_key_cache_digest($1)", keyValue)
+		})
+
+		for _, enabled := range []bool{true, false, true} {
+			group.ForceOpenAIUltrafast = enabled
+			require.NoError(t, groups.Update(ctx, group))
+			read, err := groups.GetByID(ctx, group.ID)
+			require.NoError(t, err)
+			require.Equal(t, enabled, read.ForceOpenAIUltrafast)
+			auth, err := keys.GetByKeyForAuth(ctx, keyValue)
+			require.NoError(t, err)
+			projected := auth.Group
+			if fallback {
+				projected = auth.FallbackGroup
+			}
+			require.NotNil(t, projected)
+			require.Equal(t, enabled, projected.ForceOpenAIUltrafast)
+			require.True(t, projected.ForceOpenAIFast)
+			require.Empty(t, projected.ForceOpenAIServiceTier)
+		}
+
+		_, err := integrationDB.ExecContext(ctx, "DELETE FROM auth_cache_invalidation_outbox WHERE cache_key=api_key_cache_digest($1)", keyValue)
+		require.NoError(t, err)
+		_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET force_openai_ultrafast=NOT force_openai_ultrafast WHERE id=$1", group.ID)
+		require.NoError(t, err)
+		var invalidations int
+		require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT count(*) FROM auth_cache_invalidation_outbox WHERE cache_key=api_key_cache_digest($1)", keyValue).Scan(&invalidations))
+		require.Equal(t, 1, invalidations, "direct SQL changes must invalidate both primary and fallback group snapshots")
+		_, err = integrationDB.ExecContext(ctx, "DELETE FROM auth_cache_invalidation_outbox WHERE cache_key=api_key_cache_digest($1)", keyValue)
+		require.NoError(t, err)
+		_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET force_openai_ultrafast=force_openai_ultrafast WHERE id=$1", group.ID)
+		require.NoError(t, err)
+		require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT count(*) FROM auth_cache_invalidation_outbox WHERE cache_key=api_key_cache_digest($1)", keyValue).Scan(&invalidations))
+		require.Zero(t, invalidations, "unchanged flags must not enqueue invalidations")
+	}
+}

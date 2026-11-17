@@ -57,6 +57,9 @@ func TestOpenAIUpstreamErrorClientMessage(t *testing.T) {
 		{"context window", `{"response":{"error":{"code":"context_length_exceeded"}}}`, "input exceeds the context window", "input exceeds the context window"},
 		{"policy", `{"error":{"code":"content_policy_violation"}}`, "blocked by our content policy", "blocked by our content policy"},
 		{"billing", `{"error":{"code":"insufficient_quota"}}`, "provider balance empty", UpstreamBillingExhaustedClientMessage},
+		{"flat invalid image", `{"code":"invalid_image"}`, "Invalid image: https://example.test?access_token=secret", "Invalid image: https://example.test?access_token=***"},
+		{"nested invalid size", `{"error":{"code":"invalid_size"}}`, "Invalid size.", "Invalid size."},
+		{"misclassified image failure", `{"code":"invalid_image"}`, internalExcelFailure, OpenAIUpstreamFailureClientMessage},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, OpenAIUpstreamErrorClientMessage([]byte(tc.payload), tc.message))

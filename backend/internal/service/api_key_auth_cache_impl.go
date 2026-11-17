@@ -12,7 +12,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 32 // v32: group forced service tier; retain legacy Fast compatibility.
+const apiKeyAuthSnapshotVersion = 33 // v33: retain forced service tier and cache the upstream Ultrafast flag.
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -381,6 +381,7 @@ func apiKeyAuthGroupSnapshotFromGroup(group *Group) *APIKeyAuthGroupSnapshot {
 		AllowLive:                       group.AllowLive,
 		ForceOpenAIFast:                 group.ForceOpenAIFast,
 		ForceOpenAIServiceTier:          group.ForceOpenAIServiceTier,
+		ForceOpenAIUltrafast:            group.ForceOpenAIUltrafast,
 		FreeOpenAIFast:                  group.FreeOpenAIFast,
 		RequireOAuthOnly:                group.RequireOAuthOnly,
 		RequirePrivacySet:               group.RequirePrivacySet,
@@ -457,6 +458,7 @@ func apiKeyAuthGroupFromSnapshot(snapshot *APIKeyAuthGroupSnapshot) *Group {
 		AllowLive:                       snapshot.AllowLive,
 		ForceOpenAIFast:                 snapshot.ForceOpenAIFast,
 		ForceOpenAIServiceTier:          snapshot.ForceOpenAIServiceTier,
+		ForceOpenAIUltrafast:            snapshot.ForceOpenAIUltrafast,
 		FreeOpenAIFast:                  snapshot.FreeOpenAIFast,
 		RequireOAuthOnly:                snapshot.RequireOAuthOnly,
 		RequirePrivacySet:               snapshot.RequirePrivacySet,
@@ -579,6 +581,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			RequirePrivacySet:               apiKey.Group.RequirePrivacySet,
 			ForceOpenAIFast:                 apiKey.Group.ForceOpenAIFast,
 			ForceOpenAIServiceTier:          apiKey.Group.ForceOpenAIServiceTier,
+			ForceOpenAIUltrafast:            apiKey.Group.ForceOpenAIUltrafast,
 			FreeOpenAIFast:                  apiKey.Group.FreeOpenAIFast,
 			DefaultMappedModel:              apiKey.Group.DefaultMappedModel,
 			MessagesDispatchModelConfig:     apiKey.Group.MessagesDispatchModelConfig,
@@ -702,6 +705,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			RequirePrivacySet:               snapshot.Group.RequirePrivacySet,
 			ForceOpenAIFast:                 snapshot.Group.ForceOpenAIFast,
 			ForceOpenAIServiceTier:          snapshot.Group.ForceOpenAIServiceTier,
+			ForceOpenAIUltrafast:            snapshot.Group.ForceOpenAIUltrafast,
 			FreeOpenAIFast:                  snapshot.Group.FreeOpenAIFast,
 			DefaultMappedModel:              snapshot.Group.DefaultMappedModel,
 			MessagesDispatchModelConfig:     snapshot.Group.MessagesDispatchModelConfig,

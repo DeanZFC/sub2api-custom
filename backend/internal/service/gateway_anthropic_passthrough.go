@@ -20,6 +20,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 
 	"github.com/gin-gonic/gin"
 )
@@ -524,6 +525,7 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 		}
 		keepaliveTimer.Reset(keepaliveInterval)
 	}
+	clientModel := compositeClientModel(ctx, "")
 	var eventLines []string
 	var eventData []string
 	eventName := ""
@@ -569,7 +571,12 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 			writeResponseHeaders()
 			var output strings.Builder
 			for _, line := range eventLines {
-				output.Write(reverseToolNamesIfPresent(c, []byte(line)))
+				if data, ok := extractAnthropicSSEDataLine(line); ok && clientModel != "" && gjson.Get(data, "type").String() == "message_start" && gjson.Get(data, "message.model").Exists() {
+					if rewritten, err := sjson.Set(data, "message.model", clientModel); err == nil {
+						line = "data: " + rewritten
+					}
+				}
+				output.WriteString(reverseToolNamesIfPresentString(c, line))
 				output.WriteByte('\n')
 			}
 			if _, err := io.WriteString(w, output.String()); err != nil {
@@ -996,6 +1003,7 @@ func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(
 	if contentType == "" {
 		contentType = "application/json"
 	}
+	body = restoreCompositeClientModel(ctx, body)
 	body = reverseToolNamesIfPresent(c, body)
 	c.Data(resp.StatusCode, contentType, body)
 	return usage, nil

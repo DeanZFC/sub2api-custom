@@ -264,6 +264,9 @@ func (Group) Fields() []ent.Field {
 			MaxLen(16).
 			Default("").
 			Comment("强制此 OpenAI/Composite 分组的服务档位：空、priority 或 ultrafast"),
+		field.Bool("force_openai_ultrafast").
+			Default(false).
+			Comment("是否对支持 Ultrafast 的模型强制使用 service_tier=ultrafast（优先于 force_openai_fast）"),
 		field.Bool("free_openai_fast").
 			Default(false).
 			Comment("是否让此 OpenAI/Composite 分组的 Fast 请求按 Standard 价格计费"),

@@ -8,7 +8,7 @@ import (
 )
 
 func TestUsageLogAPIKeyCostIndexMigration(t *testing.T) {
-	content, err := FS.ReadFile("351_add_usage_logs_api_key_cost_index_notx.sql")
+	content, err := FS.ReadFile("249_add_usage_logs_api_key_cost_index_notx.sql")
 	require.NoError(t, err)
 
 	sql := strings.Join(strings.Fields(string(content)), " ")

@@ -1606,6 +1606,9 @@
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
             {{ t("admin.groups.openaiFast.hint") }}
           </p>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            {{ t("admin.groups.openaiFast.ultrafastHint") }}
+          </p>
           <div class="flex items-center justify-between gap-4 mt-4">
             <label class="text-sm text-gray-600 dark:text-gray-400">
               {{ t("admin.groups.openaiFast.free") }}
@@ -3298,6 +3301,9 @@
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
             {{ t("admin.groups.openaiFast.hint") }}
           </p>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            {{ t("admin.groups.openaiFast.ultrafastHint") }}
+          </p>
           <div class="flex items-center justify-between gap-4 mt-4">
             <label class="text-sm text-gray-600 dark:text-gray-400">
               {{ t("admin.groups.openaiFast.free") }}
@@ -4351,7 +4357,6 @@ import { useOnboardingStore } from "@/stores/onboarding";
 import { adminAPI } from "@/api/admin";
 import type {
   AdminGroup,
-  GroupOpenAIServiceTier,
   CodexModelsManifestConfig,
   StrictFailoverConfig,
   CompositeModelRoute,
@@ -4416,6 +4421,7 @@ import {
   type MessagesDispatchMappingRow,
 } from "./groupsMessagesDispatch";
 import {
+  type GroupOpenAIServiceTierSelection,
   getGroupOpenAIServiceTier,
   groupOpenAIServiceTierToAPI,
   normalizeGroupOpenAIFast,
@@ -4714,6 +4720,8 @@ const openAIServiceTierOptions = computed(() => [
   { value: "", label: t("admin.groups.openaiFast.noForce") },
   { value: "priority", label: t("admin.groups.openaiFast.priority") },
   { value: "ultrafast", label: t("admin.groups.openaiFast.ultrafast") },
+  { value: "supported_ultrafast", label: t("admin.groups.openaiFast.supportedUltrafast") },
+  { value: "ultrafast_with_fast_fallback", label: t("admin.groups.openaiFast.ultrafastWithFastFallback") },
 ]);
 
 const platformFilterOptions = computed(() => [
@@ -5051,7 +5059,7 @@ const createForm = reactive({
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
   long_context_pricing_enabled: true,
-  force_openai_service_tier: "" as GroupOpenAIServiceTier,
+  force_openai_service_tier: "" as GroupOpenAIServiceTierSelection,
   free_openai_fast: false,
   model_pricing: [] as PricingFormEntry[],
   // 图片生成计费配置
@@ -5420,7 +5428,7 @@ const editForm = reactive({
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
   long_context_pricing_enabled: true,
-  force_openai_service_tier: "" as GroupOpenAIServiceTier,
+  force_openai_service_tier: "" as GroupOpenAIServiceTierSelection,
   free_openai_fast: false,
   model_pricing: [] as PricingFormEntry[],
   // 图片生成计费配置
@@ -6036,6 +6044,7 @@ const handleCreateGroup = async () => {
   try {
     const {
       video_model_prices: _createFormVideoModelPrices,
+      force_openai_service_tier: _createFormServiceTier,
       ...createGroupForm
     } = createForm;
     const videoModelPrices = serializeVideoModelPrices(
@@ -6392,9 +6401,11 @@ const handleUpdateGroup = async () => {
 
   submitting.value = true;
   try {
+    // The UI selection includes a combined policy that is serialized as legacy flags.
+    const { force_openai_service_tier: _editFormServiceTier, ...editGroupForm } = editForm;
     // 转换 fallback_group_id: null -> 0 (后端使用 0 表示清除)
     const payload = {
-      ...editForm,
+      ...editGroupForm,
       ...groupOpenAIServiceTierToAPI(
         editForm.platform,
         editForm.force_openai_service_tier,

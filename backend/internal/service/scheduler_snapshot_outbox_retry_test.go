@@ -225,6 +225,10 @@ func (r *retryAccountRepository) ListSchedulableUngroupedByPlatform(context.Cont
 	return []Account{r.old}, nil
 }
 
+func (r *retryAccountRepository) ListModelAvailabilityCandidates(context.Context, *int64, []string, bool) ([]Account, error) {
+	return []Account{r.old}, nil
+}
+
 type retryAccountCache struct {
 	*outboxCleanupCache
 	busy      bool

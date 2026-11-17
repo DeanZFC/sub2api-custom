@@ -36,6 +36,7 @@ func OpenAIUpstreamErrorClientMessage(payload []byte, message string) string {
 		switch strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, path).String())) {
 		case "invalid_request_error", "invalid_request", "invalid_argument", "validation_error",
 			"context_length_exceeded", "model_not_found", "invalid_parameter", "missing_required_parameter",
+			"invalid_image", "invalid_size",
 			"content_policy_violation", "content_policy", "safety", "safety_error", "cyber_policy":
 			return message
 		}
