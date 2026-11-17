@@ -16,7 +16,7 @@ func (c *outboxAuthoritativeSchedulerCache) GetSnapshotValues(ctx context.Contex
 	if reader, ok := c.SchedulerCache.(schedulerSnapshotValuesReader); ok {
 		return reader.GetSnapshotValues(ctx, bucket)
 	}
-	cached, hit, err := c.SchedulerCache.GetSnapshot(ctx, bucket)
+	cached, hit, err := c.GetSnapshot(ctx, bucket)
 	if err != nil || !hit {
 		return nil, hit, err
 	}

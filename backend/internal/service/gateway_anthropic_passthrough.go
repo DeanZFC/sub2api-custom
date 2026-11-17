@@ -576,7 +576,7 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 						line = "data: " + rewritten
 					}
 				}
-				output.WriteString(reverseToolNamesIfPresentString(c, line))
+				_, _ = output.WriteString(reverseToolNamesIfPresentString(c, line))
 				output.WriteByte('\n')
 			}
 			if _, err := io.WriteString(w, output.String()); err != nil {
