@@ -190,6 +190,7 @@ func cloneUsageChannelModelPricing(src ChannelModelPricing) ChannelModelPricing 
 	clone.CacheReadPrice = cloneUsagePointer(src.CacheReadPrice)
 	clone.FastMultiplier = cloneUsagePointer(src.FastMultiplier)
 	clone.FlexMultiplier = cloneUsagePointer(src.FlexMultiplier)
+	clone.UltrafastMultiplier = cloneUsagePointer(src.UltrafastMultiplier)
 	clone.ImageInputPrice = cloneUsagePointer(src.ImageInputPrice)
 	clone.ImageOutputPrice = cloneUsagePointer(src.ImageOutputPrice)
 	clone.PerRequestPrice = cloneUsagePointer(src.PerRequestPrice)

@@ -12,6 +12,7 @@ func TestAPIKeyAuthSnapshotGroupPricingRoundtrip(t *testing.T) {
 	groupID := int64(50)
 	inputPrice := 1e-6
 	outputPrice := 2e-6
+	ultrafastMultiplier := 1.25
 	apiKey := &APIKey{
 		ID: 82, UserID: 40, GroupID: &groupID, Key: "sk-pricing-roundtrip", Status: StatusActive,
 		User: &User{ID: 40, Status: StatusActive},
@@ -21,6 +22,7 @@ func TestAPIKeyAuthSnapshotGroupPricingRoundtrip(t *testing.T) {
 			ModelPricing: []ChannelModelPricing{{
 				Models: []string{"claude-sonnet-*"}, BillingMode: BillingModeToken,
 				InputPrice: &inputPrice, OutputPrice: &outputPrice,
+				UltrafastMultiplier: &ultrafastMultiplier,
 			}},
 		},
 	}
@@ -47,4 +49,11 @@ func TestAPIKeyAuthSnapshotGroupPricingRoundtrip(t *testing.T) {
 	require.True(t, resolved.longContextPricingEnabled)
 	require.InDelta(t, inputPrice, resolved.BasePricing.InputPricePerToken, 1e-12)
 	require.InDelta(t, outputPrice, resolved.BasePricing.OutputPricePerToken, 1e-12)
+	require.Equal(t, ultrafastMultiplier, configuredServiceTierMultiplier("ultrafast", resolved.BasePricing))
+
+	// Delayed billing must retain the request's multiplier after a group edit.
+	snapshot := CloneAPIKeyForUsage(materialized)
+	*materialized.Group.ModelPricing[0].UltrafastMultiplier = 3
+	snapshotPricing := resolver.Resolve(context.Background(), PricingInput{Model: "claude-sonnet-4", Group: snapshot.Group})
+	require.Equal(t, ultrafastMultiplier, configuredServiceTierMultiplier("ultrafast", snapshotPricing.BasePricing))
 }

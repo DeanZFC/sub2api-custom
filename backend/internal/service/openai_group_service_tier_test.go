@@ -208,6 +208,8 @@ func TestGroupForcedServiceTierPreservesExplicitAndModelScopedModes(t *testing.T
 		fast, ultrafast         bool
 	}{
 		{name: "explicit ultrafast retains custom model override", tier: "ultrafast", model: "gpt-6-sol", want: "ultrafast"},
+		{name: "explicit ultrafast supports gpt62", tier: "ultrafast", model: "gpt-6.2-astra", want: "ultrafast"},
+		{name: "explicit priority wins for gpt62", tier: "priority", ultrafast: true, model: "gpt-6.2-sol", want: "priority"},
 		{name: "explicit priority wins over boolean ultrafast", tier: "priority", ultrafast: true, model: "gpt-6.1-sol", want: "priority"},
 		{name: "boolean ultrafast respects supported models", ultrafast: true, model: "gpt-6-sol"},
 		{name: "boolean pair falls back to fast", fast: true, ultrafast: true, model: "gpt-6-sol", want: "priority"},

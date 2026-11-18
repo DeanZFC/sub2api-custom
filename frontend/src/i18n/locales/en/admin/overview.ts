@@ -1320,7 +1320,7 @@ export default {
         ultrafastWithFastFallback: 'Ultra Fast (Fast fallback for other models)',
         hint: 'Requests from this group to OpenAI-compatible upstreams use the selected tier. Does not apply to Excel BPS channels. The global Fast/Flex policy and upstream model and account support still apply. New requests update immediately after saving; existing WebSocket sessions must reconnect.',
         forceUltrafast: 'Force Ultra Fast (ultrafast)',
-        ultrafastHint: 'The original Ultrafast selection forces the tier on all models. The supported-model options force service_tier=ultrafast only on models that support Ultra Fast (GPT-6 Astra, GPT-6.1 Sol), taking precedence over Fast. The Fast fallback option uses priority for other models; the supported-model option without fallback follows the client for other models. Ultra Fast is billed at 6x the Standard price, is not covered by "Free Fast", and requires upstream accounts with Ultra Fast access.',
+        ultrafastHint: 'The original Ultrafast selection forces the tier on all models. Supported-model options apply model and account entitlements: Pro 200 includes GPT-6.2 Sol; Pro 500 includes Sol and Astra. Other subscriptions use the tiers advertised by their account. If unavailable, the Fast fallback option uses priority; otherwise the client tier is kept. GPT-6.2 Sol and Astra default to 3× Standard through February 28, 2027 (Pacific time), then 6×. GPT-6 Astra and GPT-6.1 Sol default to 6×. A channel Ultra Fast multiplier can override these defaults. Free Fast excludes Ultra Fast.',
         free: 'Free Fast',
         freeHint: 'Applies only to Fast (priority): customers are charged the equivalent Standard price. Does not apply to Ultrafast.'
       },

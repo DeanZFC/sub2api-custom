@@ -90,7 +90,7 @@ func TestExcelBPSCacheCreationAsInputBilling(t *testing.T) {
 					if tt.option != nil {
 						extra["openai_excel_bps_cache_creation_as_input"] = tt.option
 					}
-					original := OpenAIUsage{InputTokens: tt.input, CacheCreationInputTokens: tt.creation, CacheCreation30mInputTokens: tt.creation / 4, CacheCreation12hInputTokens: tt.creation - tt.creation/4, CacheReadInputTokens: tt.read, OutputTokens: tt.output}
+					original := OpenAIUsage{InputTokens: tt.input, CacheCreationInputTokens: tt.creation, CacheCreation5mTokens: tt.creation / 2, CacheCreation1hTokens: tt.creation - tt.creation/2, CacheCreation30mInputTokens: tt.creation / 4, CacheCreation12hInputTokens: tt.creation - tt.creation/4, CacheReadInputTokens: tt.read, OutputTokens: tt.output}
 					result := &OpenAIForwardResult{RequestID: "resp_bps_billing", UpstreamEndpoint: "/basispoints/api/responses", Usage: original, Model: "gpt-6-astra", Stream: stream, Duration: time.Second}
 					input := &OpenAIRecordUsageInput{
 						Result: result, APIKey: &APIKey{ID: 1001}, User: &User{ID: 2001},
@@ -106,6 +106,8 @@ func TestExcelBPSCacheCreationAsInputBilling(t *testing.T) {
 					log := usageRepo.lastLog
 					require.Equal(t, tt.wantInput, log.InputTokens)
 					require.Equal(t, tt.wantCreation, log.CacheCreationTokens)
+					require.Equal(t, tt.wantCreation/2, log.CacheCreation5mTokens)
+					require.Equal(t, tt.wantCreation-tt.wantCreation/2, log.CacheCreation1hTokens)
 					require.Equal(t, tt.wantCreation/4, log.CacheCreation30mTokens)
 					require.Equal(t, tt.wantCreation-tt.wantCreation/4, log.CacheCreation12hTokens)
 					require.Equal(t, tt.read, log.CacheReadTokens)
