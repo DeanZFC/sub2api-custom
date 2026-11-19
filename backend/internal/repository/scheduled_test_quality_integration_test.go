@@ -223,7 +223,8 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 		}
 		seriesCounts[fmt.Sprintf("%d/%s/%s", *result.TestDefinitionID, result.ModelID, result.ReasoningEffort)]++
 	}
-	require.Zero(t, seriesCounts[fmt.Sprintf("%d/model-a/high", candyID)], "a running check must not fall back to earlier successes")
+	require.Equal(t, 1, seriesCounts[fmt.Sprintf("%d/model-a/high", candyID)], "a running check retains the previous completed result")
+	require.True(t, seen[candyHistoryAnchor.ID])
 	require.Equal(t, 1, seriesCounts[fmt.Sprintf("%d/model-a/high", htmlID)], "the latest failed check remains visible")
 	require.Equal(t, 1, seriesCounts[fmt.Sprintf("%d/model-a/medium", candyID)])
 	require.Equal(t, 1, seriesCounts[fmt.Sprintf("%d/model-b/high", candyID)])

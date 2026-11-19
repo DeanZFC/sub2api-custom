@@ -14,8 +14,8 @@ import (
 
 func testScheduledTestLatestPublicRun(t *testing.T, ctx context.Context, db *sql.DB, plans service.ScheduledTestPlanRepository, results *scheduledTestResultRepository, candyID, htmlID int64) {
 	t.Helper()
-	_, err := db.ExecContext(ctx, `INSERT INTO accounts(id,name) VALUES (90,'Successful'),(91,'Failed'),(92,'Queued'),(93,'Removed');
-INSERT INTO account_groups(account_id,group_id) VALUES (90,8),(91,8),(92,8),(93,8)`)
+	_, err := db.ExecContext(ctx, `INSERT INTO accounts(id,name) VALUES (90,'Successful'),(91,'Failed'),(92,'Queued'),(93,'Removed'),(94,'Initial check');
+INSERT INTO account_groups(account_id,group_id) VALUES (90,8),(91,8),(92,8),(93,8),(94,8)`)
 	require.NoError(t, err)
 	groupID := int64(8)
 	newPlan := func(name string) *service.ScheduledTestPlan {
@@ -58,8 +58,16 @@ INSERT INTO account_groups(account_id,group_id) VALUES (90,8),(91,8),(92,8),(93,
 	finish(other[0], "success")
 	assertVisible := func(want ...int64) {
 		t.Helper()
-		for _, limit := range []int{1, 3} {
-			rows, err := results.ListVisible(ctx, 100, limit)
+		for _, list := range []func() ([]*service.ScheduledTestResult, error){
+			func() ([]*service.ScheduledTestResult, error) { return results.ListVisible(ctx, 100, 1) },
+			func() ([]*service.ScheduledTestResult, error) { return results.ListVisible(ctx, 100, 3) },
+			func() ([]*service.ScheduledTestResult, error) { return results.ListVisibleWithRecentHTML(ctx, 100, 4) },
+			func() ([]*service.ScheduledTestResult, error) {
+				return results.ListVisibleWithRecentResults(ctx, 100, 4)
+			},
+			func() ([]*service.ScheduledTestResult, error) { return results.ListVisibleByGroup(ctx, 100) },
+		} {
+			rows, err := list()
 			require.NoError(t, err)
 			var got []int64
 			for _, row := range rows {
@@ -77,31 +85,34 @@ INSERT INTO account_groups(account_id,group_id) VALUES (90,8),(91,8),(92,8),(93,
 	}
 	assertVisible(append(previousIDs, other[0].ID)...)
 
-	// A new snapshot replaces the entire previous round, including accounts
-	// and test types that are no longer targeted. Completion times may differ.
+	// A new snapshot determines the eligible targets. Pending targets keep
+	// their previous result, but removed targets and initial checks add none.
 	one := noon.Add(time.Hour)
 	current, err := results.BeginRun(ctx, plan, "one-pm", []*service.ScheduledTestResult{
 		input(plan, 90, candyID, one), input(plan, 90, htmlID, one.Add(time.Minute)),
 		input(plan, 91, candyID, one), input(plan, 92, candyID, one),
+		input(plan, 94, candyID, one),
 	})
 	require.NoError(t, err)
-	assertVisible(other[0].ID)
+	assertVisible(previous[0].ID, previous[1].ID, previous[2].ID, previous[4].ID, other[0].ID)
 	finish(current[0], "success")
+	assertVisible(current[0].ID, previous[1].ID, previous[2].ID, previous[4].ID, other[0].ID)
 	finish(current[1], "passed")
 	finish(current[2], "failed")
 	finish(current[3], "running")
-	assertVisible(current[0].ID, current[1].ID, current[2].ID, other[0].ID)
+	assertVisible(current[0].ID, current[1].ID, current[2].ID, previous[4].ID, other[0].ID)
 
 	// Failed and queued accounts still exist in the administrator's snapshot.
 	admin, err := results.ListByPlanID(ctx, plan.ID, 1)
 	require.NoError(t, err)
-	require.Len(t, admin, 4)
+	require.Len(t, admin, 5)
 	states := map[int64]string{}
 	for _, row := range admin {
 		states[row.ID] = row.Status
 	}
 	require.Equal(t, "failed", states[current[2].ID])
 	require.Equal(t, "running", states[current[3].ID])
+	require.Equal(t, "pending", states[current[4].ID])
 	for _, old := range previous {
 		if *old.TestDefinitionID != candyID {
 			continue
@@ -115,23 +126,37 @@ INSERT INTO account_groups(account_id,group_id) VALUES (90,8),(91,8),(92,8),(93,
 		require.Contains(t, ids, old.ID, "old successes remain accessible through history")
 	}
 
-	// Retrying the current failed row does not reveal its previous success.
+	// A retry temporarily displays the previous completed result, then switches
+	// back as soon as the current result completes.
 	current[2].StartedAt = one.Add(5 * time.Minute)
 	finish(current[2], "running")
-	assertVisible(current[0].ID, current[1].ID, other[0].ID)
+	assertVisible(current[0].ID, current[1].ID, previous[2].ID, previous[4].ID, other[0].ID)
 	finish(current[2], "success")
-	assertVisible(current[0].ID, current[1].ID, current[2].ID, other[0].ID)
+	assertVisible(current[0].ID, current[1].ID, current[2].ID, previous[4].ID, other[0].ID)
 
 	// Even a later manual update to an old run cannot replace the current run.
 	previous[2].StartedAt = one.Add(10 * time.Minute)
 	finish(previous[2], "success")
-	assertVisible(current[0].ID, current[1].ID, current[2].ID, other[0].ID)
+	assertVisible(current[0].ID, current[1].ID, current[2].ID, previous[4].ID, other[0].ID)
 
 	// A failed latest round remains visible instead of falling back to old successes.
 	last, err := results.BeginRun(ctx, plan, "two-pm", []*service.ScheduledTestResult{input(plan, 90, candyID, noon.Add(2*time.Hour))})
 	require.NoError(t, err)
+	assertVisible(current[0].ID, other[0].ID)
 	finish(last[0], "failed")
 	assertVisible(last[0].ID, other[0].ID)
+
+	// Several unfinished rounds can still display the last completed failure;
+	// a newly completed error also replaces it instead of exposing an old pass.
+	_, err = results.BeginRun(ctx, plan, "three-pm", []*service.ScheduledTestResult{input(plan, 90, candyID, noon.Add(3*time.Hour))})
+	require.NoError(t, err)
+	assertVisible(last[0].ID, other[0].ID)
+	newest, err := results.BeginRun(ctx, plan, "four-pm", []*service.ScheduledTestResult{input(plan, 90, candyID, noon.Add(4*time.Hour))})
+	require.NoError(t, err)
+	finish(newest[0], "running")
+	assertVisible(last[0].ID, other[0].ID)
+	finish(newest[0], "error")
+	assertVisible(newest[0].ID, other[0].ID)
 	var eligible int
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM accounts WHERE id IN (90,91,92,93) AND status='active' AND schedulable`).Scan(&eligible))
 	require.Equal(t, 4, eligible, "listing results does not modify account state or scheduling")

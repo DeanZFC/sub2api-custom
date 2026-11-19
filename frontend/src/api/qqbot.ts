@@ -248,6 +248,28 @@ export interface QQActivityPreview {
  tasks: { id: string; name: string; progress: string; eligible: boolean; status: string; reward: string }[]
 }
 export interface QQTransferHistory { items: { id: number; from_user_id: number; to_user_id: number; from_email: string; to_email: string; amount: string; fee: string; net_amount: string; created_at: string }[]; total: number; page: number; page_size: number }
+export type QQRewardReportKind = 'checkin' | 'invite' | 'lottery' | 'redemption' | 'growth' | 'streak' | 'ranking'
+export type QQRewardReportType = 'balance' | 'chances' | 'coupon' | 'physical' | 'other'
+export interface QQRewardReportMetrics {
+  reward_count: number; user_count: number; balance_amount: number; chances_quantity: number
+  coupon_quantity: number; pending_quantity: number; fulfilled_quantity: number
+}
+export interface QQRewardReportFilter {
+  start_date: string; end_date: string; group_id: string; kind: QQRewardReportKind | ''
+  reward_type: QQRewardReportType | ''; search: string; page?: number; page_size?: number
+}
+export interface QQRewardReportRecord {
+  id: string; kind: QQRewardReportKind; reward_type: QQRewardReportType; amount: number; quantity: number
+  prize_name: string; status: 'fulfilled' | 'pending'; user_id: number; email: string; nickname: string
+  member_id: string; group_id: string; created_at: string; fulfilled_at?: string | null
+}
+export interface QQRewardReport {
+  start_date: string; end_date: string; timezone: string; summary: QQRewardReportMetrics
+  daily: (QQRewardReportMetrics & { date: string })[]
+  by_kind: (QQRewardReportMetrics & { kind: QQRewardReportKind })[]
+  top_users: (QQRewardReportMetrics & { user_id: number; email: string; nickname: string })[]
+  items: QQRewardReportRecord[]; total: number; page: number; page_size: number
+}
 export interface QQGroupInfo { app_id: string; sandbox: boolean; group_id: string; name: string; status: 'available' | 'permission_required' | 'unavailable' | 'unconfigured' | 'rate_limited'; retry_after_seconds?: number }
 export interface QQSetupOptions {
   groups: { id: number; name: string; models: string[]; platform?: string; chat_protocols?: ('chat_completions' | 'responses')[] }[]
@@ -261,6 +283,7 @@ export interface QQSetupProbe { kind: string; status: 'ready' | 'blocked'; messa
 export interface QQActivityBundle { version: string; checkin: QQCheckinConfig; lottery: QQLotteryConfig; invite: QQInviteConfig; ranking: QQRankingConfig; budget: number | null }
 export interface QQSetupRequest { config: QQBotConfig; versions: Record<string, string>; sections: string[]; site_quota: number; regenerate_site_key?: boolean; image_site_quota?: number; regenerate_image_site_key?: boolean }
 export const qqbotAPI = {
+  reports: async (params: QQRewardReportFilter) => (await apiClient.get<QQRewardReport>('/admin/qqbot/reports', { params })).data,
   sendAnnouncement: async (request: QQAnnouncementRequest) => (await apiClient.post<QQAnnouncementResult>('/admin/qqbot/announcements', request)).data,
   setupOptions: async () => (await apiClient.get<QQSetupOptions>('/admin/qqbot/setup/options')).data,
   setupChecks: async () => (await apiClient.get<QQSetupReadiness>('/admin/qqbot/setup/checks')).data,

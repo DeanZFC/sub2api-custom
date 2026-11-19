@@ -1,4 +1,63 @@
 export default { qqbot: {
+  reports: {
+    "title": "Reward reports",
+    "help": "View reward totals, recipients and quantities for a selected period.",
+    "quickDates": "Quick date ranges",
+    "presets": {
+        "today": "Today",
+        "yesterday": "Yesterday",
+        "last7": "Last 7 days",
+        "last30": "Last 30 days",
+        "month": "This month"
+    },
+    "from": "Start date (Beijing)",
+    "to": "End date (Beijing)",
+    "source": "Reward source",
+    "rewardType": "Reward type",
+    "groupFilter": "Group OpenID",
+    "allGroups": "All historical groups",
+    "search": "User ID, email, nickname or member OpenID",
+    "methodTitle": "How rewards are counted",
+    "method": "Reports cover the current bot and use the actual claim or credit date in Beijing time. Both dates are included, up to 366 days. Balance, chances and coupons are counted separately; each part of a bundle is one reward entry. Zero-value participation and losing draws are excluded. Physical and custom prizes show their current fulfillment status. Legacy chance entries without a confirmed bot identity are excluded.",
+    "beijing": "Beijing time",
+    "exportDaily": "Export daily summary CSV",
+    "trend": "Daily reward trend",
+    "dailyTable": "View daily summary",
+    "bySource": "Rewards by source",
+    "topUsers": "Top 10 recipients",
+    "topHelp": "Sorted by credited balance, then by reward entries for equal amounts.",
+    "details": "Reward claim details",
+    "account": "Recipient account",
+    "reward": "Reward received",
+    "status": "Delivery status",
+    "claimedAt": "Claimed at (Beijing)",
+    "date": "Date",
+    "empty": "No claimed rewards match the selected filters.",
+    "invalidDates": "Choose valid start and end dates, in order, covering no more than 366 days.",
+    "metrics": {
+        "balance_amount": "Credited balance (USD)",
+        "user_count": "Unique recipients",
+        "reward_count": "Reward entries",
+        "chances_quantity": "Draw chances awarded",
+        "coupon_quantity": "Coupons issued",
+        "pending_quantity": "Items awaiting delivery",
+        "fulfilled_quantity": "Items delivered manually"
+    },
+    "kinds": {
+        "checkin": "Check-in",
+        "invite": "Invitation",
+        "lottery": "Lottery",
+        "redemption": "Legacy redemption",
+        "growth": "Growth tasks",
+        "streak": "Check-in streak",
+        "ranking": "Ranking"
+    },
+    "statuses": {
+        "pending": "Awaiting manual delivery",
+        "fulfilled": "Delivered",
+        "credited": "Credited"
+    }
+},
   rewardEditor: {
     "rechargeRules": "Recharge and chance calculation rules",
     "items": "Prizes",

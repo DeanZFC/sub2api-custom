@@ -814,15 +814,15 @@ func (r *scheduledTestResultRepository) GetAdminResultAccountNames(ctx context.C
 	return names, rows.Err()
 }
 
-// The user list shows completed results, including failures, from each plan's
-// current execution. Rank first so a failed or running check cannot fall back
-// to an older success. History uses its own query.
+// The user list shows the current execution's completed results, including
+// failures. Pending and running checks retain their latest completed result
+// until a new result is available. History uses its own query.
 func (r *scheduledTestResultRepository) ListVisible(ctx context.Context, userID int64, _ int) ([]*service.ScheduledTestResult, error) {
 	return r.listVisible(ctx, userID, scheduledTestVisibleResultsCTE, 1, false)
 }
 
-// Recent artwork supplements the current execution; it never supplies a
-// replacement when the current check is still running or no longer visible.
+// Recent artwork supplements the displayed result, including the previous
+// completed result retained while the current check is still running.
 func (r *scheduledTestResultRepository) ListVisibleWithRecentHTML(ctx context.Context, userID int64, total int) ([]*service.ScheduledTestResult, error) {
 	if total < 1 || total > 5 {
 		total = 3
@@ -831,7 +831,7 @@ func (r *scheduledTestResultRepository) ListVisibleWithRecentHTML(ctx context.Co
 }
 
 // Recent results include numeric checks and artwork from the current series.
-// They supplement the current execution without replacing its result.
+// They supplement the displayed result without replacing it.
 func (r *scheduledTestResultRepository) ListVisibleWithRecentResults(ctx context.Context, userID int64, total int) ([]*service.ScheduledTestResult, error) {
 	if total < 1 || total > 5 {
 		total = 4
@@ -858,6 +858,26 @@ func (r *scheduledTestResultRepository) listVisible(ctx context.Context, userID 
 ), current_results AS (
     SELECT * FROM ranked_results
     WHERE history_rank = 1 AND status IN ('success', 'passed', 'failed', 'error')
+    UNION ALL
+    -- Keep the latest run's target scope while unfinished checks display their
+    -- previous completed result through the same current visibility checks.
+    SELECT history.*, 1::bigint AS history_rank
+    FROM ranked_results anchor
+    JOIN LATERAL (
+        SELECT historical.* FROM visible_results historical
+        WHERE historical.plan_id = anchor.plan_id
+          AND historical.group_id IS NOT DISTINCT FROM anchor.group_id
+          AND historical.result_target_key = anchor.result_target_key
+          AND historical.test_definition_id IS NOT DISTINCT FROM anchor.test_definition_id
+          AND historical.model_id = anchor.model_id
+          AND historical.reasoning_effort = anchor.reasoning_effort
+          AND historical.output_kind = anchor.output_kind
+          AND historical.status IN ('success', 'passed', 'failed', 'error')
+          AND (historical.started_at, historical.id) < (anchor.started_at, anchor.id)
+        ORDER BY historical.started_at DESC, historical.id DESC
+        LIMIT 1
+    ) history ON TRUE
+    WHERE anchor.history_rank = 1 AND anchor.status IN ('pending', 'running')
 )`
 	args := []any{userID}
 	resultSource := "current_results"

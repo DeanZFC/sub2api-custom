@@ -222,6 +222,12 @@ func testDB(t *testing.T) *sql.DB {
 		_, err = db.Exec(string(couponSQL))
 		require.NoError(t, err)
 	}
+	reportSQL, err := migrations.FS.ReadFile("356_qq_bot_reward_reports.sql")
+	require.NoError(t, err)
+	for range 2 {
+		_, err = db.Exec(string(reportSQL))
+		require.NoError(t, err)
+	}
 	return db
 }
 func savedBot(t *testing.T, db *sql.DB) *Service {

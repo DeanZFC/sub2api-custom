@@ -49,6 +49,7 @@ func RegisterAdminRoutes(
 			bot.PUT("/config/:section", h.QQBot.SaveConfigSection)
 			bot.GET("/config-history", h.QQBot.ConfigHistory)
 			bot.GET("/overview", h.QQBot.Overview)
+			bot.GET("/reports", h.QQBot.RewardReport)
 			bot.GET("/jobs", h.QQBot.ListJobs)
 			bot.GET("/moderation-records", h.QQBot.ListModerationRecords)
 			bot.GET("/diagnosis", h.QQBot.Diagnose)

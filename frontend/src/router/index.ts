@@ -614,6 +614,11 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, requiresAdmin: true, title: 'QQ Bot Overview', titleKey: 'qqbot.workspace.overview' }
   },
   {
+    path: '/admin/qqbot/reports', name: 'AdminQQBotReports',
+    component: () => import('@/views/admin/QQBotReportsView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'QQ Reward Reports', titleKey: 'qqbot.reports.title' }
+  },
+  {
     path: '/admin/qqbot/groups', name: 'AdminQQBotGroups',
     component: () => import('@/views/admin/QQBotView.vue'),
     meta: { requiresAuth: true, requiresAdmin: true, title: 'QQ Group Management', titleKey: 'qqbot.workspace.groups' }

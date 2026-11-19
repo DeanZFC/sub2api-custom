@@ -149,34 +149,75 @@ INSERT INTO account_groups(account_id,group_id) VALUES(62,9)`)
 		}
 	})
 
-	t.Run("running current checks never fall back to a previous success", func(t *testing.T) {
+	t.Run("unfinished checks retain the latest completed result and its earlier artwork", func(t *testing.T) {
 		f := newRecentHTMLFixture(t)
-		f.create(f.input(f.at.Add(-time.Minute), "success", "<html>previous run</html>"))
+		f.exec(`INSERT INTO groups(id,name) VALUES(9,'Other public group');
+INSERT INTO account_groups(account_id,group_id) VALUES(62,9)`)
+		previous := f.create(f.input(f.at.Add(-time.Minute), "success", "<html>previous run</html>"))
 		current := f.begin("running-html-run", f.input(f.at, "running", ""))
 		earlierInRun := f.input(f.at.Add(-30*time.Second), "success", "<html>earlier in current run</html>")
 		earlierInRun.RunID = current.RunID
-		f.create(earlierInRun)
+		completed := f.create(earlierInRun)
 		for _, status := range []string{"running", "pending"} {
 			current.Status = status
 			require.NoError(t, f.repo.Update(f.ctx, current))
+			rows, err := f.repo.ListVisible(f.ctx, 1, 3)
+			require.NoError(t, err)
+			require.Equal(t, []int64{completed.ID}, recentHTMLResultIDs(rows))
+			monitor, err := f.repo.ListVisibleByGroup(f.ctx, 1)
+			require.NoError(t, err)
+			require.Equal(t, []int64{completed.ID, completed.ID}, recentHTMLResultIDs(monitor))
 			for _, list := range []func(context.Context, int64, int) ([]*service.ScheduledTestResult, error){f.repo.ListVisibleWithRecentHTML, f.repo.ListVisibleWithRecentResults} {
 				rows, err := list(f.ctx, 1, 4)
 				require.NoError(t, err)
-				require.Empty(t, rows, "rank the current series before filtering its completion status")
+				require.ElementsMatch(t, []int64{completed.ID, previous.ID}, recentHTMLResultIDs(rows), "history supplements the completed display anchor while the latest check runs")
 			}
 		}
+		current.Status, current.OutputHTML = "success", "<html>newly completed</html>"
+		require.NoError(t, f.repo.Update(f.ctx, current))
+		rows, err := f.repo.ListVisible(f.ctx, 1, 3)
+		require.NoError(t, err)
+		require.Equal(t, []int64{current.ID}, recentHTMLResultIDs(rows), "the new result replaces the temporary display immediately")
 		current.Status = "failed"
 		require.NoError(t, f.repo.Update(f.ctx, current))
-		rows, err := f.repo.ListVisibleWithRecentHTML(f.ctx, 1, 3)
+		rows, err = f.repo.ListVisibleWithRecentHTML(f.ctx, 1, 3)
 		require.NoError(t, err)
-		require.Len(t, rows, 3, "history appears only after a completed current anchor exists")
-		require.Contains(t, recentHTMLResultIDs(rows), current.ID)
+		require.ElementsMatch(t, []int64{current.ID, completed.ID, previous.ID}, recentHTMLResultIDs(rows), "a failed latest check remains the current display alongside its artwork history")
+	})
+
+	t.Run("unfinished first checks do not borrow results from another series", func(t *testing.T) {
+		f := newRecentHTMLFixture(t)
+		for _, mutate := range []func(*service.ScheduledTestResult){
+			func(row *service.ScheduledTestResult) { row.ModelID = "other-model" },
+			func(row *service.ScheduledTestResult) { row.ReasoningEffort = "high" },
+			func(row *service.ScheduledTestResult) { row.TestDefinitionID = &f.definitionID },
+			func(row *service.ScheduledTestResult) { other := int64(63); row.AccountID = &other },
+			func(row *service.ScheduledTestResult) { row.OutputKind = "text" },
+		} {
+			row := f.input(f.at.Add(-time.Minute), "success", "<html>unrelated</html>")
+			mutate(row)
+			f.create(row)
+		}
+		current := f.begin("initial-html-run", f.input(f.at, "pending", ""))
+		for _, status := range []string{"pending", "running"} {
+			current.Status = status
+			require.NoError(t, f.repo.Update(f.ctx, current))
+			for _, list := range []func(context.Context, int64, int) ([]*service.ScheduledTestResult, error){f.repo.ListVisible, f.repo.ListVisibleWithRecentHTML, f.repo.ListVisibleWithRecentResults} {
+				rows, err := list(f.ctx, 1, 4)
+				require.NoError(t, err)
+				require.Empty(t, rows, "an unfinished first check has no completed display anchor")
+			}
+			rows, err := f.repo.ListVisibleByGroup(f.ctx, 1)
+			require.NoError(t, err)
+			require.Empty(t, rows)
+		}
 	})
 
 	t.Run("history rechecks current permissions membership and account state", func(t *testing.T) {
 		f := newRecentHTMLFixture(t)
 		old := f.create(f.input(f.at.Add(-time.Minute), "success", "<html>old</html>"))
 		current := f.begin("permission-html-run", f.input(f.at, "success", "<html>current</html>"))
+		f.begin("permission-running-html-run", f.input(f.at.Add(time.Minute), "running", ""))
 		assertVisible := func(groupID int64, visible bool) {
 			t.Helper()
 			for _, list := range []func(context.Context, int64, int) ([]*service.ScheduledTestResult, error){f.repo.ListVisibleWithRecentHTML, f.repo.ListVisibleWithRecentResults} {
@@ -299,6 +340,6 @@ INSERT INTO account_groups(account_id,group_id) VALUES(62,9)`)
 		require.NoError(t, f.repo.Update(f.ctx, current))
 		rows, err := f.repo.ListVisibleWithRecentResults(f.ctx, 1, 4)
 		require.NoError(t, err)
-		require.Empty(t, rows, "unfinished numeric checks never fall back to a previous run")
+		require.ElementsMatch(t, []int64{sameTime.ID, successful[3].ID, successful[2].ID, successful[1].ID}, recentHTMLResultIDs(rows), "unfinished numeric checks keep their previous completed result and its earlier history")
 	}
 }

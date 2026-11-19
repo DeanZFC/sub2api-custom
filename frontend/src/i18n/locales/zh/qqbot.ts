@@ -1,4 +1,63 @@
 export default { qqbot: {
+  reports: {
+    "title": "报表统计",
+    "help": "按日期查看奖励领取情况，汇总金额、人数与奖品数量。",
+    "quickDates": "快捷日期",
+    "presets": {
+        "today": "今日",
+        "yesterday": "昨日",
+        "last7": "近7天",
+        "last30": "近30天",
+        "month": "本月"
+    },
+    "from": "开始日期（北京时间）",
+    "to": "结束日期（北京时间）",
+    "source": "奖励来源",
+    "rewardType": "奖励类型",
+    "groupFilter": "群 OpenID",
+    "allGroups": "全部历史群",
+    "search": "用户 ID、邮箱、昵称或成员 OpenID",
+    "methodTitle": "统计口径",
+    "method": "按当前机器人的实际领取或到账日统计，日期含首尾，最多366天。余额、次数和优惠券分别统计；组合奖励每个分项计一条，未中奖和零额参与不计奖励。实物及其他奖品展示当前待发放或已发放数量；旧版无法确认机器人归属的次数流水不纳入。",
+    "beijing": "北京时间",
+    "exportDaily": "导出每日汇总 CSV",
+    "trend": "每日奖励趋势",
+    "dailyTable": "查看每日汇总",
+    "bySource": "奖励来源汇总",
+    "topUsers": "领取排行榜 · 前10名",
+    "topHelp": "按已到账余额排序，金额相同按奖励条目数排序。",
+    "details": "奖励领取明细",
+    "account": "领取账户",
+    "reward": "领取奖励",
+    "status": "发放状态",
+    "claimedAt": "领取时间（北京时间）",
+    "date": "日期",
+    "empty": "所选条件下暂无奖励领取记录。",
+    "invalidDates": "请选择有效的起止日期，结束日期不得早于开始日期，范围最多366天。",
+    "metrics": {
+        "balance_amount": "已到账余额（USD）",
+        "user_count": "领取人数（去重）",
+        "reward_count": "奖励条目数",
+        "chances_quantity": "奖励抽奖次数",
+        "coupon_quantity": "已发优惠券（张）",
+        "pending_quantity": "待人工发放（件）",
+        "fulfilled_quantity": "已人工发放（件）"
+    },
+    "kinds": {
+        "checkin": "签到",
+        "invite": "邀请",
+        "lottery": "抽奖",
+        "redemption": "历史兑换",
+        "growth": "成长任务",
+        "streak": "连续签到",
+        "ranking": "排行榜"
+    },
+    "statuses": {
+        "pending": "待人工发放",
+        "fulfilled": "已发放",
+        "credited": "已到账"
+    }
+},
   rewardEditor: {
     "rechargeRules": "充值与次数计算规则",
     "items": "奖品",

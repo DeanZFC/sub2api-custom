@@ -15,7 +15,7 @@
           <p>{{ t(config.enabled ? 'qqbot.workspace.enabled' : 'qqbot.workspace.disabled') }} · {{ t('qqbot.workspace.lastEvent') }}: {{ overview.last_event ? new Date(overview.last_event).toLocaleString() : t('qqbot.workspace.noEvent') }}</p>
           <ul class="grid gap-2 text-sm sm:grid-cols-2"><li v-for="check in overview.checks" :key="check.code" :class="check.ok ? 'text-green-700 dark:text-green-400' : 'text-amber-700 dark:text-amber-400'">{{ check.ok ? '✓' : '○' }} {{ check.message }}</li></ul>
           <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('qqbot.workspace.connectivityHelp') }}</p>
-          <div class="flex flex-wrap gap-2"><RouterLink class="btn btn-secondary" to="/admin/qqbot/config">{{ t('qqbot.basicConfig') }}</RouterLink><RouterLink class="btn btn-secondary" to="/admin/qqbot/groups">{{ t('qqbot.workspace.groups') }}</RouterLink><RouterLink class="btn btn-secondary" to="/admin/qqbot/records">{{ t('qqbot.workspace.records') }}</RouterLink></div>
+          <div class="flex flex-wrap gap-2"><RouterLink class="btn btn-secondary" to="/admin/qqbot/config">{{ t('qqbot.basicConfig') }}</RouterLink><RouterLink class="btn btn-secondary" to="/admin/qqbot/groups">{{ t('qqbot.workspace.groups') }}</RouterLink><RouterLink class="btn btn-secondary" to="/admin/qqbot/reports">{{ t('qqbot.reports.title') }}</RouterLink><RouterLink class="btn btn-secondary" to="/admin/qqbot/records">{{ t('qqbot.workspace.records') }}</RouterLink></div>
         </section>
         <section class="card space-y-4 p-5">
           <h2 class="text-lg font-semibold">{{ t('qqbot.workspace.diagnose') }}</h2>
