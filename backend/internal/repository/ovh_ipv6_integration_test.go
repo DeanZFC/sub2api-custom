@@ -472,7 +472,7 @@ func TestOVHIPv6AdminServiceCreateEditDrainBulkAndDetach(t *testing.T) {
 	ctx := context.Background()
 	client := proxies.client
 	accounts := newAccountRepositoryWithSQL(client, db, nil)
-	admin := service.NewAdminService(nil, nil, NewAdminGroupRepository(client, db), accounts, proxies, nil, nil, nil, nil, nil, nil, nil, nil, client, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	admin := service.NewAdminService(nil, nil, NewAdminGroupRepository(client, db), accounts, proxies, nil, nil, nil, nil, nil, nil, nil, nil, client, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	cache := &ovhAdminConcurrencyCache{counts: map[int64]int{}}
 	service.ConfigureManagedIPv6Concurrency(admin, service.NewConcurrencyService(cache))
 	input := func() *service.CreateAccountInput {

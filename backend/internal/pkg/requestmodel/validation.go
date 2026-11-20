@@ -2,6 +2,7 @@ package requestmodel
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"unsafe"
 
@@ -34,6 +35,22 @@ func ValidateJSONModelFields(body []byte) error {
 		return nil
 	}
 	return validateObjectModelFields(view)
+}
+
+// ErrConflictingWebSocketFields identifies invalid client frames for account failure accounting.
+var ErrConflictingWebSocketFields = errors.New("invalid websocket request")
+
+// ValidateWebSocketRequestFields checks the raw frame before model rewriting or routing.
+func ValidateWebSocketRequestFields(body []byte) error {
+	field, conflict := ConflictingField("application/json", body)
+	if !conflict {
+		return nil
+	}
+	// Preserve the existing client close reason for ambiguous model and session selectors.
+	if err := ValidateWebSocketModelFields(body); err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: payload declares field %.64q more than once", ErrConflictingWebSocketFields, field)
 }
 
 // ValidateWebSocketModelFields also validates session.model, which can change

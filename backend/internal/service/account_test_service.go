@@ -385,6 +385,15 @@ func generateSessionString() (string, error) {
 	return FormatMetadataUserID(hex64, "", sessionUUID, uaVersion), nil
 }
 
+func accountTestPromptAndBudget(customPrompt []string, defaultMaxTokens int) (string, int) {
+	if len(customPrompt) > 0 {
+		if prompt := strings.TrimSpace(customPrompt[0]); prompt != "" {
+			return prompt, accountTestMaxOutputTokens(prompt, defaultMaxTokens)
+		}
+	}
+	return "hi", defaultMaxTokens
+}
+
 // createTestPayload creates a Claude Code style test request payload
 func createTestPayload(modelID string, customPrompt ...string) (map[string]any, error) {
 	sessionID, err := generateSessionString()
@@ -392,13 +401,8 @@ func createTestPayload(modelID string, customPrompt ...string) (map[string]any, 
 		return nil, err
 	}
 
-	prompt := "hi"
-	configuredPrompt := ""
-	if len(customPrompt) > 0 && strings.TrimSpace(customPrompt[0]) != "" {
-		configuredPrompt = strings.TrimSpace(customPrompt[0])
-		prompt = configuredPrompt
-	}
-	return map[string]any{
+	prompt, maxTokens := accountTestPromptAndBudget(customPrompt, 1024)
+	payload := map[string]any{
 		"model": modelID,
 		"messages": []map[string]any{
 			{
@@ -426,10 +430,13 @@ func createTestPayload(modelID string, customPrompt ...string) (map[string]any, 
 		"metadata": map[string]string{
 			"user_id": sessionID,
 		},
-		"max_tokens":  accountTestMaxOutputTokens(configuredPrompt, 1024),
-		"temperature": 1,
-		"stream":      true,
-	}, nil
+		"max_tokens": maxTokens,
+		"stream":     true,
+	}
+	if !claude.RejectsTemperature(modelID) {
+		payload["temperature"] = 1
+	}
+	return payload, nil
 }
 
 func (s *AccountTestService) setAccountTestError(ctx context.Context, accountID int64, message string) error {
@@ -793,6 +800,29 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 	return s.processClaudeStream(c, resp.Body)
 }
 
+func buildBedrockTestPayload(modelID string, customPrompt ...string) map[string]any {
+	prompt, maxTokens := accountTestPromptAndBudget(customPrompt, 256)
+	payload := map[string]any{
+		"anthropic_version": "bedrock-2023-05-31",
+		"messages": []map[string]any{
+			{
+				"role": "user",
+				"content": []map[string]any{
+					{
+						"type": "text",
+						"text": prompt,
+					},
+				},
+			},
+		},
+		"max_tokens": maxTokens,
+	}
+	if !claude.RejectsTemperature(modelID) {
+		payload["temperature"] = 1
+	}
+	return payload
+}
+
 // testBedrockAccountConnection tests a Bedrock (SigV4 or API Key) account using non-streaming invoke
 func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx context.Context, account *Account, testModelID string, prompt string) error {
 	region := bedrockRuntimeRegion(account)
@@ -810,27 +840,8 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 	c.Writer.Flush()
 
 	// Create a minimal Bedrock-compatible payload (no stream, no cache_control)
-	bedrockPayload := map[string]any{
-		"anthropic_version": "bedrock-2023-05-31",
-		"messages": []map[string]any{
-			{
-				"role": "user",
-				"content": []map[string]any{
-					{
-						"type": "text",
-						"text": func() string {
-							if value := strings.TrimSpace(prompt); value != "" {
-								return value
-							}
-							return "hi"
-						}(),
-					},
-				},
-			},
-		},
-		"max_tokens":  accountTestMaxOutputTokens(prompt, 256, accountTestOutputTokenLimit(ctx)),
-		"temperature": 1,
-	}
+	bedrockPayload := buildBedrockTestPayload(testModelID, prompt)
+	applyAccountTestOutputTokenLimit(ctx, bedrockPayload, "max_tokens")
 	applyScheduledTestContentInstructions(ctx, bedrockPayload, APIProtocolAnthropic)
 	bedrockBody, _ := json.Marshal(bedrockPayload)
 

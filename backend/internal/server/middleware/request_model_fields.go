@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"bytes"
-	"errors"
 	"mime"
 	"net/http"
 	"strings"
@@ -60,7 +59,8 @@ func RequestModelFields(maxBodySize, textMaxBodySize int64) gin.HandlerFunc {
 			normalized, err = httputil.NormalizeLenientJSONRequestBody(body, readLimit)
 			if err == nil {
 				if validationErr := requestmodel.ValidateJSONModelFields(normalized); validationErr != nil {
-					requestModelFieldsError(c, http.StatusBadRequest, validationErr.Error())
+					MarkIngressRejected(c, IngressRejectConflictingRequestFields)
+					writeGatewayInvalidRequest(c, http.StatusBadRequest, validationErr.Error())
 					c.Abort()
 					return
 				}
@@ -69,15 +69,9 @@ func RequestModelFields(maxBodySize, textMaxBodySize int64) gin.HandlerFunc {
 			}
 		}
 
-		status := http.StatusBadRequest
-		message := "Failed to read request body"
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			status = http.StatusRequestEntityTooLarge
-			message = "Request body is too large"
+		if !RejectRequestBodyReadError(c, "middleware.request_model_fields", err) {
+			AbortWithRequestBodyReadFailure(c, "middleware.request_model_fields", err)
 		}
-		requestModelFieldsError(c, status, message)
-		c.Abort()
 	}
 }
 
@@ -117,17 +111,4 @@ func requestModelFieldsTextRoute(path string) bool {
 	default:
 		return false
 	}
-}
-
-func requestModelFieldsError(c *gin.Context, status int, message string) {
-	path := c.Request.URL.Path
-	if strings.HasPrefix(path, "/v1beta") || strings.HasPrefix(path, "/antigravity/v1beta") {
-		GoogleErrorWriter(c, status, message)
-		return
-	}
-	errorBody := gin.H{"error": gin.H{"type": "invalid_request_error", "message": message}}
-	if strings.Contains(path, "/messages") {
-		errorBody["type"] = "error"
-	}
-	c.JSON(status, errorBody)
 }

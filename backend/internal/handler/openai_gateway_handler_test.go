@@ -1809,7 +1809,7 @@ func TestOpenAIChannelForwardModelForScheduler(t *testing.T) {
 }
 
 func TestShouldReportOpenAIWSProxyAccountFailure(t *testing.T) {
-	for _, cause := range []error{requestmodel.ErrDuplicateModelFields, requestmodel.ErrDuplicateSessionFields} {
+	for _, cause := range []error{requestmodel.ErrDuplicateModelFields, requestmodel.ErrDuplicateSessionFields, requestmodel.ErrConflictingWebSocketFields} {
 		t.Run(cause.Error(), func(t *testing.T) {
 			closeErr := service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, cause.Error(), cause)
 			for _, err := range []error{cause, closeErr, fmt.Errorf("wrapped ingress turn: %w", closeErr)} {
@@ -2021,6 +2021,8 @@ type openAIResponsesWSUsageLogCase struct {
 	secondTurnCloseExpected bool
 	// checkFirstTurnUsage verifies a rejected follow-up preserves the accepted turn's usage.
 	checkFirstTurnUsage bool
+	// midFrameCloseExpected：midPayload 被拒（连接被 1008 关闭），帧不到达上游。
+	midFrameCloseExpected bool
 }
 
 type openAIResponsesWSUsageLogResult struct {
@@ -3303,6 +3305,19 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		err = clientConn.Write(writeCtx, coderws.MessageText, []byte(tc.midPayload))
 		cancelWrite()
 		require.NoError(t, err)
+		if tc.midFrameCloseExpected {
+			readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+			_, _, readErr := clientConn.Read(readCtx)
+			cancelRead()
+			require.Error(t, readErr, "mid frame should have been rejected with a close")
+			var closeErr coderws.CloseError
+			require.ErrorAs(t, readErr, &closeErr)
+			require.Equal(t, coderws.StatusPolicyViolation, closeErr.Code)
+			require.Contains(t, closeErr.Reason, tc.closeReason)
+			require.Len(t, upstreamPayloadCh, 1, "rejected mid frame must not reach upstream")
+			_ = clientConn.CloseNow()
+			return openAIResponsesWSUsageLogResult{}
+		}
 		readCompleted()
 	}
 	if strings.TrimSpace(tc.secondPayload) != "" && (turnCount >= 2) {
