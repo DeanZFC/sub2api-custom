@@ -49,13 +49,14 @@ func gatewayProfitTestAccount(id int64, platform string, rate float64, groupID i
 	}
 }
 
-func TestGatewayProfitControlInstallsForFivePlatformsOnlyOnTokenRequests(t *testing.T) {
+func TestGatewayProfitControlInstallsOnlyOnTokenRequests(t *testing.T) {
 	for _, platform := range []string{
 		PlatformOpenAI,
 		PlatformAnthropic,
 		PlatformGemini,
 		PlatformGrok,
 		PlatformAntigravity,
+		PlatformDeepseek,
 	} {
 		t.Run(platform, func(t *testing.T) {
 			group := gatewayProfitTestGroup(101, platform)

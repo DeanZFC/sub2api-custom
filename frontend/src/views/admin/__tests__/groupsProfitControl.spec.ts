@@ -85,20 +85,21 @@ describe("validateProfitControlFormState", () => {
     ).toBeNull();
   });
 
-  it("validates all five supported platforms and skips unsupported platforms", () => {
+  it.each(["openai", "anthropic", "gemini", "grok", "antigravity", "deepseek"])("validates enabled profit control for %s", (platform) => {
+    expect(validateProfitControlFormState(formState({ platform }))).toBeNull();
+    expect(
+      validateProfitControlFormState(
+        formState({ platform, profit_min_margin_percent: 200 }),
+      ),
+    ).toBe("marginRangeError");
+  });
+
+  it("skips validation when disabled or unsupported", () => {
     expect(
       validateProfitControlFormState(
         formState({ profit_control_enabled: false, profit_min_margin_percent: 200 }),
       ),
     ).toBeNull();
-    expect(
-      validateProfitControlFormState(
-        formState({ platform: "anthropic", profit_min_margin_percent: 200 }),
-      ),
-    ).toBe("marginRangeError");
-    for (const platform of ["openai", "anthropic", "gemini", "grok", "antigravity"]) {
-      expect(validateProfitControlFormState(formState({ platform }))).toBeNull();
-    }
     expect(
       validateProfitControlFormState(
         formState({ platform: "composite", profit_min_margin_percent: 200 }),

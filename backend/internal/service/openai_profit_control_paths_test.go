@@ -322,6 +322,68 @@ func TestProfitControl_EligibilityFunctionVetoes(t *testing.T) {
 	require.True(t, isOpenAICompatibleAccountEligibleForRequest(context.Background(), expensive, PlatformOpenAI, "", false, ""))
 }
 
+func TestDeepSeekProfitControlChatScheduling(t *testing.T) {
+	group := profitControlTestGroup(9, 0.3, 0.05)
+	group.Platform = PlatformDeepseek
+	group.RateMultiplier = 2 // Maximum upstream rate is 1.3.
+	const session = "deepseek-chat"
+	account := func(id int64, rate float64) Account {
+		return Account{
+			ID:             id,
+			GroupIDs:       []int64{group.ID},
+			Platform:       PlatformDeepseek,
+			Type:           AccountTypeAPIKey,
+			Status:         StatusActive,
+			Schedulable:    true,
+			Concurrency:    1,
+			RateMultiplier: &rate,
+		}
+	}
+	boundary, expensive := account(10, 1.3), account(11, 1.31)
+	for _, advanced := range []string{"true", "false"} {
+		t.Run("advanced="+advanced, func(t *testing.T) {
+			resetOpenAIAdvancedSchedulerSettingCacheForTest()
+			t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
+			svc := &OpenAIGatewayService{
+				accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{boundary, expensive}},
+				cache:              &schedulerTestGatewayCache{},
+				cfg:                &config.Config{},
+				rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService(advanced),
+				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+			}
+			selectChat := func(ctx context.Context, excluded map[int64]struct{}) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+				return svc.SelectAccountWithSchedulerForCapability(ctx, &group.ID, "", session, "deepseek-v4-flash",
+					excluded, OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, false, true, PlatformDeepseek)
+			}
+			disabled := *group
+			disabled.ProfitControlEnabled = false
+			ungated, _ := svc.WithOpenAIRequestPricingContext(profitControlTestCtx(&disabled), &group.ID)
+			require.NoError(t, svc.BindStickySession(ungated, &group.ID, session, expensive.ID))
+			sel, decision, err := selectChat(ungated, nil)
+			require.NoError(t, err)
+			require.True(t, decision.StickySessionHit)
+			require.Equal(t, expensive.ID, sel.Account.ID)
+			if sel.ReleaseFunc != nil {
+				sel.ReleaseFunc()
+			}
+
+			ctx, _ := svc.WithOpenAIRequestPricingContext(profitControlTestCtx(group), &group.ID)
+			sel, _, err = selectChat(ctx, nil)
+			require.NoError(t, err)
+			require.Equal(t, boundary.ID, sel.Account.ID)
+			require.True(t, sel.ProfitGateActive())
+			if sel.ReleaseFunc != nil {
+				sel.ReleaseFunc()
+			}
+
+			// Failover cannot reuse the expensive sticky account.
+			sel, _, err = selectChat(ctx, map[int64]struct{}{boundary.ID: {}})
+			require.ErrorIs(t, err, ErrNoAvailableAccounts)
+			require.Nil(t, sel)
+		})
+	}
+}
+
 // legacy 引擎粘性写回（评审 M-Legacy 回归）：门下选号阶段不得直写粘性——
 // 终检否决的账号不能成为新绑定；无门保持官方 eager 绑定与原 TTL 语义。
 func TestProfitControl_LegacyEngineDefersStickyBindingUnderGate(t *testing.T) {

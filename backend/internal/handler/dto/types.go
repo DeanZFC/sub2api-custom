@@ -183,7 +183,7 @@ type AdminGroup struct {
 	// FreeOpenAIFast 是管理端计费策略，用户侧分组 DTO 无需暴露。
 	FreeOpenAIFast bool `json:"free_openai_fast"`
 
-	// 分组利润控制（五个 token 平台分组可启用；margin/buffer 为小数存储）。
+	// 分组利润控制（margin/buffer 为小数存储）。
 	// 仅管理员可见：这三个字段与同响应中的 rate_multiplier 相乘即可反推出
 	// 运营方的上游成本上限，属于内部经营信息，不得下放到 dto.Group。
 	ProfitControlEnabled bool                          `json:"profit_control_enabled"`

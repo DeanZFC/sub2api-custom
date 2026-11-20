@@ -78,7 +78,7 @@ type ProfitPreviewGroupReport struct {
 	Verdicts             []ProfitPreviewAccountVerdict `json:"verdicts"`
 }
 
-// PreviewProfitAdmission 对五大平台分组推演利润门准入结果。未启用的分组仅在
+// PreviewProfitAdmission 对支持利润控制的平台分组推演准入结果。未启用的分组仅在
 // AssumeEnabled=true 时按保存配置执行门；Composite 分组始终不直接安装利润门。
 func PreviewProfitAdmission(inputs []ProfitPreviewGroupInput, evalAt time.Time) []ProfitPreviewGroupReport {
 	reports := make([]ProfitPreviewGroupReport, 0, len(inputs))

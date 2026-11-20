@@ -655,7 +655,7 @@ export interface AdminGroup extends Group {
   force_openai_ultrafast: boolean
   free_openai_fast: boolean
   model_pricing: import('@/api/admin/channels').ChannelModelPricing[]
-  // 分组利润控制（openai/anthropic/gemini/grok/antigravity 分组可启用；margin/buffer 为小数存储）。
+  // 分组利润控制，profit_min_margin 和 profit_safety_buffer 按小数存储。
   // 仅管理员可见：与 rate_multiplier 相乘即可反推上游成本上限，不得下放到 Group。
   profit_control_enabled: boolean
   profit_min_margin: number
@@ -868,7 +868,7 @@ export interface CreateGroupRequest {
   peak_start?: string
   peak_end?: string
   peak_rate_multiplier?: number
-  // 分组利润控制（五个 token 平台；margin/buffer 为小数）
+  // 分组利润控制，profit_min_margin 和 profit_safety_buffer 按小数提交。
   profit_control_enabled?: boolean
   profit_min_margin?: number
   profit_safety_buffer?: number
@@ -941,7 +941,7 @@ export interface UpdateGroupRequest {
   peak_start?: string
   peak_end?: string
   peak_rate_multiplier?: number
-  // 分组利润控制（五个 token 平台；margin/buffer 为小数）
+  // 分组利润控制，profit_min_margin 和 profit_safety_buffer 按小数提交。
   profit_control_enabled?: boolean
   profit_min_margin?: number
   profit_safety_buffer?: number

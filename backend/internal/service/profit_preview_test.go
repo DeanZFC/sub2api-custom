@@ -119,13 +119,14 @@ func TestPreviewProfitAdmissionAssumeEnabled(t *testing.T) {
 		"账号倍率 0.9 > 阈值 0.5，探测快照的低倍率不能替代账号倍率")
 }
 
-func TestPreviewProfitAdmissionSupportsFivePlatforms(t *testing.T) {
+func TestPreviewProfitAdmissionSupportedPlatforms(t *testing.T) {
 	for i, platform := range []string{
 		PlatformOpenAI,
 		PlatformAnthropic,
 		PlatformGemini,
 		PlatformGrok,
 		PlatformAntigravity,
+		PlatformDeepseek,
 	} {
 		group := profitControlTestGroup(int64(100+i), 0, 0)
 		group.Platform = platform

@@ -55,10 +55,12 @@ func TestResolveOpenAIProfitControlGate(t *testing.T) {
 		require.Nil(t, svc.resolveOpenAIProfitControlGate(profitControlTestCtx(group), &groupID))
 	})
 
-	t.Run("non openai or grok platform yields no gate even if enabled", func(t *testing.T) {
+	t.Run("other gateway or unsupported compatible platform yields no gate", func(t *testing.T) {
 		group := profitControlTestGroup(groupID, 0.3, 0)
-		group.Platform = PlatformAnthropic
-		require.Nil(t, svc.resolveOpenAIProfitControlGate(profitControlTestCtx(group), &groupID))
+		for _, platform := range []string{PlatformAnthropic, PlatformKimi} {
+			group.Platform = platform
+			require.Nil(t, svc.resolveOpenAIProfitControlGate(profitControlTestCtx(group), &groupID), platform)
+		}
 	})
 
 	t.Run("grok group routed through openai handler installs gate", func(t *testing.T) {
@@ -262,7 +264,7 @@ func TestProfitControlSchedulerFiltersCandidates(t *testing.T) {
 
 func TestValidateProfitControlConfig(t *testing.T) {
 	require.NoError(t, ValidateProfitControlConfig(PlatformAnthropic, false, 0, 0))
-	for _, platform := range []string{PlatformOpenAI, PlatformAnthropic, PlatformGemini, PlatformGrok, PlatformAntigravity} {
+	for _, platform := range []string{PlatformOpenAI, PlatformAnthropic, PlatformGemini, PlatformGrok, PlatformAntigravity, PlatformDeepseek} {
 		require.NoError(t, ValidateProfitControlConfig(platform, true, 0.3, 0.05))
 		require.NoError(t, ValidateProfitControlConfig(platform, true, 0, 0))
 	}
@@ -282,8 +284,8 @@ func TestNormalizeProfitControlConfig(t *testing.T) {
 		require.Zero(t, buffer)
 	})
 
-	t.Run("all five platforms retain configuration", func(t *testing.T) {
-		for _, platform := range []string{PlatformOpenAI, PlatformAnthropic, PlatformGemini, PlatformGrok, PlatformAntigravity} {
+	t.Run("supported platforms retain configuration", func(t *testing.T) {
+		for _, platform := range []string{PlatformOpenAI, PlatformAnthropic, PlatformGemini, PlatformGrok, PlatformAntigravity, PlatformDeepseek} {
 			enabled, margin, buffer := NormalizeProfitControlConfig(platform, true, 0.3, 0.1)
 			require.True(t, enabled)
 			require.InDelta(t, 0.3, margin, 1e-12)
