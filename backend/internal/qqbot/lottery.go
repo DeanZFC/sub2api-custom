@@ -255,7 +255,7 @@ func (s *Service) lotteryInfo(ctx context.Context, c Config, j Job, showRules bo
 		if cfg.rechargeRuleEnabled() {
 			fmt.Fprintf(&b, "\n累计有效充值每满 USD %.2f 送 %d 次", cfg.RechargeStep, cfg.ChancesPerStep)
 		}
-		b.WriteString("\n每次抽奖消耗 1 次\n\n**普通奖池**")
+		_, _ = b.WriteString("\n每次抽奖消耗 1 次\n\n**普通奖池**")
 		for _, p := range cfg.Prizes {
 			fmt.Fprintf(&b, "\n\n%s\n%s（概率 %.2f%%）", replyPlainLabel(p.Name), p.description(), float64(p.ProbabilityBPS)/100)
 		}
