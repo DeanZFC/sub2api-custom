@@ -59,27 +59,23 @@ describe("groupsOpenAIFast", () => {
   });
 
   it("provides localized tier labels and states protocol and billing limits", () => {
-    expect(zh.groups.openaiFast.hint).toContain("Excel BPS");
-    expect(en.groups.openaiFast.hint).toContain("Excel BPS");
-    expect(zh.groups.openaiFast).toMatchObject({
-      title: expect.any(String),
-      force: expect.any(String),
-      noForce: expect.any(String),
-      priority: expect.stringContaining("priority"),
-      ultrafast: "Ultrafast",
-      hint: expect.stringContaining("WebSocket"),
-      free: expect.any(String),
-      freeHint: expect.stringContaining("Ultrafast"),
-    });
-    expect(en.groups.openaiFast).toMatchObject({
-      title: expect.any(String),
-      force: expect.any(String),
-      noForce: expect.any(String),
-      priority: expect.stringContaining("priority"),
-      ultrafast: "Ultrafast",
-      hint: expect.stringContaining("WebSocket"),
-      free: expect.any(String),
-      freeHint: expect.stringContaining("Ultrafast"),
-    });
+    for (const { groups: { openaiFast } } of [zh, en]) {
+      expect(openaiFast.hint).toContain("Excel BPS");
+      expect(openaiFast).toMatchObject({
+        title: expect.any(String),
+        force: expect.any(String),
+        noForce: expect.any(String),
+        priority: expect.stringContaining("priority"),
+        ultrafast: "Ultrafast",
+        hint: expect.stringContaining("WebSocket"),
+        free: expect.any(String),
+        freeHint: expect.stringContaining("priority"),
+        freeUltrafast: expect.stringContaining("Ultra Fast"),
+        freeUltrafastHint: expect.stringContaining("ultrafast"),
+      });
+      expect(openaiFast.freeHint).toContain("Standard");
+      expect(openaiFast.freeUltrafastHint).toContain("Standard");
+      expect(openaiFast.freeUltrafastHint).toContain(openaiFast.free);
+    }
   });
 });
