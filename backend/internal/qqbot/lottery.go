@@ -132,10 +132,12 @@ func lotteryResult(cfg LotteryConfig, state LotteryState, draws []lotteryOutcome
 // Refund-in-progress orders are suspended; partial refunds remove principal pro rata.
 func lotteryState(ctx context.Context, db queryRower, c LotteryConfig, uid int64, lockSources bool) (LotteryState, error) {
 	out := LotteryState{UserID: uid}
-	total, err := rechargeSum(ctx, db, uid, nil, lockSources)
+	rechargeEnabled := c.rechargeRuleEnabled()
+	total, err := rechargeSum(ctx, db, uid, nil, lockSources && rechargeEnabled)
 	if err != nil {
 		return out, err
 	}
+	out.RechargeTotal = total.InexactFloat64()
 	if err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM qq_bot_lottery_draws WHERE user_id=$1`, uid).Scan(&out.Used); err != nil {
 		return out, err
 	}
@@ -146,23 +148,34 @@ func lotteryState(ctx context.Context, db queryRower, c LotteryConfig, uid int64
 	if out.DrawsUntilGuarantee > 0 {
 		out.GuaranteeEvery = c.GuaranteeEvery
 	}
-	step := decimal.NewFromFloat(c.RechargeStep)
-	if step.LessThanOrEqual(decimal.Zero) || c.ChancesPerStep < 1 {
-		return out, errors.New("抽奖规则不正确")
+	earned := decimal.NewFromInt(out.BonusChances)
+	if rechargeEnabled {
+		step := decimal.NewFromFloat(c.RechargeStep)
+		quotient, _ := total.QuoRem(step, 0)
+		earned = earned.Add(quotient.Mul(decimal.NewFromInt(c.ChancesPerStep)))
+		// When refunds or rule changes create a deficit, new recharge must
+		// cover it before another draw becomes available.
+		usedTiers := decimal.NewFromInt(max(out.Used-out.BonusChances, 0) / c.ChancesPerStep)
+		nextTier := decimal.Max(quotient, usedTiers).Add(decimal.NewFromInt(1))
+		out.NextRecharge = nextTier.Mul(step).Sub(total).InexactFloat64()
 	}
-	quotient, _ := total.QuoRem(step, 0)
-	earned := quotient.Mul(decimal.NewFromInt(c.ChancesPerStep)).Add(decimal.NewFromInt(out.BonusChances))
 	if earned.GreaterThan(decimal.NewFromInt(1e12)) {
 		return out, errors.New("抽奖次数超出支持范围，请联系管理员")
 	}
-	out.RechargeTotal = total.InexactFloat64()
 	out.Earned = earned.IntPart()
 	out.Remaining = max(out.Earned-out.Used, 0)
-	// When refunds/rule changes put usage ahead of entitlement, new recharge
-	// must cover that deficit before another draw becomes available.
-	nextTier := max(quotient.IntPart()+1, max(out.Used-out.BonusChances, 0)/c.ChancesPerStep+1)
-	out.NextRecharge = decimal.NewFromInt(nextTier).Mul(step).Sub(total).InexactFloat64()
 	return out, nil
+}
+
+func (c LotteryConfig) rechargeRuleEnabled() bool {
+	return c.RechargeStep > 0 && c.ChancesPerStep > 0
+}
+
+func (s LotteryState) nextRechargeHint() string {
+	if s.NextRecharge <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("\n再充值 USD %.2f 获赠", s.NextRecharge)
 }
 func (s *Service) LotteryState(ctx context.Context, uid int64) (LotteryState, error) {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
@@ -238,7 +251,11 @@ func (s *Service) lotteryInfo(ctx context.Context, c Config, j Job, showRules bo
 	}
 	if showRules {
 		var b strings.Builder
-		fmt.Fprintf(&b, "🎉 **%s**\n累计有效充值每满 USD %.2f 送 %d 次\n每次抽奖消耗 1 次\n\n**普通奖池**", replyPlainLabel(cfg.Title), cfg.RechargeStep, cfg.ChancesPerStep)
+		fmt.Fprintf(&b, "🎉 **%s**", replyPlainLabel(cfg.Title))
+		if cfg.rechargeRuleEnabled() {
+			fmt.Fprintf(&b, "\n累计有效充值每满 USD %.2f 送 %d 次", cfg.RechargeStep, cfg.ChancesPerStep)
+		}
+		b.WriteString("\n每次抽奖消耗 1 次\n\n**普通奖池**")
 		for _, p := range cfg.Prizes {
 			fmt.Fprintf(&b, "\n\n%s\n%s（概率 %.2f%%）", replyPlainLabel(p.Name), p.description(), float64(p.ProbabilityBPS)/100)
 		}
@@ -254,7 +271,7 @@ func (s *Service) lotteryInfo(ctx context.Context, c Config, j Job, showRules bo
 	if err != nil {
 		return "", err
 	}
-	result := fmt.Sprintf("🎟 **抽奖次数**\n剩余抽奖次数：%d 次\n再充值 USD %.2f 获赠", state.Remaining, state.NextRecharge)
+	result := fmt.Sprintf("🎟 **抽奖次数**\n剩余抽奖次数：%d 次", state.Remaining) + state.nextRechargeHint()
 	if state.DrawsUntilGuarantee > 0 {
 		result += fmt.Sprintf("\n距保底 %d 次", state.DrawsUntilGuarantee)
 	}
@@ -281,6 +298,9 @@ func (s *Service) drawLotteryCount(ctx context.Context, c Config, j Job, count i
 		return "", err
 	}
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,272))`, c.AppID); err != nil {
+		return "", err
+	}
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock_shared($1)`, checkinConfigLock); err != nil {
 		return "", err
 	}
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock_shared($1)`, lotteryConfigLock); err != nil {
@@ -336,9 +356,9 @@ func (s *Service) drawLotteryCount(ctx context.Context, c Config, j Job, count i
 	}
 	if state.Remaining < int64(count) {
 		if count > 1 {
-			return fmt.Sprintf("抽奖次数不足，本次未抽奖\n需要抽奖次数：%d 次\n剩余抽奖次数：%d 次\n再充值 USD %.2f 获赠", count, state.Remaining, state.NextRecharge), nil
+			return fmt.Sprintf("抽奖次数不足，本次未抽奖\n需要抽奖次数：%d 次\n剩余抽奖次数：%d 次", count, state.Remaining) + state.nextRechargeHint(), nil
 		}
-		return fmt.Sprintf("抽奖次数不足\n再充值 USD %.2f 获赠", state.NextRecharge), nil
+		return "抽奖次数不足" + state.nextRechargeHint(), nil
 	}
 	draws := make([]lotteryOutcome, count)
 	for i := range draws {
@@ -383,12 +403,23 @@ func (s *Service) drawLotteryCount(ctx context.Context, c Config, j Job, count i
 		// Older records without this field remain ordinary draws, without a migration.
 		snapshot, err := json.Marshal(struct {
 			LotteryConfig
-			IsGuaranteed     bool  `json:"is_guaranteed"`
-			DrawNumber       int64 `json:"draw_number"`
-			AwardedChances   int   `json:"awarded_chances"`
-			CouponTemplateID int64 `json:"coupon_template_id,omitempty"`
-			CouponQuantity   int   `json:"coupon_quantity,omitempty"`
-		}{cfg, guaranteed, state.Used + int64(i) + 1, prize.Chances, prize.CouponTemplateID, prize.CouponQuantity})
+			RechargeStep     float64 `json:"recharge_step,omitempty"`
+			ChancesPerStep   int64   `json:"chances_per_step,omitempty"`
+			IsGuaranteed     bool    `json:"is_guaranteed"`
+			DrawNumber       int64   `json:"draw_number"`
+			AwardedChances   int     `json:"awarded_chances"`
+			CouponTemplateID int64   `json:"coupon_template_id,omitempty"`
+			CouponQuantity   int     `json:"coupon_quantity,omitempty"`
+		}{
+			LotteryConfig:    cfg,
+			RechargeStep:     cfg.RechargeStep,
+			ChancesPerStep:   cfg.ChancesPerStep,
+			IsGuaranteed:     guaranteed,
+			DrawNumber:       state.Used + int64(i) + 1,
+			AwardedChances:   prize.Chances,
+			CouponTemplateID: prize.CouponTemplateID,
+			CouponQuantity:   prize.CouponQuantity,
+		})
 		if err != nil {
 			return "", err
 		}

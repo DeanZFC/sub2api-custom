@@ -51,8 +51,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 	schedulerSnapshotSvc := service.NewSchedulerSnapshotService(nil, nil, nil, nil, cfg)
 	opsSystemLogSinkSvc := service.NewOpsSystemLogSink(nil)
 
-	cleanup := provideCleanup(nil, // gptDirect
-		nil, // qqBot
+	cleanup := provideCleanup(nil, // qqBot
 		nil, // entClient
 		nil, // redis
 		&service.OpsMetricsCollector{},

@@ -124,6 +124,13 @@ func TestSiteQueryRulesKeepRewardPrecisionAndDoNotPromiseExecution(t *testing.T)
 	text = siteLotteryRules(lottery)
 	require.Contains(t, text, "保底奖池")
 	require.Contains(t, text, "普通中奖不重置保底进度")
+	lottery.RechargeStep, lottery.ChancesPerStep = 0, 0
+	require.NotContains(t, siteLotteryRules(lottery), "累计有效充值")
+	text = siteGrowthRules(GrowthConfig{
+		LotteryRecharge: &LotteryRechargeRule{RechargeStep: 50, ChancesPerStep: 2},
+	})
+	require.Contains(t, text, "累计有效充值每满 USD 50 送 2 次")
+	require.NotContains(t, text, "暂无已开启的成长任务")
 	text = siteGrowthRules(GrowthConfig{Tasks: []GrowthTask{
 		{ID: "active", Name: "公开任务", Kind: "usage_tokens", Target: 1000, Chances: 1, Enabled: true},
 		{ID: "disabled", Name: "停用任务", Kind: "binding", Target: 1, Chances: 1},

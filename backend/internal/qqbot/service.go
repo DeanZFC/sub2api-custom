@@ -587,7 +587,7 @@ func (s *Service) message(ctx context.Context, c Config, j *Job, e Event) error 
 			break
 		}
 		var err error
-		text, err = s.todayRankings(ctx, c, time.Now())
+		text, err = s.todayRankings(ctx, time.Now())
 		if err != nil {
 			text = "排行榜查询失败，请稍后重试。"
 		}

@@ -3222,19 +3222,24 @@ func TestGatewayServiceCalculateRecordUsageCost_ChannelImageBillingNormalizesMis
 
 func TestOpenAIGatewayServiceRecordUsage_OutboundTierIgnoresUpstreamTier(t *testing.T) {
 	for _, tierCase := range []struct {
-		tier       string
-		model      string
-		multiplier float64
+		name               string
+		tier               string
+		model              string
+		multiplier         float64
+		customerMultiplier float64
+		freeUltrafast      bool
 	}{
-		{tier: "priority", model: "gpt-5.4", multiplier: 2},
-		{tier: "ultrafast", model: "gpt-6-astra", multiplier: 6},
-		{tier: "default", model: "gpt-5.4", multiplier: 1},
-		{tier: "flex", model: "gpt-5.4", multiplier: 0.5},
+		{name: "priority", tier: "priority", model: "gpt-5.4", multiplier: 2, customerMultiplier: 2},
+		{name: "ultrafast", tier: "ultrafast", model: "gpt-6-astra", multiplier: 6, customerMultiplier: 6},
+		{name: "default", tier: "default", model: "gpt-5.4", multiplier: 1, customerMultiplier: 1},
+		{name: "flex", tier: "flex", model: "gpt-5.4", multiplier: 0.5, customerMultiplier: 0.5},
+		{name: "free ultrafast", tier: "ultrafast", model: "gpt-6-astra", multiplier: 6, customerMultiplier: 1, freeUltrafast: true},
+		{name: "fast fallback with only free ultrafast", tier: "priority", model: "gpt-5.4", multiplier: 2, customerMultiplier: 2, freeUltrafast: true},
 	} {
 		for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth, AccountTypeSetupToken} {
 			for _, observed := range []string{"", "default", "standard", "flex", "priority", "ultrafast", "turbo"} {
 				for _, billingPath := range []string{"legacy", "atomic"} {
-					t.Run(tierCase.tier+"/"+accountType+"/"+observed+"/"+billingPath, func(t *testing.T) {
+					t.Run(tierCase.name+"/"+accountType+"/"+observed+"/"+billingPath, func(t *testing.T) {
 						usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 						userRepo := &openAIRecordUsageUserRepoStub{}
 						billingRepo := &openAIRecordUsageBillingRepoStub{}
@@ -3261,7 +3266,7 @@ func TestOpenAIGatewayServiceRecordUsage_OutboundTierIgnoresUpstreamTier(t *test
 						err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 							Result: result,
 							APIKey: &APIKey{ID: 1017, GroupID: &groupID, Group: &Group{
-								ID: groupID, Platform: PlatformOpenAI, RateMultiplier: 0.5,
+								ID: groupID, Platform: PlatformOpenAI, RateMultiplier: 0.5, FreeOpenAIUltrafast: tierCase.freeUltrafast,
 							}},
 							User:    &User{ID: 2017},
 							Account: &Account{ID: 3017, Platform: PlatformOpenAI, Type: accountType},
@@ -3280,7 +3285,7 @@ func TestOpenAIGatewayServiceRecordUsage_OutboundTierIgnoresUpstreamTier(t *test
 						require.InDelta(t, base.OutputCost*tierCase.multiplier, log.OutputCost, 1e-10)
 						require.InDelta(t, base.CacheReadCost*tierCase.multiplier, log.CacheReadCost, 1e-10)
 						require.InDelta(t, base.TotalCost*tierCase.multiplier, log.TotalCost, 1e-10)
-						require.InDelta(t, base.TotalCost*tierCase.multiplier*0.5, log.ActualCost, 1e-10)
+						require.InDelta(t, base.TotalCost*tierCase.customerMultiplier*0.5, log.ActualCost, 1e-10)
 						require.NotNil(t, log.AccountStatsCost)
 						require.InDelta(t, base.TotalCost*tierCase.multiplier, *log.AccountStatsCost, 1e-10)
 						if billingPath == "atomic" {
@@ -3528,7 +3533,7 @@ func TestGroupBillsOpenAIFastAtStandardRequiresOpenAIAccount(t *testing.T) {
 }
 
 // "免费 Fast" 只把 priority 降到 Standard 价；Ultrafast 是独立的更高档位，
-// 分组强制 Ultrafast 时仍按 Ultrafast 计费。
+// 仅开启免费 Fast 时，强制 Ultrafast 的请求仍按 Ultrafast 计费。
 func TestGroupBillsOpenAIFastAtStandardExcludesUltrafast(t *testing.T) {
 	apiKey := &APIKey{Group: &Group{Platform: PlatformOpenAI, FreeOpenAIFast: true, ForceOpenAIUltrafast: true}}
 

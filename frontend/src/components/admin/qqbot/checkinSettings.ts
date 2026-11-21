@@ -17,6 +17,7 @@ export async function loadCheckinConfig(): Promise<QQCheckinConfig> {
       binding_chances: config.growth?.binding_chances ?? 0,
       first_usage_chances: config.growth?.first_usage_chances ?? 0,
       checkin_30_chances: config.growth?.checkin_30_chances ?? 0,
+      ...(config.growth?.lottery_recharge === undefined ? {} : { lottery_recharge: config.growth.lottery_recharge }),
       periodic_tasks: (config.growth?.periodic_tasks ?? []).map(task => ({ ...task, reward: normalizeGrowthReward(task.reward, task.chances) })),
       tasks: (config.growth?.tasks ?? [
         { id: 'binding', name: '完成账号绑定', kind: 'binding', target: 1, chances: config.growth?.binding_chances ?? 0, enabled: (config.growth?.binding_chances ?? 0) > 0 },
@@ -66,4 +67,13 @@ export function validCheckinDistribution(distribution: QQCheckinRewardDistributi
 export function saveGrowthSettings(config: QQCheckinConfig, section: 'tasks' | 'periodic_tasks' = 'tasks'): Promise<QQCheckinConfig> {
   const tasks = config.growth[section].map(task => ({ ...task, reward: { ...task.reward }, chances: task.reward.type === 'chances' ? task.reward.quantity : 0 }))
   return saveConfigPatch(config._sections?.[section] || config._version, section, current => ({ growth: { ...current.growth, [section]: tasks } }))
+}
+
+export function saveLotteryRecharge(config: QQCheckinConfig): Promise<QQCheckinConfig> {
+  const rule = config.growth.lottery_recharge
+  return qqbotAPI.saveCheckin({
+    _section: 'lottery_recharge',
+    _version: config._sections?.lottery_recharge || config._version,
+    growth: { lottery_recharge: rule ? { ...rule } : null }
+  })
 }

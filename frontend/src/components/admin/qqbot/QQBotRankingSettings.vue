@@ -7,7 +7,6 @@
     <form v-if="form" data-testid="ranking-settings-form" class="card space-y-6 p-6" @submit.prevent="save">
       <fieldset class="space-y-4" :disabled="busy">
         <legend class="mb-2 font-medium">{{ t('qqbot.rankings.title') }}</legend>
-        <label class="flex items-center gap-2"><input v-model="form.enabled" type="checkbox" data-testid="rankings-enabled" />{{ t('qqbot.rankings.enabled') }}</label>
         <label class="flex items-center gap-2"><input v-model="form.rewards_enabled" type="checkbox" data-testid="rankings-rewards-enabled" />{{ t('qqbot.rankings.rewardsEnabled') }}</label>
         <p class="rounded-lg bg-gray-50 p-3 text-sm text-gray-600 dark:bg-dark-800 dark:text-gray-300">{{ t('qqbot.rankings.settlement') }}</p>
         <p v-if="form.effective_day" class="text-sm text-gray-500">{{ t('qqbot.rankings.effective', { day: form.effective_day }) }}</p>

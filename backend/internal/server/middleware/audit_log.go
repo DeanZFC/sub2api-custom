@@ -157,11 +157,6 @@ var auditActionOverrides = map[string]string{
 // 这类 body 的凭证内嵌在普通字符串值里，键级脱敏无法覆盖，整体不入库。
 var auditBodyOmittedRoutes = map[string]struct{}{
 	"PUT /api/v1/admin/accounts/:id/openai-reauth/config":       {},
-	"POST /api/v1/gpt-direct/verify":                            {},
-	"POST /api/v1/gpt-direct/query":                             {},
-	"POST /api/v1/gpt-direct/redeem":                            {},
-	"POST /api/v1/gpt-direct/subscription":                      {},
-	"POST /api/v1/gpt-direct/task":                              {},
 	"PUT /api/v1/admin/qqbot/config":                            {},
 	"POST /api/v1/user/qqbot/binding-code":                      {},
 	"POST /api/v1/qqbot/email-binding/preview":                  {},

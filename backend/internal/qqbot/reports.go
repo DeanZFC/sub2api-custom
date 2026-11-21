@@ -129,8 +129,7 @@ const reportMetricSelect = `COUNT(*) AS reward_count,COUNT(DISTINCT user_id) AS 
 
 // Balance awards have one authoritative ledger. Non-balance fulfillment rows
 // and lottery snapshots add independent components, never another balance sum.
-// Unscoped historical chance grants (also used by GPT Direct) cannot establish
-// an application's ownership and deliberately do not enter an app report.
+// Historical chance grants without an application ID are excluded from app reports.
 const rewardReportSQL = `WITH draw_records AS (
  SELECT d.id,d.user_id,d.member_id,d.group_id,d.prize_name,d.config_snapshot,r.created_at AS reward_at
  FROM qq_bot_rewards r JOIN qq_bot_lottery_draws d

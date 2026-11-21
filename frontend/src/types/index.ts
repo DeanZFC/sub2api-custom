@@ -212,7 +212,6 @@ export interface LoginAgreementDocument {
 export interface PublicSettings {
   excel_bps_enabled?: boolean
   openai_codex_ticket_enabled?: boolean
-  gpt_direct_enabled?: boolean
   registration_enabled: boolean
   email_verify_enabled: boolean
   force_email_on_third_party_signup: boolean
@@ -654,6 +653,7 @@ export interface AdminGroup extends Group {
   force_openai_service_tier?: GroupOpenAIServiceTier
   force_openai_ultrafast: boolean
   free_openai_fast: boolean
+  free_openai_ultrafast: boolean
   model_pricing: import('@/api/admin/channels').ChannelModelPricing[]
   // 分组利润控制，profit_min_margin 和 profit_safety_buffer 按小数存储。
   // 仅管理员可见：与 rate_multiplier 相乘即可反推上游成本上限，不得下放到 Group。
@@ -842,6 +842,7 @@ export interface CreateGroupRequest {
   force_openai_service_tier?: GroupOpenAIServiceTier
   force_openai_ultrafast?: boolean
   free_openai_fast?: boolean
+  free_openai_ultrafast?: boolean
   model_pricing?: import('@/api/admin/channels').ChannelModelPricing[]
   allow_image_generation?: boolean
   allow_batch_image_generation?: boolean
@@ -915,6 +916,7 @@ export interface UpdateGroupRequest {
   force_openai_service_tier?: GroupOpenAIServiceTier
   force_openai_ultrafast?: boolean
   free_openai_fast?: boolean
+  free_openai_ultrafast?: boolean
   model_pricing?: import('@/api/admin/channels').ChannelModelPricing[]
   allow_image_generation?: boolean
   allow_batch_image_generation?: boolean

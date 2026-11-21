@@ -84,7 +84,6 @@ func providePluginHostInfo(buildInfo handler.BuildInfo) service.PluginHostInfo {
 }
 
 func provideCleanup(
-	gptDirect *service.GPTDirectService,
 	qqBot *qqbot.Service,
 	entClient *ent.Client,
 	rdb *redis.Client,
@@ -217,10 +216,6 @@ func provideCleanup(
 				if qqBot != nil {
 					qqBot.Stop()
 				}
-				return nil
-			}},
-			{"GPTDirectService", func() error {
-				gptDirect.Stop()
 				return nil
 			}},
 			{"OpsCleanupService", func() error {

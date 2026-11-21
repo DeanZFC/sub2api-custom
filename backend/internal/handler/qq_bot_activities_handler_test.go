@@ -20,7 +20,7 @@ func TestQQCheckinAdminReadReturnsPrivateDistribution(t *testing.T) {
 	botJSON, err := json.Marshal(qqbot.DefaultConfig())
 	require.NoError(t, err)
 	mock.ExpectQuery("SELECT value FROM settings").WithArgs("qq_bot_config").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(string(botJSON)))
-	mock.ExpectQuery("SELECT value FROM settings").WithArgs("qq_bot_checkin_config").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(`{"enabled":true,"min_amount":1,"max_amount":3,"reward_distribution":{"lower_half_bps":6525,"next_quarter_bps":2475,"upper_quarter_bps":1000}}`))
+	mock.ExpectQuery("SELECT value FROM settings").WithArgs("qq_bot_checkin_config").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(`{"enabled":true,"min_amount":1,"max_amount":3,"reward_distribution":{"lower_half_bps":6525,"next_quarter_bps":2475,"upper_quarter_bps":1000},"growth":{"lottery_recharge":{"recharge_step":50,"chances_per_step":1}}}`))
 	h := NewQQBotHandler(qqbot.New(db, qqTestEncryptor{}, true, nil))
 	r := gin.New()
 	r.Use(func(c *gin.Context) { c.Set(string(middleware.ContextKeyUserRole), "admin"); c.Next() })
@@ -35,6 +35,8 @@ func TestQQCheckinAdminReadReturnsPrivateDistribution(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
 	require.Equal(t, &qqbot.CheckinRewardDistribution{LowerHalfBPS: 6525, NextQuarterBPS: 2475, UpperQuarterBPS: 1000}, result.Data.RewardDistribution)
+	require.Equal(t, &qqbot.LotteryRechargeRule{RechargeStep: 50, ChancesPerStep: 1}, result.Data.Growth.LotteryRecharge)
+	require.Equal(t, qqbot.CheckinSectionVersion(result.Data, "lottery_recharge"), w.Header().Get("X-QQBot-lottery_recharge-Version"))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

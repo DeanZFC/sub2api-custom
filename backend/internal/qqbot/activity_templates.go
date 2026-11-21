@@ -29,7 +29,7 @@ func loadActivityBundle(ctx context.Context, db queryRower, c Config) (ActivityB
 	if b.Checkin, err = loadCheckinConfig(ctx, db, c.CheckinReward); err != nil {
 		return b, err
 	}
-	if b.Lottery, err = loadLotteryConfig(ctx, db); err != nil {
+	if b.Lottery, err = readLotteryConfig(ctx, db); err != nil {
 		return b, err
 	}
 	if b.Ranking, err = loadRankingConfig(ctx, db, c.AppID); err != nil {
@@ -89,10 +89,9 @@ func activityTemplate(old ActivityBundle, name string) ActivityBundle {
 		}
 	}
 	b.Checkin.Growth.Tasks = tasks
+	b.Checkin.Growth.LotteryRecharge = &LotteryRechargeRule{RechargeStep: 10, ChancesPerStep: 1}
 	b.Lottery.Enabled = name == "active"
 	b.Lottery.Title = "幸运抽奖"
-	b.Lottery.RechargeStep = 10
-	b.Lottery.ChancesPerStep = 1
 	b.Lottery.Prizes = []LotteryPrize{{Name: "普通奖励", Amount: .01, ProbabilityBPS: 9000}, {Name: "幸运奖励", Amount: .1, ProbabilityBPS: 1000}}
 	b.Lottery.GuaranteeEnabled = false
 	b.Invite = InviteConfig{Enabled: name == "active", InviteReward: .05, InviteDailyLimit: 10, RechargeRequirement: RechargeRequirement{RechargeWindowDays: DefaultRechargeWindowDays}}
@@ -100,7 +99,6 @@ func activityTemplate(old ActivityBundle, name string) ActivityBundle {
 	b.Ranking.TokenRewards = []RankingPrize{}
 	b.Ranking.AmountRewards = []RankingPrize{}
 	if name == "active" {
-		b.Ranking.Enabled = true
 		for i, amount := range []float64{.1, .05, .02} {
 			b.Ranking.TokenRewards = append(b.Ranking.TokenRewards, RankingPrize{Rank: i + 1, Reward: GrowthReward{Type: "balance", Amount: amount}})
 		}

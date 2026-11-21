@@ -3,7 +3,7 @@
     <div class="mx-auto max-w-7xl space-y-6">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div><h1 class="text-2xl font-semibold">{{ t('qqbot.workspace.records') }}</h1><p class="mt-2 text-sm text-gray-500">{{ t('qqbot.recordsHelp') }}</p></div>
-        <div class="flex gap-2"><button v-if="recordMode !== 'activities'" class="btn btn-secondary" :disabled="appLoading" data-testid="qq-records-refresh-app" @click="loadApp">{{ t('common.refresh') }}</button><RouterLink class="btn btn-secondary" :to="{ path: '/admin/qqbot/activities', query: { tab: activeTab } }">{{ t('qqbot.activitiesTitle') }}</RouterLink></div>
+        <div class="flex gap-2"><button v-if="recordMode !== 'activities'" class="btn btn-secondary" :disabled="appLoading" data-testid="qq-records-refresh-app" @click="loadApp">{{ t('common.refresh') }}</button><RouterLink class="btn btn-secondary" :to="{ path: '/admin/qqbot/activities', query: activitySettingsQuery }">{{ t('qqbot.activitiesTitle') }}</RouterLink></div>
       </div>
       <div class="flex flex-wrap gap-2"><RouterLink v-for="mode in recordModes" :key="mode" :to="{ query: { tab: mode } }" class="btn" :class="recordMode === mode ? 'btn-primary' : 'btn-secondary'">{{ t(`qqbot.workspace.${mode}`) }}</RouterLink></div>
       <p v-if="appError && recordMode !== 'activities'" role="alert" class="text-red-600">{{ appError }}</p>
@@ -135,6 +135,7 @@ const tabs = [
   { key: 'invite', label: 'qqbot.inviteRecords' }
 ] as const
 const activeTab = computed<QQActivityKind>(() => tabs.find(tab => tab.key === route.query.tab)?.key ?? 'checkin')
+const activitySettingsQuery = computed(() => activeTab.value === 'invite' ? { tab: 'growth', section: 'invite' } : { tab: activeTab.value })
 function emptyState() { return { search: '', appliedSearch: '', loading: false, loaded: false, error: '', data: { items: [], total: 0, page: 1, page_size: 20 } as QQActivityRecordsPage } }
 const states = reactive({ checkin: emptyState(), lottery: emptyState(), invite: emptyState() })
 const state = computed(() => states[activeTab.value])

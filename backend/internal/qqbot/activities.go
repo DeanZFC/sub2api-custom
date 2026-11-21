@@ -71,8 +71,8 @@ type LotteryPrize struct {
 type LotteryConfig struct {
 	Enabled          bool           `json:"enabled"`
 	Title            string         `json:"title"`
-	RechargeStep     float64        `json:"recharge_step"`
-	ChancesPerStep   int64          `json:"chances_per_step"`
+	RechargeStep     float64        `json:"-"`
+	ChancesPerStep   int64          `json:"-"`
 	Prizes           []LotteryPrize `json:"prizes"`
 	GuaranteeEnabled bool           `json:"guarantee_enabled"`
 	GuaranteeEvery   int64          `json:"guarantee_every"`
@@ -81,7 +81,7 @@ type LotteryConfig struct {
 
 func defaultLotteryConfig() LotteryConfig {
 	return LotteryConfig{
-		Title: "幸运抽奖", RechargeStep: 10, ChancesPerStep: 1,
+		Title:           "幸运抽奖",
 		GuaranteeEvery:  10,
 		GuaranteePrizes: []LotteryPrize{{Name: "保底奖励", Amount: 1, ProbabilityBPS: 10000}},
 		Prizes: []LotteryPrize{
@@ -120,13 +120,25 @@ func (s *Service) CheckinConfig(ctx context.Context) (CheckinConfig, error) {
 	}
 	return loadCheckinConfig(ctx, s.db, c.CheckinReward)
 }
-func loadLotteryConfig(ctx context.Context, db queryRower) (LotteryConfig, error) {
+func readLotteryConfig(ctx context.Context, db queryRower) (LotteryConfig, error) {
 	c := defaultLotteryConfig()
 	_, err := readActivityConfig(ctx, db, lotteryConfigKey, &c)
 	return c, err
 }
+func loadLotteryConfig(ctx context.Context, db queryRower) (LotteryConfig, error) {
+	c, err := readLotteryConfig(ctx, db)
+	if err != nil {
+		return c, err
+	}
+	var checkin CheckinConfig
+	_, err = readActivityConfig(ctx, db, checkinConfigKey, &checkin)
+	if rule := checkin.Growth.LotteryRecharge; rule != nil {
+		c.RechargeStep, c.ChancesPerStep = rule.RechargeStep, rule.ChancesPerStep
+	}
+	return c, err
+}
 func (s *Service) LotteryConfig(ctx context.Context) (LotteryConfig, error) {
-	return loadLotteryConfig(ctx, s.db)
+	return readLotteryConfig(ctx, s.db)
 }
 func validRewardAmount(n float64) bool {
 	return !math.IsNaN(n) && !math.IsInf(n, 0) && n >= 0 && n <= 1000 && math.Abs(n*1e8-math.Round(n*1e8)) <= .001
@@ -195,12 +207,6 @@ func validateCheckin(c CheckinConfig) error {
 func validateLottery(c LotteryConfig) error {
 	if strings.TrimSpace(c.Title) == "" || len([]rune(c.Title)) > 60 {
 		return errors.New("活动名称需为 1 到 60 个字符")
-	}
-	if math.IsNaN(c.RechargeStep) || math.IsInf(c.RechargeStep, 0) || c.RechargeStep < .01 || c.RechargeStep > 1e9 || math.Abs(c.RechargeStep*100-math.Round(c.RechargeStep*100)) > .001 {
-		return errors.New("累计充值门槛需为 0.01 到 1000000000 USD，最多 2 位小数")
-	}
-	if c.ChancesPerStep < 1 || c.ChancesPerStep > 1000 {
-		return errors.New("每档赠送次数需在 1 到 1000 之间")
 	}
 	if err := validateLotteryPrizes(c.Prizes); err != nil {
 		return err
@@ -284,7 +290,12 @@ func (s *Service) saveActivityConfig(ctx context.Context, key string, lock int64
 		case "periodic_tasks":
 			current.Growth.PeriodicTasks = next.Growth.PeriodicTasks
 			next = current
+		case "lottery_recharge":
+			current.Growth.LotteryRecharge = next.Growth.LotteryRecharge
+			next = current
 		case "":
+			// Older clients can still save these settings without a section.
+			next.Growth.LotteryRecharge = current.Growth.LotteryRecharge
 		default:
 			return errors.New("未知活动配置模块")
 		}
@@ -297,7 +308,7 @@ func (s *Service) saveActivityConfig(ctx context.Context, key string, lock int64
 		}
 		c = next
 	case lotteryConfigKey:
-		current, e := loadLotteryConfig(ctx, tx)
+		current, e := readLotteryConfig(ctx, tx)
 		if e != nil {
 			return e
 		}

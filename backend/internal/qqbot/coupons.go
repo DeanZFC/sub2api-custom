@@ -132,7 +132,7 @@ func validateCouponRewardTemplates(ctx context.Context, db coupon.DB, config any
 			}
 		}
 	case RankingConfig:
-		if !c.Enabled || !c.RewardsEnabled {
+		if !c.RewardsEnabled {
 			break
 		}
 		for _, prizes := range [][]RankingPrize{c.TokenRewards, c.AmountRewards} {

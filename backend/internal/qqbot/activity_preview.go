@@ -116,6 +116,20 @@ func (s *Service) PreviewActivities(ctx context.Context, uid int64) (ActivityPre
 	if out.Lottery.DrawsUntilGuarantee == 1 {
 		out.LotteryNextExpected = expectedPrize(lottery.GuaranteePrizes)
 	}
+	if lottery.rechargeRuleEnabled() {
+		status := "抽奖次数实时计算"
+		if !lottery.Enabled {
+			status = "抽奖活动未开启"
+		}
+		out.Tasks = append(out.Tasks, PreviewTask{
+			ID:       "lottery:recharge",
+			Name:     "充值送抽奖次数",
+			Progress: fmt.Sprintf("累计有效充值 %s，距下一档还差 %s", money(out.Lottery.RechargeTotal), money(out.Lottery.NextRecharge)),
+			Eligible: out.Bound && c.Enabled && lottery.Enabled && out.Lottery.Earned > out.Lottery.BonusChances,
+			Status:   status,
+			Reward:   fmt.Sprintf("每满 %s 送 %d 次", money(lottery.RechargeStep), lottery.ChancesPerStep),
+		})
+	}
 	at := time.Now()
 	total, streak, err := checkinProgress(ctx, tx, uid, at)
 	if err != nil {

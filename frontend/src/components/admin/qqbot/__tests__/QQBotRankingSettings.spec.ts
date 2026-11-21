@@ -10,7 +10,7 @@ const api = vi.hoisted(() => ({ rankingConfig: vi.fn(), saveRankings: vi.fn() })
 vi.mock('@/api/qqbot', () => ({ qqbotAPI: api }))
 function config(): QQRankingConfig {
   const prizes = () => [1, 2, 3].map(rank => ({ rank, reward: { type: 'chances' as const, amount: 0, quantity: 0, prize_name: '', claim_instructions: '' } }))
-  return { enabled: true, rewards_enabled: false, effective_day: '', token_rewards: prizes(), amount_rewards: prizes() }
+  return { rewards_enabled: false, effective_day: '', token_rewards: prizes(), amount_rewards: prizes() }
 }
 function setup(locale = 'zh') {
   const i18n = createI18n({ legacy: false, locale, messages: { zh, en } })
@@ -28,6 +28,7 @@ describe('QQ daily ranking prizes', () => {
     expect(w.text()).toContain('今日排行榜')
     expect(w.text()).toContain(t('qqbot.rankings.help'))
     expect(w.get('[data-testid="token_rewards-rank-0"]').findAll('option')).toHaveLength(10)
+    expect(w.find('[data-testid="rankings-enabled"]').exists()).toBe(false)
     expect((w.get('[data-testid="rankings-rewards-enabled"]').element as HTMLInputElement).checked).toBe(false)
     await w.get('[data-testid="token_rewards-reward-type-0"]').setValue('balance')
     await w.get('[data-testid="token_rewards-reward-amount-0"]').setValue('1.00000001')
@@ -38,6 +39,8 @@ describe('QQ daily ranking prizes', () => {
     await w.get('form').trigger('submit'); await flushPromises()
     expect(api.saveRankings).toHaveBeenCalledTimes(1)
     const sent = api.saveRankings.mock.calls[0]![0]
+    expect(sent.enabled).toBeUndefined()
+    expect(sent.rewards_enabled).toBe(true)
     expect(sent.token_rewards[0]).toEqual({ rank: 1, reward: { type: 'balance', amount: 1.00000001, quantity: 0, prize_name: '', claim_instructions: '' } })
     expect(sent.amount_rewards[0]).toEqual({ rank: 1, reward: { type: 'physical', amount: 0, quantity: 1, prize_name: 'Cup', claim_instructions: 'Contact admin' } })
     expect(w.get('[role="status"]').text()).toBe(t('common.saved'))

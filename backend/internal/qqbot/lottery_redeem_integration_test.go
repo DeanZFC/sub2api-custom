@@ -107,9 +107,8 @@ func TestLotteryPaymentCodesNeverDuplicateOrdersOrBypassRefunds(t *testing.T) {
 
 func TestLotteryAccumulatesOrderAndRedeemDecimalsExactly(t *testing.T) {
 	ctx := context.Background()
-	s, db, _, uid, cfg := lotteryFixture(t, 0.1)
-	cfg.RechargeStep = 0.3
-	require.NoError(t, s.SaveLotteryConfig(ctx, cfg))
+	s, db, _, uid, _ := lotteryFixture(t, 0.1)
+	saveLotteryRechargeRule(t, s, &LotteryRechargeRule{RechargeStep: .3, ChancesPerStep: 1})
 	_, err := db.Exec(`INSERT INTO redeem_codes(code,type,value,status,used_by,used_at)
  VALUES('decimal','balance',0.2,'used',$1,NOW())`, uid)
 	require.NoError(t, err)

@@ -18,7 +18,6 @@ type RankingPrize struct {
 }
 
 type RankingConfig struct {
-	Enabled        bool           `json:"enabled"`
 	RewardsEnabled bool           `json:"rewards_enabled"`
 	TokenRewards   []RankingPrize `json:"token_rewards"`
 	AmountRewards  []RankingPrize `json:"amount_rewards"`
@@ -33,7 +32,7 @@ func defaultRankingConfig() RankingConfig {
 			{Rank: 3, Reward: GrowthReward{Type: "chances"}},
 		}
 	}
-	return RankingConfig{Enabled: true, TokenRewards: prizes(), AmountRewards: prizes()}
+	return RankingConfig{TokenRewards: prizes(), AmountRewards: prizes()}
 }
 
 func validateRankingConfig(c RankingConfig) error {

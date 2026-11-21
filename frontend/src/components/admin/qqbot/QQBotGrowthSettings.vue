@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-6"><p v-if="tasksDraft.dirty.value || periodicDraft.dirty.value" class="text-sm text-amber-700">{{ t('qqbot.workspace.unsaved') }}</p>
+  <div class="space-y-6"><p v-if="tasksDraft.dirty.value || periodicDraft.dirty.value || lotteryRechargeDraft.dirty.value" class="text-sm text-amber-700">{{ t('qqbot.workspace.unsaved') }}</p>
     <section class="space-y-4 rounded-2xl border border-primary-100 bg-gradient-to-br from-primary-50 to-white p-5 dark:border-primary-900 dark:from-primary-950/30 dark:to-dark-800">
       <div class="flex flex-wrap items-start justify-between gap-3"><div><h2 class="text-xl font-bold">{{ t('qqbot.growth.playbookTitle') }}</h2><p class="mt-2 max-w-3xl text-sm text-gray-600 dark:text-gray-300">{{ t('qqbot.growth.help') }}</p></div><span class="badge badge-primary">{{ t('qqbot.growth.autoSettle') }}</span></div>
       <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="growth-playbook">
@@ -59,6 +59,34 @@
     <section class="space-y-4" data-testid="periodic-growth-tasks">
       <h2 class="text-lg font-semibold">{{ t('qqbot.growth.periodicTitle') }}</h2>
       <p class="text-sm text-gray-500">{{ t('qqbot.growth.periodicHelp') }}</p>
+      <form v-if="form" class="card space-y-5 p-6" data-testid="lottery-recharge-form" @submit.prevent="saveRechargeRule">
+        <fieldset class="space-y-4" :disabled="busy">
+          <legend class="mb-2 font-medium">{{ t('qqbot.growth.lotteryRechargeTitle') }}</legend>
+          <label class="flex items-center gap-2 text-sm">
+            <input v-model="lotteryRechargeEnabled" data-testid="lottery-recharge-enabled" type="checkbox" />
+            {{ t('qqbot.growth.enabled') }}
+          </label>
+          <p v-if="!lotteryRechargeEnabled" class="text-sm text-gray-500">{{ t('qqbot.growth.lotteryRechargeDisabled') }}</p>
+          <div v-if="form.growth.lottery_recharge" class="grid gap-4 sm:grid-cols-2">
+            <label class="space-y-1">
+              {{ t('qqbot.rechargeStep') }}
+              <input v-model.number="form.growth.lottery_recharge.recharge_step" data-testid="recharge-step" class="input" type="number" min="0.01" max="1000000000" step="0.01" required />
+            </label>
+            <label class="space-y-1">
+              {{ t('qqbot.chancesPerStep') }}
+              <input v-model.number="form.growth.lottery_recharge.chances_per_step" data-testid="chances-per-step" class="input" type="number" min="1" max="1000" step="1" required />
+            </label>
+          </div>
+          <details class="rounded-lg bg-gray-50 p-4 text-sm dark:bg-dark-800">
+            <summary class="cursor-pointer font-medium">{{ t('qqbot.rewardEditor.rechargeRules') }}</summary>
+            <div class="mt-3 space-y-2 text-gray-500">
+              <p>{{ t('qqbot.historicalRechargeHelp') }}</p>
+              <p>{{ t('qqbot.lotteryRuleChangeHelp') }}</p>
+            </div>
+          </details>
+        </fieldset>
+        <button type="submit" class="btn btn-primary" :disabled="busy || !lotteryRechargeDraft.dirty.value">{{ t('common.save') }}</button>
+      </form>
       <form v-if="form" data-testid="periodic-growth-form" class="card space-y-5 p-6" @submit.prevent="save('periodic_tasks')">
         <fieldset class="min-w-0 space-y-4" :disabled="busy">
           <legend class="mb-2 font-medium">{{ t('qqbot.growth.repeatTitle') }}</legend>
@@ -107,8 +135,8 @@
 import { useQQDraft } from './useQQDraft'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { QQCheckinConfig, QQGrowthTask, QQGrowthTaskKind, QQGrowthTaskPeriod } from '@/api/qqbot'
-import { loadCheckinConfig, saveGrowthSettings } from './checkinSettings'
+import type { QQCheckinConfig, QQGrowthTask, QQGrowthTaskKind, QQGrowthTaskPeriod, QQLotteryRechargeRule } from '@/api/qqbot'
+import { loadCheckinConfig, saveGrowthSettings, saveLotteryRecharge } from './checkinSettings'
 import QQBotGrowthRewardFields from './QQBotGrowthRewardFields.vue'
 
 import { normalizeGrowthReward, rewardEnabled, validGrowthReward } from './growthReward'
@@ -125,6 +153,16 @@ const form = ref<QQCheckinConfig | null>(null)
 const persistedTaskIDs = ref(new Set<string>())
 const tasksDraft = useQQDraft(() => form.value?.growth.tasks)
 const periodicDraft = useQQDraft(() => form.value?.growth.periodic_tasks)
+const lotteryRechargeDraft = useQQDraft(() => form.value && { rule: form.value.growth.lottery_recharge ?? null })
+const pausedLotteryRechargeRule = ref<QQLotteryRechargeRule | null>(null)
+const lotteryRechargeEnabled = computed({
+  get: () => Boolean(form.value?.growth.lottery_recharge),
+  set: enabled => {
+    if (!form.value) return
+    if (!enabled) pausedLotteryRechargeRule.value = form.value.growth.lottery_recharge ?? null
+    form.value.growth.lottery_recharge = enabled ? pausedLotteryRechargeRule.value ?? { recharge_step: 10, chances_per_step: 1 } : null
+  }
+})
 const enabledTasks = computed(() => form.value?.growth.tasks.filter(task => task.enabled && rewardEnabled(task.reward)).length ?? 0)
 const busy = ref(false)
 const error = ref('')
@@ -190,6 +228,38 @@ function validTask(task: QQGrowthTask) {
     && validGrowthReward(task.reward)
 }
 
+function updateSavedRevision(section: string, saved: QQCheckinConfig) {
+  if (!form.value) return
+  form.value._version = saved._version
+  const version = saved._sections?.[section]
+  if (version) form.value._sections = { ...form.value._sections, [section]: version }
+}
+
+async function saveRechargeRule() {
+  if (!form.value || busy.value || !lotteryRechargeDraft.dirty.value) return
+  error.value = ''; notice.value = ''
+  const rule = form.value.growth.lottery_recharge
+  if (rule) {
+    const { recharge_step: amount, chances_per_step: chances } = rule
+    if (!Number.isFinite(amount) || amount < 0.01 || amount > 1_000_000_000 || Number(amount.toFixed(2)) !== amount ||
+        !Number.isInteger(chances) || chances < 1 || chances > 1000) {
+      error.value = t('qqbot.growth.invalidLotteryRecharge')
+      return
+    }
+  }
+  busy.value = true
+  try {
+    const saved = await saveLotteryRecharge(form.value)
+    form.value.growth.lottery_recharge = saved.growth.lottery_recharge ?? null
+    pausedLotteryRechargeRule.value = null
+    updateSavedRevision('lottery_recharge', saved)
+    lotteryRechargeDraft.markSaved()
+    notice.value = t('common.saved')
+  }
+  catch (e) { error.value = (e as Error).message || t('common.error') }
+  finally { busy.value = false }
+}
+
 async function save(section: 'tasks' | 'periodic_tasks') {
   if (!form.value || busy.value) return
   error.value = ''; notice.value = ''
@@ -203,8 +273,7 @@ async function save(section: 'tasks' | 'periodic_tasks') {
     const saved = await saveGrowthSettings(form.value, section)
     form.value.growth[section] = saved.growth[section] ?? []
     if (section === 'tasks') persistedTaskIDs.value = new Set(form.value.growth.tasks.map(task => task.id))
-    form.value._version = saved._version
-    if (saved._sections) form.value._sections = { ...form.value._sections, [section]: saved._sections[section]! }
+    updateSavedRevision(section, saved)
     ;(section === 'tasks' ? tasksDraft : periodicDraft).markSaved()
     notice.value = t('common.saved')
   }

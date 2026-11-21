@@ -243,6 +243,7 @@ type CreateGroupRequest struct {
 	ForceOpenAIServiceTier      *string                                   `json:"force_openai_service_tier"`
 	ForceOpenAIUltrafast        bool                                      `json:"force_openai_ultrafast"`
 	FreeOpenAIFast              bool                                      `json:"free_openai_fast"`
+	FreeOpenAIUltrafast         bool                                      `json:"free_openai_ultrafast"`
 	RequireOAuthOnly            bool                                      `json:"require_oauth_only"`
 	RequirePrivacySet           bool                                      `json:"require_privacy_set"`
 	DefaultMappedModel          string                                    `json:"default_mapped_model"`
@@ -325,6 +326,7 @@ type UpdateGroupRequest struct {
 	ForceOpenAIServiceTier      *string                                    `json:"force_openai_service_tier"`
 	ForceOpenAIUltrafast        *bool                                      `json:"force_openai_ultrafast"`
 	FreeOpenAIFast              *bool                                      `json:"free_openai_fast"`
+	FreeOpenAIUltrafast         *bool                                      `json:"free_openai_ultrafast"`
 	RequireOAuthOnly            *bool                                      `json:"require_oauth_only"`
 	RequirePrivacySet           *bool                                      `json:"require_privacy_set"`
 	DefaultMappedModel          *string                                    `json:"default_mapped_model"`
@@ -733,6 +735,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		ForceOpenAIServiceTier:          req.ForceOpenAIServiceTier,
 		ForceOpenAIUltrafast:            req.ForceOpenAIUltrafast,
 		FreeOpenAIFast:                  req.FreeOpenAIFast,
+		FreeOpenAIUltrafast:             req.FreeOpenAIUltrafast,
 		RequireOAuthOnly:                req.RequireOAuthOnly,
 		RequirePrivacySet:               req.RequirePrivacySet,
 		DefaultMappedModel:              req.DefaultMappedModel,
@@ -886,6 +889,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		ForceOpenAIServiceTier:          req.ForceOpenAIServiceTier,
 		ForceOpenAIUltrafast:            req.ForceOpenAIUltrafast,
 		FreeOpenAIFast:                  req.FreeOpenAIFast,
+		FreeOpenAIUltrafast:             req.FreeOpenAIUltrafast,
 		RequireOAuthOnly:                req.RequireOAuthOnly,
 		RequirePrivacySet:               req.RequirePrivacySet,
 		DefaultMappedModel:              req.DefaultMappedModel,

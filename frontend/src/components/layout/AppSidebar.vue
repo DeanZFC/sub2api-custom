@@ -755,7 +755,6 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/coupons', label: t('coupon.title'), icon: GiftIcon, hideInSimpleMode: true },
     { path: '/invoices', label: t('invoice.title'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
-    { path: '/gpt-direct', label: t('gptDirect.title'), icon: GiftIcon, featureFlag: makeSidebarFlag(FeatureFlags.gptDirect) },
     { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true },
     { path: '/affiliate', label: t('nav.affiliate'), icon: UsersIcon, hideInSimpleMode: true, featureFlag: flagAffiliate },
     { path: '/profile', label: t('nav.profile'), icon: UserIcon },

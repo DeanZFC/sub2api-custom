@@ -7,7 +7,6 @@ export default {
       title: 'System Settings',
       description: 'Manage registration, email verification, default values, and SMTP settings',
       tabs: {
-        gptDirect: 'GPT Direct',
         general: 'General',
         agreement: 'Agreement',
         features: 'Feature Switches',

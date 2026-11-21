@@ -13,18 +13,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLotteryDirectChancesCombineWithRechargeAndSurviveRuleChanges(t *testing.T) {
+func TestLotteryBonusChancesCombineWithRechargeAndSurviveRuleChanges(t *testing.T) {
 	ctx := context.Background()
-	s, db, c, uid, cfg := lotteryFixture(t, 10)
-	_, err := db.Exec(`INSERT INTO qq_bot_lottery_chance_grants(source_key,user_id,chances) VALUES('gpt-direct:test',$1,2)`, uid)
+	s, db, c, uid, _ := lotteryFixture(t, 10)
+	_, err := db.Exec(`INSERT INTO qq_bot_lottery_chance_grants(source_key,user_id,chances) VALUES('legacy:test',$1,2)`, uid)
 	require.NoError(t, err)
 	state, err := s.LotteryState(ctx, uid)
 	require.NoError(t, err)
 	require.Equal(t, int64(3), state.Earned)
 	require.Equal(t, int64(2), state.BonusChances)
 	// Draw from the existing pool; changing balance recharge rules cannot erase grants.
-	cfg.RechargeStep = 100
-	require.NoError(t, s.SaveLotteryConfig(ctx, cfg))
+	saveLotteryRechargeRule(t, s, &LotteryRechargeRule{RechargeStep: 100, ChancesPerStep: 1})
 	state, err = s.LotteryState(ctx, uid)
 	require.NoError(t, err)
 	require.Equal(t, int64(2), state.Remaining)

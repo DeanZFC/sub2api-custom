@@ -260,12 +260,6 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, requiresAdmin: false, title: 'Channel Quality Checks', titleKey: 'tests.title', descriptionKey: 'tests.description' }
   },
   {
-    path: '/gpt-direct',
-    name: 'GPTDirect',
-    component: () => import('@/views/user/GPTDirectView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: false, title: 'GPT Direct', titleKey: 'gptDirect.title', descriptionKey: 'gptDirect.subtitle' }
-  },
-  {
     path: '/redeem',
     name: 'Redeem',
     component: () => import('@/views/user/RedeemView.vue'),

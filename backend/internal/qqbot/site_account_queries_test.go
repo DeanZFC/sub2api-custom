@@ -147,6 +147,7 @@ func TestSiteAccountLotteryChancesNeverSettlesEligibleRewards(t *testing.T) {
 	raw, err := json.Marshal(lottery)
 	require.NoError(t, err)
 	mock.ExpectQuery("SELECT value FROM settings").WithArgs(lotteryConfigKey).WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(string(raw)))
+	mock.ExpectQuery("SELECT value FROM settings").WithArgs(checkinConfigKey).WillReturnRows(sqlmock.NewRows([]string{"value"}))
 	mock.ExpectQuery("SELECT b.user_id FROM qq_bot_bindings").WithArgs(c.AppID, "trusted-member").WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(42))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(SUM(CASE")).WithArgs(42).WillReturnRows(sqlmock.NewRows([]string{"sum"}).AddRow("0"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(SUM(value),0)::text")).WithArgs(42).WillReturnRows(sqlmock.NewRows([]string{"sum"}).AddRow("0"))
@@ -157,5 +158,6 @@ func TestSiteAccountLotteryChancesNeverSettlesEligibleRewards(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "succeeded", result.Decision.Status)
 	require.Contains(t, result.Text, "剩余抽奖次数：3 次")
+	require.NotContains(t, result.Text, "再充值")
 	require.NoError(t, mock.ExpectationsWereMet(), "no settlement or balance mutation may occur")
 }

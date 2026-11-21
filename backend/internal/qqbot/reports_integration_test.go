@@ -38,9 +38,8 @@ func TestQQRewardReportComponentsCalendarAndHistoricalOwnership(t *testing.T) {
  VALUES('draw','app','first','g1',$1,'bundle',0,'{"awarded_chances":2,"coupon_quantity":3}',0,1,0,'ok','2026-11-17T23:59:59+08:00') RETURNING id`, u1).Scan(&draw)
 	require.NoError(t, err)
 	credit(fmt.Sprintf("lottery:%d", draw), "app", "g1", "first", "lottery", "0", "2026-11-18T00:00:01+08:00", u1)
-	// The grant table is shared with GPT Direct and old records do not establish
-	// AppID ownership. Neither duplicate/current nor unscoped grants add totals.
-	_, err = db.Exec(`INSERT INTO qq_bot_lottery_chance_grants(source_key,user_id,chances) VALUES($1,$2,2),('gpt-direct:test',$2,77),('qq-growth:legacy',$2,88)`, fmt.Sprintf("qq-lottery:%d", draw), u1)
+	// App reports exclude grants without an application ID and count the draw once.
+	_, err = db.Exec(`INSERT INTO qq_bot_lottery_chance_grants(source_key,user_id,chances) VALUES($1,$2,2),('legacy:test',$2,77),('qq-growth:legacy',$2,88)`, fmt.Sprintf("qq-lottery:%d", draw), u1)
 	require.NoError(t, err)
 	_, err = db.Exec(`INSERT INTO qq_bot_reward_codes(app_id,code_hash,code_hint,batch_name,reward_type,amount,quantity,status,user_id,member_id,group_id,redeemed_at,fulfilled_at,source_kind,source_key) VALUES
  ('app',NULL,'','growth','balance',.5,0,'fulfilled',$1,'first','g1','2026-11-18T12:00:00+08:00','2026-11-18T12:00:00+08:00','growth','growth'),

@@ -16,7 +16,6 @@
 | QQ 聊天与群治理 | 验签去重、持久化队列、成员上下文、站点知识与状态查询、自主接话、看图、生图、改图、意图复核、防刷屏与群策略；排队与生成共享截止时间 | backend/internal/qqbot/；qq-bot.md |
 | QQ 账户及运营 | 账户绑定、邮箱确认转账、签到、邀请、抽奖和保底、一次性与周期成长、排行榜、奖励与价格健康通知、成员目录 | backend/internal/qqbot/growth.go；backend/internal/qqbot/lottery.go；qq-bot.md |
 | QQ 群信息展示 | 管理端读取群信息、缓存群名及群选择器名称回填 | backend/internal/qqbot/group_info.go；frontend/src/composables/useQQGroupNames.ts |
-| GPT 直充 | CTAI API 适配、验码、兑换、订阅与进度；请求幂等、任务凭据加密、奖励结算及后台补结算 | GPT_DIRECT_CN.md；backend/internal/service/gpt_direct_rewards.go |
 | 固定 IPv6 出口 | 保留旧绑定与恢复；独立 OVH 分配、预留、账号独占、单审计 Key 独占、退役重试和存储统计；排除轮转池与 BPS 池 | ovh-ipv6-compatibility.md；deploy/ovh-ipv6-egress/ |
 | VM Bridge 退休保护 | VM 传输及入口已移除；保留旧绑定审计与停用隔离，需恢复原路由后手动启用 | openai-vm.md |
 | 更新与运维 | Fork 版本及来源、不可变镜像 manifest、宿主更新器、镜像及健康核验、持久化完成状态、重启恢复、多实例部署 | AUTO_UPDATE.md；backend/internal/sourceupdater/ |

@@ -110,7 +110,7 @@ func TestCORS_AllowedOrigin_HasAllowHeaders(t *testing.T) {
 			assert.NotEmpty(t, w.Header().Get("Access-Control-Allow-Methods"),
 				"允许的 origin 应收到 Allow-Methods")
 			assert.Contains(t, w.Header().Get("Access-Control-Expose-Headers"), "Server-Timing")
-			for _, header := range []string{"ETag", "X-QQBot-Config-Version", "X-QQBot-checkin-Version", "X-QQBot-tasks-Version", "X-QQBot-periodic_tasks-Version"} {
+			for _, header := range []string{"ETag", "X-QQBot-Config-Version", "X-QQBot-checkin-Version", "X-QQBot-tasks-Version", "X-QQBot-periodic_tasks-Version", "X-QQBot-lottery_recharge-Version"} {
 				assert.Contains(t, w.Header().Get("Access-Control-Expose-Headers"), header)
 			}
 			assert.Contains(t, w.Header().Get("Access-Control-Expose-Headers"), "WWW-Authenticate")

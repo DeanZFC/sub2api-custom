@@ -1,11 +1,12 @@
 import { apiClient } from './client'
 function versions(headers: Record<string, unknown>) {
  const extra: { _version?: string; _sections?: Record<string, string> } = { _version: (headers?.['x-qqbot-config-version'] || headers?.etag) as string | undefined }
- if (headers?.['x-qqbot-checkin-version']) extra._sections = Object.fromEntries(['checkin', 'tasks', 'periodic_tasks'].map(key => [key, headers[`x-qqbot-${key}-version`] as string]))
+ if (headers?.['x-qqbot-checkin-version']) extra._sections = Object.fromEntries(['checkin', 'tasks', 'periodic_tasks', 'lottery_recharge'].map(key => [key, headers[`x-qqbot-${key}-version`] as string]))
  return extra
 }
 async function versionedGet<T>(path: string): Promise<T> { const r = await apiClient.get<T>(path); return { ...r.data, ...versions(r.headers) } }
-async function versionedPut<T extends { _version?: string; _section?: string }>(path: string, value: T): Promise<T> { const r = await apiClient.put<T>(path, value, { headers: { 'If-Match': value._version || '', 'X-QQBot-Section': value._section || '' } }); return { ...r.data, ...versions(r.headers) } }
+interface QQVersionedDraft { _version?: string; _section?: string }
+async function versionedPut<T extends QQVersionedDraft, Result = T>(path: string, value: T): Promise<Result> { const r = await apiClient.put<Result>(path, value, { headers: { 'If-Match': value._version || '', 'X-QQBot-Section': value._section || '' } }); return { ...r.data, ...versions(r.headers) } }
 
 
 export interface QQBotCustomCommand { command: string; reply: string; enabled: boolean }
@@ -159,7 +160,7 @@ export interface QQGrowthTask {
 export interface QQRankingPrize { rank: number; reward: QQGrowthReward }
 export interface QQRankingConfig {
   _version?: string
-  enabled: boolean; rewards_enabled: boolean; effective_day: string
+  rewards_enabled: boolean; effective_day: string
   token_rewards: QQRankingPrize[]; amount_rewards: QQRankingPrize[]
 }
 export interface QQCheckinRewardDistribution {
@@ -169,6 +170,14 @@ export interface QQCheckinRewardDistribution {
 }
 export interface QQCheckinMilestone {
   id: string; name: string; kind: 'checkin_total' | 'checkin_streak'; days: number; repeat?: boolean; reward: QQGrowthReward; enabled: boolean
+}
+export interface QQLotteryRechargeRule {
+  recharge_step: number
+  chances_per_step: number
+}
+interface QQLotteryRechargePatch extends QQVersionedDraft {
+  _section: 'lottery_recharge'
+  growth: { lottery_recharge: QQLotteryRechargeRule | null }
 }
 export interface QQCheckinConfig {
  coupon_template_id?: number; coupon_quantity?: number
@@ -180,7 +189,14 @@ export interface QQCheckinConfig {
   streak_reward: QQGrowthReward
   streak_days: number
   streak_chances: number
-  growth: { binding_chances: number; first_usage_chances: number; checkin_30_chances: number; tasks: QQGrowthTask[]; periodic_tasks: QQGrowthTask[] }
+  growth: {
+    binding_chances: number
+    first_usage_chances: number
+    checkin_30_chances: number
+    tasks: QQGrowthTask[]
+    periodic_tasks: QQGrowthTask[]
+    lottery_recharge?: QQLotteryRechargeRule | null
+  }
   enabled: boolean; min_amount: number; max_amount: number
   min_recharge_total: number; min_recharge_30d: number; recharge_window_days: number
 }
@@ -203,7 +219,7 @@ export interface QQTransferPreview {
 export interface QQLotteryPrize { coupon_template_id?: number; coupon_quantity?: number; name: string; amount: number; chances?: number; probability_bps: number }
 export interface QQLotteryConfig {
   _version?: string
-  enabled: boolean; title: string; recharge_step: number; chances_per_step: number; prizes: QQLotteryPrize[]
+  enabled: boolean; title: string; prizes: QQLotteryPrize[]
   guarantee_enabled: boolean; guarantee_every: number; guarantee_prizes: QQLotteryPrize[]
 }
 export interface QQLotteryState { user_id: number; recharge_total: number; earned: number; bonus_chances?: number; used: number; remaining: number; next_recharge: number; guarantee_every: number; draws_until_guarantee: number }
@@ -312,7 +328,7 @@ export const qqbotAPI = {
   inviteConfig: async () => versionedGet<QQInviteConfig>('/admin/qqbot/invite'),
   saveInvite: async (config: QQInviteConfig) => versionedPut('/admin/qqbot/invite', config),
   checkinConfig: async () => versionedGet<QQCheckinConfig>('/admin/qqbot/checkin'),
-  saveCheckin: async (config: QQCheckinConfig) => versionedPut('/admin/qqbot/checkin', config),
+  saveCheckin: async (config: QQCheckinConfig | QQLotteryRechargePatch) => versionedPut<typeof config, QQCheckinConfig>('/admin/qqbot/checkin', config),
   transferConfig: async () => versionedGet<QQTransferConfig>('/admin/qqbot/transfer'),
   saveTransfer: async (config: QQTransferConfig) => versionedPut('/admin/qqbot/transfer', config),
   lotteryConfig: async () => versionedGet<QQLotteryConfig>('/admin/qqbot/lottery'),

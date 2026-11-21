@@ -4,7 +4,7 @@
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div><h1 class="text-2xl font-semibold">{{ t('qqbot.activitiesTitle') }}</h1>
         <p class="mt-2 text-sm text-gray-500">{{ t('qqbot.activitiesHelp') }}</p></div>
-        <RouterLink v-if="!['templates', 'rewards', 'growth', 'rankings', 'preview'].includes(activeTab.key)" class="btn btn-secondary" :to="{ path: '/admin/qqbot/records', query: { tab: activeTab.key } }">{{ t('qqbot.recordsTitle') }}</RouterLink>
+        <RouterLink v-if="recordsTab" class="btn btn-secondary" :to="{ path: '/admin/qqbot/records', query: { tab: recordsTab } }">{{ t('qqbot.recordsTitle') }}</RouterLink>
       </div>
       <nav
         role="tablist"
@@ -36,7 +36,12 @@
         :aria-labelledby="`qqbot-tab-${activeTab.key}`"
       >
         <KeepAlive :key="activityRevision">
-          <component :is="activeTab.component" :key="activeTab.key" :before-apply="beforeApply" @applied="activityRevision++" />
+          <component
+            :is="activeTab.component"
+            :key="activeTab.key"
+            v-bind="activeTab.key === 'growth' ? { section: growthSection } : activeTab.key === 'templates' ? { beforeApply } : {}"
+            @applied="activityRevision++"
+          />
         </KeepAlive>
       </div>
     </div>
@@ -44,42 +49,62 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import QQBotActivityTemplates from '@/components/admin/qqbot/QQBotActivityTemplates.vue'
 import { hasQQDrafts } from '@/components/admin/qqbot/useQQDraft'
 import QQBotCheckinSettings from '@/components/admin/qqbot/QQBotCheckinSettings.vue'
-import QQBotGrowthSettings from '@/components/admin/qqbot/QQBotGrowthSettings.vue'
+import QQBotGrowthWorkspace from '@/components/admin/qqbot/QQBotGrowthWorkspace.vue'
 import QQBotLotterySettings from '@/components/admin/qqbot/QQBotLotterySettings.vue'
-import QQBotInviteSettings from '@/components/admin/qqbot/QQBotInviteSettings.vue'
-import QQBotRankingSettings from '@/components/admin/qqbot/QQBotRankingSettings.vue'
 import QQActivityPreview from '@/components/admin/qqbot/QQActivityPreview.vue'
 import QQBotRewardCodes from '@/components/admin/qqbot/QQBotRewardCodes.vue'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
-onMounted(() => { if (route.query.tab === 'transfer') void router.replace({ path: '/admin/qqbot/bindings', query: { tab: 'transfer' } }) })
+const legacyGrowthSection = computed(() => {
+  const tab = route.query.tab
+  return tab === 'rankings' || tab === 'invite' ? tab : undefined
+})
+const growthSection = computed(() => {
+  const section = legacyGrowthSection.value ?? route.query.section
+  return section === 'rankings' || section === 'invite' ? section : undefined
+})
+watch([() => route.path, () => route.query.tab], ([path, tab]) => {
+  if (path !== '/admin/qqbot/activities') return
+  if (tab === 'transfer') {
+    void router.replace({ path: '/admin/qqbot/bindings', query: { tab: 'transfer' } })
+  } else if (legacyGrowthSection.value) {
+    void router.replace({ query: { ...route.query, tab: 'growth', section: legacyGrowthSection.value }, hash: route.hash })
+  }
+}, { immediate: true })
 const activityRevision = ref(0)
 function beforeApply() { return !hasQQDrafts(router) || window.confirm(t('qqbot.simple.discardActivities')) }
 const tabs = [
   { key: 'checkin', label: 'qqbot.checkinTitle', component: QQBotCheckinSettings },
-  { key: 'growth', label: 'qqbot.growth.tab', component: QQBotGrowthSettings },
-  { key: 'rankings', label: 'qqbot.rankings.tab', component: QQBotRankingSettings },
+  { key: 'growth', label: 'qqbot.growth.tab', component: QQBotGrowthWorkspace },
   { key: 'lottery', label: 'qqbot.lotteryTitle', component: QQBotLotterySettings },
-  { key: 'invite', label: 'qqbot.inviteTitle', component: QQBotInviteSettings },
   { key: 'preview', label: 'qqbot.workspace.preview', component: QQActivityPreview },
   { key: 'templates', label: 'qqbot.simple.templates', component: QQBotActivityTemplates },
   { key: 'rewards', label: 'qqbot.redemption.title', component: QQBotRewardCodes }
 ] as const
 type ActivityTab = (typeof tabs)[number]['key']
-const activeTab = computed(() => tabs.find(tab => tab.key === (route.query.tab === 'redemption' ? 'rewards' : route.query.tab)) ?? tabs[0])
+const activeTab = computed(() => {
+  const tab = route.query.tab
+  const key = legacyGrowthSection.value ? 'growth' : tab === 'redemption' ? 'rewards' : tab
+  return tabs.find(item => item.key === key) ?? tabs[0]
+})
+const recordsTab = computed(() => {
+  const tab = activeTab.value.key
+  if (tab === 'checkin' || tab === 'lottery') return tab
+  return tab === 'growth' && growthSection.value === 'invite' ? 'invite' : undefined
+})
 
 async function selectTab(tab: ActivityTab) {
   if (activeTab.value.key !== tab) {
-    await router.push({ query: { ...route.query, tab } })
+    await router.push({ query: { ...route.query, tab, section: undefined } })
   }
 }
 async function handleKeydown(event: KeyboardEvent, tab: ActivityTab) {

@@ -50,7 +50,7 @@ func TestGetByKeyForAuthCarriesGroupForceOpenAIUltrafast(t *testing.T) {
 	suffix := time.Now().UnixNano()
 	group := mustCreateGroup(t, integrationEntClient, &service.Group{
 		Name: fmt.Sprintf("ultrafast-proj-group-%d", suffix), Platform: service.PlatformOpenAI,
-		RateMultiplier: 1, ForceOpenAIUltrafast: true,
+		RateMultiplier: 1, ForceOpenAIUltrafast: true, FreeOpenAIUltrafast: true,
 	})
 	user := mustCreateUser(t, integrationEntClient, &service.User{
 		Email: fmt.Sprintf("ultrafast-proj-%d@example.com", suffix), Concurrency: 5,
@@ -75,5 +75,6 @@ func TestGetByKeyForAuthCarriesGroupForceOpenAIUltrafast(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got.Group)
 	require.True(t, got.Group.ForceOpenAIUltrafast)
+	require.True(t, got.Group.FreeOpenAIUltrafast)
 	require.False(t, got.Group.ForceOpenAIFast)
 }

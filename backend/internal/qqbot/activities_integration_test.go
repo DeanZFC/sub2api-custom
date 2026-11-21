@@ -32,8 +32,16 @@ func lotteryFixture(t *testing.T, amount float64) (*Service, *sql.DB, Config, in
 	lottery.Enabled = true
 	lottery.Prizes = []LotteryPrize{{Name: "win", Amount: 1, ProbabilityBPS: 10000}}
 	require.NoError(t, s.SaveLotteryConfig(context.Background(), lottery))
+	saveLotteryRechargeRule(t, s, &LotteryRechargeRule{RechargeStep: 10, ChancesPerStep: 1})
 	return s, db, c, uid, lottery
 }
+
+func saveLotteryRechargeRule(t *testing.T, s *Service, rule *LotteryRechargeRule) {
+	t.Helper()
+	ctx := WithCheckinSection(context.Background(), "lottery_recharge")
+	require.NoError(t, s.SaveCheckinConfig(ctx, CheckinConfig{Growth: GrowthConfig{LotteryRecharge: rule}}))
+}
+
 func TestCheckinRandomRangeLegacyAndZeroDedup(t *testing.T) {
 	ctx := context.Background()
 	db := testDB(t)
@@ -130,7 +138,7 @@ func TestLotteryConcurrentSpendingReplayAndRebinding(t *testing.T) {
 }
 func TestLotteryHistoricalPrincipalAndRefunds(t *testing.T) {
 	ctx := context.Background()
-	s, db, _, uid, c := lotteryFixture(t, 0)
+	s, db, _, uid, _ := lotteryFixture(t, 0)
 	_, err := db.Exec(`INSERT INTO payment_orders(user_id,amount,bonus_amount,status,refund_amount,order_type) VALUES
         ($1,25,5,'COMPLETED',0,'balance'),
         ($1,20,4,'PARTIALLY_REFUNDED',10,'balance'),
@@ -154,8 +162,7 @@ func TestLotteryHistoricalPrincipalAndRefunds(t *testing.T) {
 	uid2 := user(t, db)
 	_, err = db.Exec(`INSERT INTO payment_orders(user_id,amount) VALUES($1,.1),($1,.2)`, uid2)
 	require.NoError(t, err)
-	c.RechargeStep = .3
-	require.NoError(t, s.SaveLotteryConfig(ctx, c))
+	saveLotteryRechargeRule(t, s, &LotteryRechargeRule{RechargeStep: .3, ChancesPerStep: 1})
 	state, err = s.LotteryState(ctx, uid2)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), state.Remaining)
@@ -186,8 +193,7 @@ func TestLotteryRefundDeficitAndRuleChangesNeverResetUsage(t *testing.T) {
 	text, err = s.drawLottery(ctx, c, Job{ID: "covered", GroupID: "group", MemberID: "member"})
 	require.NoError(t, err)
 	require.Contains(t, text, "奖励额度：USD 1.")
-	lottery.RechargeStep = 5
-	require.NoError(t, s.SaveLotteryConfig(ctx, lottery))
+	saveLotteryRechargeRule(t, s, &LotteryRechargeRule{RechargeStep: 5, ChancesPerStep: 1})
 	state, err = s.LotteryState(ctx, uid)
 	require.NoError(t, err)
 	require.Equal(t, int64(6), state.Earned)

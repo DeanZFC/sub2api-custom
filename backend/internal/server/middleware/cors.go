@@ -106,7 +106,7 @@ func CORS(cfg config.CORSConfig) gin.HandlerFunc {
 			}
 			c.Writer.Header().Set("Access-Control-Allow-Headers", allowHeadersValue)
 			c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
-			c.Writer.Header().Set("Access-Control-Expose-Headers", "ETag, Server-Timing, WWW-Authenticate, X-QQBot-Config-Version, X-QQBot-checkin-Version, X-QQBot-tasks-Version, X-QQBot-periodic_tasks-Version")
+			c.Writer.Header().Set("Access-Control-Expose-Headers", "ETag, Server-Timing, WWW-Authenticate, X-QQBot-Config-Version, X-QQBot-checkin-Version, X-QQBot-tasks-Version, X-QQBot-periodic_tasks-Version, X-QQBot-lottery_recharge-Version")
 			c.Writer.Header().Set("Access-Control-Max-Age", "86400")
 		}
 		// 处理预检请求

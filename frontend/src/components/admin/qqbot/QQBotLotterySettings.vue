@@ -7,14 +7,6 @@
     <form v-if="form" class="card space-y-5 p-6" @submit.prevent="save">
       <div class="flex flex-wrap items-center justify-between gap-3"><h2 class="text-lg font-semibold">{{ t('qqbot.lotteryRules') }}</h2><label class="flex items-center gap-2"><input v-model="form.enabled" type="checkbox" />{{ t('common.enabled') }}</label></div>
       <label class="block space-y-1">{{ t('qqbot.activityName') }}<input v-model.trim="form.title" class="input" maxlength="60" required /></label>
-      <div class="grid gap-4 sm:grid-cols-2">
-        <label class="space-y-1">{{ t('qqbot.rechargeStep') }}<input v-model.number="form.recharge_step" data-testid="recharge-step" class="input" type="number" min="0.01" max="1000000000" step="0.01" required /></label>
-        <label class="space-y-1">{{ t('qqbot.chancesPerStep') }}<input v-model.number="form.chances_per_step" data-testid="chances-per-step" class="input" type="number" min="1" max="1000" step="1" required /></label>
-      </div>
-      <details class="rounded-lg bg-gray-50 p-4 text-sm dark:bg-dark-800">
-        <summary class="cursor-pointer font-medium">{{ t('qqbot.rewardEditor.rechargeRules') }}</summary>
-        <div class="mt-3 space-y-2 text-gray-500"><p>{{ t('qqbot.historicalRechargeHelp') }}</p><p>{{ t('qqbot.lotteryRuleChangeHelp') }}</p></div>
-      </details>
       <div class="flex flex-wrap items-center justify-between gap-3"><h2 class="font-semibold">{{ t('qqbot.prizePool') }}</h2><span :class="probabilityTotal === 10000 ? 'text-green-600' : 'text-red-600'">{{ t('qqbot.probabilityTotal', { total: (probabilityTotal / 100).toFixed(2) }) }}</span></div>
       <QQBotLotteryPrize v-for="(prize, index) in form.prizes" :key="index" :model-value="prize" :index="index" prefix="prize" :removable="form.prizes.length > 1" @remove="form.prizes.splice(index, 1)" />
       <button type="button" data-testid="add-lottery-prize" class="btn btn-secondary" :disabled="form.prizes.length >= 20" @click="addPrize">{{ t('qqbot.addPrize') }}</button>
@@ -50,11 +42,11 @@
       <dl v-if="state" class="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
         <div><dt class="text-gray-500">{{ t('qqbot.eligibleRecharge') }}</dt><dd class="mt-1 font-semibold">${{ state.recharge_total.toFixed(2) }}</dd></div>
         <div><dt class="text-gray-500">{{ t('qqbot.earnedChances') }}</dt><dd class="mt-1 font-semibold">{{ state.earned }}</dd></div>
-        <div><dt class="text-gray-500">{{ t('qqbot.directRechargeChances') }}</dt><dd class="mt-1 font-semibold">{{ state.bonus_chances || 0 }}</dd></div>
+        <div><dt class="text-gray-500">{{ t('qqbot.bonusChances') }}</dt><dd class="mt-1 font-semibold">{{ state.bonus_chances || 0 }}</dd></div>
         <div><dt class="text-gray-500">{{ t('qqbot.usedChances') }}</dt><dd class="mt-1 font-semibold">{{ state.used }}</dd></div>
         <div><dt class="text-gray-500">{{ t('qqbot.remainingChances') }}</dt><dd class="mt-1 font-semibold">{{ state.remaining }}</dd></div>
       </dl>
-      <p v-if="state" class="text-sm text-gray-500">{{ t('qqbot.nextRecharge', { amount: state.next_recharge.toFixed(2) }) }}</p>
+      <p v-if="state && state.next_recharge > 0" class="text-sm text-gray-500">{{ t('qqbot.nextRecharge', { amount: state.next_recharge.toFixed(2) }) }}</p>
       <p v-if="state && state.draws_until_guarantee > 0" class="text-sm text-primary-600 dark:text-primary-400">{{ t('qqbot.guaranteeProgress', { every: state.guarantee_every, count: state.draws_until_guarantee }) }}</p>
     </section>
 

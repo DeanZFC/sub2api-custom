@@ -84,6 +84,7 @@ const sourceGroup = {
   long_context_pricing_enabled: true,
   force_openai_fast: false,
   free_openai_fast: false,
+  free_openai_ultrafast: false,
   model_pricing: [],
   profit_control_enabled: false,
   profit_min_margin: 0,
@@ -223,17 +224,20 @@ describe("GroupsView OpenAI service tier", () => {
     await flushPromises();
     await wrapper.get('input[data-tour="group-form-name"]').setValue("Ultrafast group");
     await selectTier(wrapper, "create", "ultrafast");
+    await wrapper.get('[data-testid="create-free-openai-ultrafast"]').trigger("click");
     await wrapper.get("form").trigger("submit");
     await flushPromises();
     expect(createGroup).toHaveBeenCalledWith(expect.objectContaining({
       force_openai_service_tier: "ultrafast",
       force_openai_fast: false,
       free_openai_fast: false,
+      free_openai_ultrafast: true,
     }));
     await wrapper.get('[data-tour="groups-create-btn"]').trigger("click");
     wrapper.getComponent('[data-tour="group-form-platform"]').vm.$emit("update:modelValue", "openai");
     await flushPromises();
     expect(wrapper.getComponent('[data-testid="create-force-openai-service-tier"]').props("modelValue")).toBe("");
+    expect(wrapper.get('[data-testid="create-free-openai-ultrafast"]').attributes("aria-checked")).toBe("false");
     wrapper.unmount();
   });
 
@@ -257,6 +261,24 @@ describe("GroupsView OpenAI service tier", () => {
     wrapper.unmount();
   });
 
+  it("can disable free Ultra Fast independently of free Fast and tier forcing", async () => {
+    setGroups([{ ...sourceGroup, free_openai_fast: true, free_openai_ultrafast: true }]);
+    const wrapper = mountView();
+    await flushPromises();
+    await openEdit(wrapper);
+    const toggle = wrapper.get('[data-testid="edit-free-openai-ultrafast"]');
+    expect(toggle.attributes("aria-checked")).toBe("true");
+    await toggle.trigger("click");
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+    expect(updateGroup).toHaveBeenLastCalledWith(42, expect.objectContaining({
+      force_openai_service_tier: "",
+      free_openai_fast: true,
+      free_openai_ultrafast: false,
+    }));
+    wrapper.unmount();
+  });
+
   it("clears a selected tier after switching to an unsupported platform", async () => {
     const wrapper = mountView();
     await flushPromises();
@@ -264,13 +286,14 @@ describe("GroupsView OpenAI service tier", () => {
     wrapper.getComponent('[data-tour="group-form-platform"]').vm.$emit("update:modelValue", "openai");
     await flushPromises();
     await selectTier(wrapper, "create", "ultrafast");
+    await wrapper.get('[data-testid="create-free-openai-ultrafast"]').trigger("click");
     wrapper.getComponent('[data-tour="group-form-platform"]').vm.$emit("update:modelValue", "anthropic");
     await flushPromises();
     expect(wrapper.find('[data-testid="create-force-openai-service-tier"]').exists()).toBe(false);
     await wrapper.get('input[data-tour="group-form-name"]').setValue("Anthropic group");
     await wrapper.get("form").trigger("submit");
     await flushPromises();
-    expect(createGroup).toHaveBeenLastCalledWith(expect.objectContaining({ platform: "anthropic", force_openai_service_tier: "", force_openai_fast: false }));
+    expect(createGroup).toHaveBeenLastCalledWith(expect.objectContaining({ platform: "anthropic", force_openai_service_tier: "", force_openai_fast: false, free_openai_ultrafast: false }));
     wrapper.unmount();
   });
 });

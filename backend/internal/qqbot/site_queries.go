@@ -308,7 +308,11 @@ func siteLotteryRules(c LotteryConfig) string {
 	if !c.Enabled {
 		return "🎉 **抽奖规则**\n抽奖活动未开启。"
 	}
-	text := fmt.Sprintf("🎉 **%s**\n累计有效充值每满 %s 送 %d 次\n每次抽奖消耗 1 次；可发送 抽奖 1～10 连抽\n需绑定网站账号。\n\n**普通奖池**", replyPlainLabel(c.Title), siteRuleMoney(c.RechargeStep), c.ChancesPerStep)
+	text := fmt.Sprintf("🎉 **%s**", replyPlainLabel(c.Title))
+	if c.rechargeRuleEnabled() {
+		text += fmt.Sprintf("\n累计有效充值每满 %s 送 %d 次", siteRuleMoney(c.RechargeStep), c.ChancesPerStep)
+	}
+	text += "\n每次抽奖消耗 1 次；可发送 抽奖 1～10 连抽\n需绑定网站账号。\n\n**普通奖池**"
 	for _, p := range c.Prizes {
 		text += fmt.Sprintf("\n\n%s\n%s（概率 %.2f%%）", replyPlainLabel(p.Name), lotteryPrizeDescription(p), float64(p.ProbabilityBPS)/100)
 	}
@@ -324,6 +328,9 @@ func siteLotteryRules(c LotteryConfig) string {
 func siteGrowthRules(c GrowthConfig) string {
 	text := "🌱 **成长任务规则**"
 	count := 0
+	if rule := c.LotteryRecharge; rule != nil {
+		text += fmt.Sprintf("\n\n**充值送抽奖次数**\n累计有效充值每满 %s 送 %d 次，抽奖时实时计算。", siteRuleMoney(rule.RechargeStep), rule.ChancesPerStep)
+	}
 	for _, set := range []struct {
 		tasks    []GrowthTask
 		periodic bool
@@ -354,6 +361,9 @@ func siteGrowthRules(c GrowthConfig) string {
 		}
 	}
 	if count == 0 {
+		if c.LotteryRecharge != nil {
+			return text + "\n\n需绑定网站账号。\n个人进度：成长任务"
+		}
 		return text + "\n暂无已开启的成长任务。"
 	}
 	return text + "\n\n需绑定网站账号；达标自动发放，实物及自定义奖品由管理员交付。\n个人进度：成长任务"

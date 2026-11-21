@@ -11,7 +11,6 @@ import (
 
 func TestRankingConfigValidation(t *testing.T) {
 	cfg := defaultRankingConfig()
-	require.True(t, cfg.Enabled)
 	require.False(t, cfg.RewardsEnabled)
 	require.NoError(t, validateRankingConfig(cfg))
 	cfg.RewardsEnabled = true

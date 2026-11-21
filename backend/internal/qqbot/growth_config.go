@@ -28,6 +28,26 @@ type GrowthTask struct {
 	Enabled     bool          `json:"enabled"`
 }
 
+// LotteryRechargeRule keeps the live recharge calculation for the draw quota.
+type LotteryRechargeRule struct {
+	RechargeStep   float64 `json:"recharge_step"`
+	ChancesPerStep int64   `json:"chances_per_step"`
+}
+
+func (r *LotteryRechargeRule) validate() error {
+	if r == nil {
+		return nil
+	}
+	step := r.RechargeStep
+	if math.IsNaN(step) || math.IsInf(step, 0) || step < .01 || step > 1e9 || math.Abs(step*100-math.Round(step*100)) > .001 {
+		return errors.New("累计充值门槛需为 0.01 到 1000000000 USD，最多 2 位小数")
+	}
+	if r.ChancesPerStep < 1 || r.ChancesPerStep > 1000 {
+		return errors.New("每档赠送次数需在 1 到 1000 之间")
+	}
+	return nil
+}
+
 func (g GrowthConfig) tasks() []GrowthTask {
 	if g.Tasks != nil {
 		return g.Tasks
@@ -48,6 +68,9 @@ func (c CheckinConfig) streakDays() int {
 }
 
 func validateGrowth(c CheckinConfig) error {
+	if err := c.Growth.LotteryRecharge.validate(); err != nil {
+		return err
+	}
 	if err := c.streakReward().validate(); err != nil {
 		return err
 	}

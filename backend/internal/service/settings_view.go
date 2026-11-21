@@ -355,7 +355,6 @@ type DefaultSubscriptionSetting struct {
 type PublicSettings struct {
 	OpenAICodexTicketEnabled            bool `json:"openai_codex_ticket_enabled"`
 	ExcelBPSEnabled                     bool `json:"excel_bps_enabled"`
-	GPTDirectEnabled                    bool
 	RegistrationEnabled                 bool
 	EmailVerifyEnabled                  bool
 	ForceEmailOnThirdPartySignup        bool

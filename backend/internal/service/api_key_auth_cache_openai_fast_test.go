@@ -64,9 +64,9 @@ func TestAPIKeyAuthSnapshotGroupForceOpenAIUltrafastRoundtrip(t *testing.T) {
 		User: &User{ID: 40, Status: StatusActive},
 		Group: &Group{
 			ID: groupID, Name: "ultrafast-roundtrip", Platform: PlatformOpenAI, Status: StatusActive,
-			Hydrated: true, ForceOpenAIUltrafast: true,
+			Hydrated: true, ForceOpenAIUltrafast: true, FreeOpenAIUltrafast: true,
 		},
-		FallbackGroup: &Group{ID: 52, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, ForceOpenAIUltrafast: true, ForceOpenAIFast: true},
+		FallbackGroup: &Group{ID: 52, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, ForceOpenAIUltrafast: true, FreeOpenAIUltrafast: true, ForceOpenAIFast: true},
 	}
 	svc := &APIKeyService{}
 
@@ -81,8 +81,10 @@ func TestAPIKeyAuthSnapshotGroupForceOpenAIUltrafastRoundtrip(t *testing.T) {
 	require.True(t, used)
 	require.NotNil(t, materialized.Group)
 	require.True(t, materialized.Group.ForceOpenAIUltrafast)
+	require.True(t, materialized.Group.FreeOpenAIUltrafast)
 	require.False(t, materialized.Group.ForceOpenAIFast)
 	require.NotNil(t, materialized.FallbackGroup)
 	require.True(t, materialized.FallbackGroup.ForceOpenAIUltrafast)
+	require.True(t, materialized.FallbackGroup.FreeOpenAIUltrafast)
 	require.True(t, materialized.FallbackGroup.ForceOpenAIFast)
 }

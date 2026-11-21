@@ -1014,6 +1014,7 @@ var (
 		{Name: "force_openai_service_tier", Type: field.TypeString, Size: 16, Default: ""},
 		{Name: "force_openai_ultrafast", Type: field.TypeBool, Default: false},
 		{Name: "free_openai_fast", Type: field.TypeBool, Default: false},
+		{Name: "free_openai_ultrafast", Type: field.TypeBool, Default: false},
 		{Name: "require_oauth_only", Type: field.TypeBool, Default: false},
 		{Name: "require_privacy_set", Type: field.TypeBool, Default: false},
 		{Name: "default_mapped_model", Type: field.TypeString, Size: 100, Default: ""},

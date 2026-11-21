@@ -39,9 +39,11 @@ describe('QQ activity records', () => {
 
   it.each(['zh', 'en'] as const)('%s shows QQ invitation relationships and current bindings', async locale => {
     api.activityRecords.mockResolvedValue(page([invitation]))
-    const { wrapper: w, t } = await setup(locale, '?tab=invite')
+    const { wrapper: w, router, t } = await setup(locale, '?tab=invite')
     expect(w.findAll('[role="tab"]')).toHaveLength(3)
     expect(api.activityRecords).toHaveBeenCalledWith('invite', '', 1)
+    const settingsLink = w.get('a[href^="/admin/qqbot/activities"]')
+    expect(router.resolve(settingsLink.attributes('href')).query).toEqual({ tab: 'growth', section: 'invite' })
     expect(w.text()).toContain(t('qqbot.recordsTitle'))
     expect(w.text()).toContain(t('qqbot.inviteRecordsHelp'))
     expect(w.text()).toContain('inviter-openid')

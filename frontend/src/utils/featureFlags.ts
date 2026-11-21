@@ -96,7 +96,6 @@ function defineFlag<K extends keyof PublicSettings>(
 export const FeatureFlags = {
   codexTicket: defineFlag({ key: 'openai_codex_ticket_enabled', mode: 'opt-in', label: 'Codex Tickets' }),
   excelBPS: defineFlag({ key: 'excel_bps_enabled', mode: 'opt-out', label: 'Excel / BPS' }),
-  gptDirect: defineFlag({ key: 'gpt_direct_enabled', mode: 'opt-in', label: 'GPT Direct' }),
   channelMonitor: defineFlag({
     key: 'channel_monitor_enabled',
     mode: 'opt-out',

@@ -1318,9 +1318,11 @@ export default {
         ultrafastWithFastFallback: 'Ultra Fast（其他模型使用 Fast）',
         hint: '此分组发往 OpenAI 协议上游的请求将统一使用所选档位，不适用于 Excel BPS 通道；仍受全局 Fast/Flex 策略和上游模型、账号支持范围限制。保存后新请求立即生效，已建立的 WebSocket 会话需重连。',
         forceUltrafast: '强制使用 Ultra Fast（ultrafast）',
-        ultrafastHint: '原 Ultrafast 选项仍对所有模型强制使用 service_tier=ultrafast；“仅支持模型”与“其他模型使用 Fast”选项按模型及账号权限启用 Ultra Fast。GPT-6.2 的 Pro 200 支持 Sol，Pro 500 支持 Sol 和 Astra；其他订阅账号使用其目录明确提供的档位。不可用时，选择“其他模型使用 Fast”则使用 Fast，否则跟随客户端。6.2 Sol 和 Astra 在太平洋时间 2027 年 2 月 28 日及之前默认按标准价 3 倍计费，之后为 6 倍；GPT-6 Astra 和 GPT-6.1 Sol 默认为 6 倍，可由渠道 Ultra Fast 倍率覆盖。免费 Fast 不包含 Ultra Fast。',
+        ultrafastHint: '原 Ultrafast 选项仍对所有模型强制使用 service_tier=ultrafast；“仅支持模型”与“其他模型使用 Fast”选项按模型及账号权限启用 Ultra Fast。GPT-6.2 的 Pro 200 支持 Sol，Pro 500 支持 Sol 和 Astra；其他订阅账号使用其目录明确提供的档位。不可用时，选择“其他模型使用 Fast”则使用 Fast，否则跟随客户端。6.2 Sol 和 Astra 在太平洋时间 2027 年 2 月 28 日及之前默认按标准价 3 倍计费，之后为 6 倍；GPT-6 Astra 和 GPT-6.1 Sol 默认为 6 倍，可由渠道 Ultra Fast 倍率覆盖。',
         free: '免费 Fast',
-        freeHint: '仅适用于 Fast（priority）：客户实际费用按同一请求的 Standard 价格计算，不适用于 Ultrafast。'
+        freeHint: 'Fast（priority）请求按同一请求的 Standard 价格向客户收费。',
+        freeUltrafast: '免费 Ultra Fast',
+        freeUltrafastHint: 'Ultra Fast（ultrafast）请求按同一请求的 Standard 价格向客户收费。回退到 Fast 时，以「免费 Fast」开关为准。'
       },
       invalidRequestFallback: {
         title: '无效请求兜底分组',

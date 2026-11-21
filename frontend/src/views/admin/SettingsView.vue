@@ -8951,17 +8951,13 @@
         </div>
         <!-- /Tab: Email -->
 
-        <div v-if="activeTab === 'gptDirect'">
-          <GPTDirectSettings />
-        </div>
-
         <!-- Tab: Backup -->
         <div v-show="activeTab === 'backup'">
           <BackupSettings />
         </div>
 
         <!-- Save dock — sticky so long tabs never require scrolling to the end -->
-        <div v-show="activeTab !== 'backup' && activeTab !== 'gptDirect'" class="settings-save-dock">
+        <div v-show="activeTab !== 'backup'" class="settings-save-dock">
           <button
             type="submit"
             :disabled="saving || loadFailed"
@@ -9040,7 +9036,6 @@ import ExcelBPSProtocolSettings from '@/components/admin/settings/ExcelBPSProtoc
 import CodexTicketFeatureSettings from '@/components/admin/settings/CodexTicketFeatureSettings.vue'
 import { FeatureFlags, resolveFeatureFlag } from '@/utils/featureFlags'
 import ExcelBPSImageSettings from '@/components/admin/settings/ExcelBPSImageSettings.vue'
-import GPTDirectSettings from "@/components/admin/settings/GPTDirectSettings.vue";
 import { ref, reactive, computed, onMounted, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { listPlatformIds } from "@/constants/platformCatalog";
@@ -9163,7 +9158,6 @@ const paymentMethodsHref = computed(() =>
 );
 
 type SettingsTab =
-  | "gptDirect"
   | "general"
   | "agreement"
   | "features"
@@ -9177,7 +9171,6 @@ const activeTab = ref<SettingsTab>("general");
 const route = useRoute();
 const router = useRouter();
 const settingsTabs = [
-  { key: "gptDirect" as SettingsTab, icon: "gift" as const },
   { key: "general" as SettingsTab, icon: "home" as const },
   { key: "agreement" as SettingsTab, icon: "document" as const },
   { key: "features" as SettingsTab, icon: "bolt" as const },

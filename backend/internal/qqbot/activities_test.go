@@ -95,14 +95,28 @@ func TestLotteryProbabilityDistributionAndValidation(t *testing.T) {
 	require.Equal(t, 1000, counts[c.Prizes[0].Name])
 	require.Equal(t, 9000, counts[c.Prizes[1].Name])
 	for _, mutate := range []func(*LotteryConfig){
-		func(c *LotteryConfig) { c.RechargeStep = 0 }, func(c *LotteryConfig) { c.RechargeStep = .001 },
-		func(c *LotteryConfig) { c.RechargeStep = math.NaN() }, func(c *LotteryConfig) { c.ChancesPerStep = 0 },
-		func(c *LotteryConfig) { c.ChancesPerStep = 1001 }, func(c *LotteryConfig) { c.Title = " " },
+		func(c *LotteryConfig) { c.Title = " " },
 		func(c *LotteryConfig) { c.Prizes = nil }, func(c *LotteryConfig) { c.Prizes[0].Amount = -1 },
 		func(c *LotteryConfig) { c.Prizes[0].ProbabilityBPS = 0 }, func(c *LotteryConfig) { c.Prizes[0].ProbabilityBPS = 1001 },
 	} {
 		c := defaultLotteryConfig()
 		mutate(&c)
 		require.Error(t, validateLottery(c))
+	}
+}
+
+func TestGrowthLotteryRechargeRuleValidation(t *testing.T) {
+	require.NoError(t, validateGrowth(CheckinConfig{}))
+	require.NoError(t, validateGrowth(CheckinConfig{Growth: GrowthConfig{
+		LotteryRecharge: &LotteryRechargeRule{RechargeStep: 50, ChancesPerStep: 1},
+	}}))
+	for _, invalid := range []LotteryRechargeRule{
+		{RechargeStep: 0, ChancesPerStep: 1},
+		{RechargeStep: .001, ChancesPerStep: 1},
+		{RechargeStep: math.NaN(), ChancesPerStep: 1},
+		{RechargeStep: 10, ChancesPerStep: 0},
+		{RechargeStep: 10, ChancesPerStep: 1001},
+	} {
+		require.Error(t, validateGrowth(CheckinConfig{Growth: GrowthConfig{LotteryRecharge: &invalid}}))
 	}
 }

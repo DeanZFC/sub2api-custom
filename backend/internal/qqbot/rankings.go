@@ -88,16 +88,9 @@ func rankingTitle(kind string) string {
 	return "消费金额榜"
 }
 
-func (s *Service) todayRankings(ctx context.Context, c Config, now time.Time) (string, error) {
+func (s *Service) todayRankings(ctx context.Context, now time.Time) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	cfg, err := loadRankingConfig(ctx, s.db, c.AppID)
-	if err != nil {
-		return "", err
-	}
-	if !cfg.Enabled {
-		return "今日排行榜暂未开启。", nil
-	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return "", err

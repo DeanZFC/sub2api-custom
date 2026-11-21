@@ -58,6 +58,8 @@ func CheckinSectionVersion(c CheckinConfig, section string) string {
 		return ConfigVersion(c.Growth.Tasks)
 	case "periodic_tasks":
 		return ConfigVersion(c.Growth.PeriodicTasks)
+	case "lottery_recharge":
+		return ConfigVersion(c.Growth.LotteryRecharge)
 	}
 	return ConfigVersion(c)
 }
