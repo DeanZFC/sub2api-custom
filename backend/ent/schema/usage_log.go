@@ -115,6 +115,7 @@ func (UsageLog) Fields() []ent.Field {
 		field.Float("rate_multiplier").
 			Default(1).
 			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}),
+		field.Bool("service_tier_surcharge_waived").Default(false),
 		field.Bool("long_context_billing_applied").
 			Default(false).
 			Comment("Whether long-context pricing changed token prices for this request"),
@@ -185,6 +186,8 @@ func (UsageLog) Fields() []ent.Field {
 		field.Bool("cache_ttl_overridden").
 			Default(false),
 
+		field.Int16("http_status").Optional().Nillable(),
+		field.Int64("sync_xid").Optional().Nillable().Immutable().Annotations(entsql.DefaultExprs(map[string]string{dialect.Postgres: "txid_current()"})),
 		// 时间戳（只有 created_at，日志不可修改）
 		field.Time("created_at").
 			Default(time.Now).

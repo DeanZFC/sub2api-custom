@@ -46,6 +46,9 @@ const messages: Record<string, string> = {
   'usage.cacheHitRate': 'Cache hit rate',
   'usage.serviceTier': 'Service tier',
   'usage.serviceTierPriority': 'Fast',
+  'usage.freeFast': 'Free Fast',
+  'usage.freeUltrafast': 'Free Ultra Fast',
+  'usage.freeFastBillingHint': 'Billed at the Standard price',
   'usage.serviceTierUltrafast': 'Ultrafast',
   'usage.serviceTierFlex': 'Flex',
   'usage.serviceTierStandard': 'Standard',
@@ -144,6 +147,25 @@ const baseImageRow = {
   image_size_source: null,
   image_size_breakdown: null,
 }
+
+describe('usage cost badges', () => {
+  it.each([
+    ['priority', true, 'Free Fast'],
+    ['fast', true, 'Free Fast'],
+    ['ultrafast', true, 'Free Ultra Fast'],
+    ['ultrafast', false, null],
+    ['priority', undefined, null],
+  ] as const)('renders the recorded waiver for %s with flag %s', (tier, waived, expected) => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ ...baseImageRow, service_tier: tier, service_tier_surcharge_waived: waived }], loading: false, columns: [] },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    const badge = wrapper.find('[title="Billed at the Standard price"]')
+    expect(badge.exists() ? badge.text() : null).toBe(expected)
+    expect(wrapper.text()).toContain('$0.400000')
+    wrapper.unmount()
+  })
+})
 
 describe('admin UsageTable tooltip', () => {
   it('shows the two OpenAI cache-write buckets without Anthropic lifetime labels', async () => {

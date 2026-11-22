@@ -248,7 +248,13 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 			).Info("gateway.web_search.search_price_per_1k_explicit_free")
 		}
 	}
-	h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"query":       req.Query,
+		"results":     nativeResp.Results,
+		"provider":    providerName,
+		"max_results": maxResults,
+	})
+	h.submitMandatoryUsageRecordTask(usageHTTPContext(c), func(ctx context.Context) {
 		if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 			Result: &service.ForwardResult{
 				RequestID:   searchRequestID,
@@ -277,12 +283,6 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 		}
 	})
 
-	c.JSON(http.StatusOK, gin.H{
-		"query":       req.Query,
-		"results":     nativeResp.Results,
-		"provider":    providerName,
-		"max_results": maxResults,
-	})
 }
 
 // acquireWebSearchAccountSlot resolves an immediate slot or WaitPlan wait.

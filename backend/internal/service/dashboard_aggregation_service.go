@@ -411,14 +411,18 @@ func (s *DashboardAggregationService) maybeCleanupRetention(ctx context.Context,
 }
 
 func (s *DashboardAggregationService) requestRetentionDays(ctx context.Context) (int, error) {
-	days := s.cfg.Retention.UsageLogsDays
-	if !s.cfg.Enabled {
+	return readRequestRetentionDays(ctx, s.cfg, s.settingRepo)
+}
+
+func readRequestRetentionDays(ctx context.Context, aggregation config.DashboardAggregationConfig, settings SettingRepository) (int, error) {
+	days := aggregation.Retention.UsageLogsDays
+	if !aggregation.Enabled {
 		days = 0
 	}
-	if s.settingRepo == nil {
+	if settings == nil {
 		return days, nil
 	}
-	raw, err := s.settingRepo.GetValue(ctx, SettingKeyOpsRuntimeLogConfig)
+	raw, err := settings.GetValue(ctx, SettingKeyOpsRuntimeLogConfig)
 	if errors.Is(err, ErrSettingNotFound) {
 		return days, nil
 	}

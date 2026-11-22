@@ -72,7 +72,7 @@
           <div v-if="activeTab === 'errors'" class="flex flex-1 flex-wrap items-end gap-4">
             <div class="w-full sm:w-auto sm:min-w-[220px]">
               <label class="input-label">{{ t('usage.errors.keyName') }}</label>
-              <Select v-model="errorFilter.api_key_id" :options="errorKeyOptions" @change="applyErrorFilters" />
+              <Select v-model="errorFilter.api_key_id" :options="errorKeyOptions" searchable @change="applyErrorFilters" />
             </div>
             <div class="w-full sm:w-auto sm:min-w-[220px]">
               <label class="input-label">{{ t('usage.errors.model') }}</label>
@@ -98,7 +98,7 @@
           <div v-else class="flex flex-1 flex-wrap items-end gap-4">
             <div class="w-full sm:w-auto sm:min-w-[220px]">
               <label class="input-label">{{ t('usage.apiKeyFilter') }}</label>
-              <Select v-model="filters.api_key_id" :options="apiKeyOptions" @change="applyFilters" />
+              <Select v-model="filters.api_key_id" :options="apiKeyOptions" searchable @change="applyFilters" />
             </div>
             <div class="w-full sm:w-auto sm:min-w-[220px]">
               <label class="input-label">{{ t('usage.model') }}</label>
@@ -178,6 +178,9 @@
       </div>
 
       <template v-if="activeTab === 'usage'">
+        <p class="text-sm text-gray-500 dark:text-gray-400">
+          {{ retentionDays === null ? t('usage.retentionUnknown') : retentionDays === 0 ? t('usage.retentionUnlimited') : t('usage.retentionDays', { days: retentionDays }) }}
+        </p>
         <UsageTable
           :data="usageLogs"
           :loading="loading"
@@ -224,7 +227,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { FeatureFlags, resolveFeatureFlag } from '@/utils/featureFlags'
-import { keysAPI, usageAPI, userGroupsAPI } from '@/api'
+import { usageAPI, userGroupsAPI } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
@@ -238,11 +241,9 @@ import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
 import Icon from '@/components/icons/Icon.vue'
 import UserErrorRequestsTable from '@/components/user/UserErrorRequestsTable.vue'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
-import { formatReasoningEffort } from '@/utils/format'
-import { getBillingModeLabel, getDisplayBillingMode as resolveDisplayBillingMode } from '@/utils/billingMode'
-import { resolveUsageRequestType, requestTypeToLegacyStream } from '@/utils/usageRequestType'
+import type { BillingKey } from '@/api/usage'
+import { requestTypeToLegacyStream } from '@/utils/usageRequestType'
 import type {
-  ApiKey,
   EndpointStat,
   Group,
   GroupStat,
@@ -292,7 +293,7 @@ const errorFilter = ref<{ model: string | null; category: string; api_key_id: nu
 
 const errorKeyOptions = computed<SelectOption[]>(() => [
   { value: null, label: t('usage.errors.allKeys') },
-  ...apiKeys.value.map((k) => ({ value: k.id, label: k.name })),
+  ...apiKeys.value.map((k) => ({ value: k.id, label: keyLabel(k) })),
 ])
 
 // 模型候选取自当前已加载错误中出现过的模型；creatable 允许输入任意片段做后端模糊。
@@ -408,13 +409,19 @@ const billingModeOptions = computed<SelectOption[]>(() => [
   { value: 'video', label: t('admin.usage.billingModeVideo') },
 ])
 
-const apiKeys = ref<ApiKey[]>([])
+const apiKeys = ref<BillingKey[]>([])
+const retentionDays = ref<number | null>(null)
+const keyLabel = (key: BillingKey) => {
+  if (key.deleted_at) return t('usage.deletedKey', { name: key.name })
+  if (key.status === 'inactive') return t('usage.inactiveKey', { name: key.name })
+  return key.name
+}
 const groups = ref<Group[]>([])
 const modelOptionValues = ref<string[]>([])
 
 const apiKeyOptions = computed<SelectOption[]>(() => [
   { value: null, label: t('usage.allApiKeys') },
-  ...apiKeys.value.map((key) => ({ value: key.id, label: key.name })),
+  ...apiKeys.value.map((key) => ({ value: key.id, label: keyLabel(key) })),
 ])
 const groupOptions = computed<SelectOption[]>(() => [
   { value: null, label: t('admin.usage.allGroups') },
@@ -609,45 +616,23 @@ const handleIpGeoBatchFailed = () => {
   appStore.showError(t('usage.ipGeo.batchFailed'))
 }
 
-const getRequestTypeExportText = (log: UsageLog): string => {
-  const requestType = resolveUsageRequestType(log)
-  if (requestType === 'cyber') return 'Cyber'
-  if (requestType === 'live') return 'Live'
-  if (requestType === 'ws_v2') return 'WS'
-  if (requestType === 'stream') return 'Stream'
-  if (requestType === 'sync') return 'Sync'
-  return 'Unknown'
-}
-
-const getDisplayBillingMode = (
-  row: Pick<UsageLog, 'billing_mode' | 'image_count'> | null | undefined
-): string | null | undefined => resolveDisplayBillingMode(row)
-
-const escapeCSVValue = (value: unknown): string => {
-  if (value == null) return ''
-  const str = String(value)
-  const escaped = str.replace(/"/g, '""')
-  if (str === '-') return str
-  if (/^[=+\-@\t\r]/.test(str)) return `"\'${escaped}"`
-  if (/[,"\n\r]/.test(str)) return `"${escaped}"`
-  return str
-}
-
-const EXPORT_PAGE_SIZE = 1000
+let exportController: AbortController | undefined
 const EXPORT_RATE_LIMIT_MAX_RETRIES = 3
 const EXPORT_RATE_LIMIT_MAX_WAIT_SECONDS = 60
 
-// 导出逐页请求计入按用户的重查询限流；429 时按 Retry-After 等待后重试同一页。
-const queryExportPage = async (params: UsageQueryParams) => {
+// Retry the complete snapshot with the same filters after a rate-limit response.
+const downloadExport = async (params: UsageQueryParams, signal: AbortSignal) => {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await usageAPI.query(params)
+      signal.throwIfAborted()
+      return await usageAPI.exportCSV(params, signal)
     } catch (error: any) {
       if (error?.status !== 429 || attempt >= EXPORT_RATE_LIMIT_MAX_RETRIES) throw error
       const waitSeconds = Math.min(
         Math.max(error.retry_after_seconds ?? EXPORT_RATE_LIMIT_MAX_WAIT_SECONDS, 1),
         EXPORT_RATE_LIMIT_MAX_WAIT_SECONDS
       )
+      if (signal.aborted) throw error
       appStore.showInfo(t('usage.exportRateLimited', { seconds: waitSeconds }))
       await new Promise((resolve) => setTimeout(resolve, waitSeconds * 1000))
     }
@@ -655,67 +640,15 @@ const queryExportPage = async (params: UsageQueryParams) => {
 }
 
 const exportToCSV = async () => {
-  if (pagination.total === 0) {
-    appStore.showWarning(t('usage.noDataToExport'))
-    return
-  }
+  if (exporting.value) return
+  const controller = new AbortController()
+  exportController = controller
   exporting.value = true
   appStore.showInfo(t('usage.preparingExport'))
+  const exportParams = { ...normalizedFilters.value, ...sortState }
   try {
-    const allLogs: UsageLog[] = []
-    const exportParams = buildUsageListParams(1, EXPORT_PAGE_SIZE)
-    const totalPages = Math.ceil(pagination.total / EXPORT_PAGE_SIZE)
-    for (let page = 1; page <= totalPages; page++) {
-      const response = await queryExportPage({ ...exportParams, page })
-      allLogs.push(...response.items)
-    }
-    if (allLogs.length === 0) {
-      appStore.showWarning(t('usage.noDataToExport'))
-      return
-    }
-    const headers = [
-      'Time',
-      'API Key Name',
-      'Model',
-      'Reasoning Effort',
-      'Inbound Endpoint',
-      'IP Address',
-      'Type',
-      'Billing Mode',
-      'Input Tokens',
-      'Output Tokens',
-      'Cache Read Tokens',
-      'Cache Creation Tokens',
-      'Rate Multiplier',
-      'Billed Cost',
-      'Original Cost',
-      'First Token (ms)',
-      'Duration (ms)',
-    ]
-    const rows = allLogs.map((log) => [
-      log.created_at,
-      log.api_key?.name || '',
-      log.model,
-      formatReasoningEffort(log.reasoning_effort),
-      log.inbound_endpoint || '',
-      log.ip_address || '',
-      getRequestTypeExportText(log),
-      getBillingModeLabel(getDisplayBillingMode(log), t),
-      log.input_tokens,
-      log.output_tokens,
-      log.cache_read_tokens,
-      log.cache_creation_tokens,
-      log.rate_multiplier,
-      log.actual_cost.toFixed(8),
-      log.total_cost.toFixed(8),
-      log.first_token_ms ?? '',
-      log.duration_ms ?? '',
-    ].map(escapeCSVValue))
-    const csvContent = [
-      headers.map(escapeCSVValue).join(','),
-      ...rows.map((row) => row.join(',')),
-    ].join('\n')
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' })
+    const blob = await downloadExport(exportParams, controller.signal)
+    if (controller.signal.aborted) return
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
@@ -724,18 +657,24 @@ const exportToCSV = async () => {
     window.URL.revokeObjectURL(url)
     appStore.showSuccess(t('usage.exportSuccess'))
   } catch (error) {
+    if (controller.signal.aborted) return
     console.error('CSV Export failed:', error)
-    appStore.showError(t('usage.exportFailed'))
+    const status = (error as { status?: number })?.status
+    appStore.showError(t(status === 413 || status === 504 ? 'usage.exportNarrowRange' : 'usage.exportFailed'))
   } finally {
     exporting.value = false
   }
 }
 
 const ALWAYS_VISIBLE = ['created_at']
-const DEFAULT_HIDDEN_COLUMNS = ['user_agent']
+const DEFAULT_HIDDEN_COLUMNS = ['user_agent', 'id', 'api_key_id', 'request_id']
 const HIDDEN_COLUMNS_KEY = 'user-usage-hidden-columns'
 
 const allColumns = computed<Column[]>(() => [
+  { key: 'id', label: t('usage.recordId'), sortable: false },
+  { key: 'api_key_id', label: 'Key ID', sortable: false },
+  { key: 'request_id', label: t('admin.usage.requestId'), sortable: false },
+  { key: 'http_status', label: 'HTTP', sortable: false },
   { key: 'api_key', label: t('usage.apiKeyFilter'), sortable: false },
   { key: 'model', label: t('usage.model'), sortable: true },
   { key: 'reasoning_effort', label: t('usage.reasoningEffort'), sortable: false },
@@ -838,10 +777,10 @@ const handleColumnClickOutside = (event: MouseEvent) => {
 }
 
 const loadApiKeys = async () => {
-  const firstPage = await keysAPI.list(1, 100)
+  const firstPage = await usageAPI.listBillingKeys(1, 100)
   const keys = [...firstPage.items]
   for (let page = 2; page <= firstPage.pages && keys.length > 0; page++) {
-    const response = await keysAPI.list(page, 100)
+    const response = await usageAPI.listBillingKeys(page, 100)
     if (response.items.length === 0) break
     keys.push(...response.items)
   }
@@ -923,11 +862,13 @@ onMounted(() => {
   loadSavedColumns()
   loadSavedErrColumns()
   document.addEventListener('click', handleColumnClickOutside)
+  void usageAPI.getRetention().then(days => { retentionDays.value = days }).catch(() => { retentionDays.value = null })
   void loadFilterOptions()
   refreshData()
 })
 
 onUnmounted(() => {
+  exportController?.abort()
   abortController?.abort()
   document.removeEventListener('click', handleColumnClickOutside)
 })

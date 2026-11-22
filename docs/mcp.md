@@ -169,3 +169,22 @@ curl 'https://api.example.com/.well-known/oauth-authorization-server'
 工具目录位于 `backend/internal/managementmcp/catalog.go`。新增工具应绑定已有管理路由，使用封闭参数 schema，并覆盖权限、资源归属、参数边界及凭证脱敏测试。
 
 OAuth 存储由 `249_mcp_oauth.sql` 创建。动态注册不写数据库：`client_id` 是服务端签名的无状态标识，自带客户端名称、回调 URI 摘要和 grant type，签名密钥首次使用时生成并保存在 `security_secrets`，多实例共享。只有用户同意授权后才写入授权记录，因此匿名注册不会占用存储，也没有可被占满的全站名额。每次新授权时有界清理过期 7 天以上的授权。浏览器使用 JWT 保护的 `/api/v1/user/mcp/config` 获取服务端配置的连接地址、`/api/v1/user/mcp/authorize` 预览/决定授权，以及 `/api/v1/user/mcp/grants` 列表、撤销接口。客户端协议端点返回标准 OAuth JSON，浏览器接口沿用平台响应格式。
+
+## 个人消费对账
+
+在用户面板的「使用记录」页选择日期、模型和 API Key，即可查看逐笔明细或下载 CSV。「全部密钥」覆盖登录用户的所有 Key。Key 筛选器包括已停用和已删除的 Key。历史名称以查询时仍保存的 Key 元数据为准。
+
+| 个人只读 MCP 工具 | 登录用户 REST 接口 | 用途 |
+| --- | --- | --- |
+| `user_list_billing_keys` | `GET /api/v1/usage/keys` | 按 `page`、`page_size` 取 Key ID、名称、状态及删除时间，包括未产生消费的 Key |
+| `user_sync_usage` | `GET /api/v1/usage/sync` | 按游标读取本人已落库的消费明细，省略 `api_key_id` 即可跨 Key 同步 |
+| `user_get_usage_retention` | `GET /api/v1/usage/retention` | 读取当前原始明细的自动清理天数，0 表示关闭自动到期清理 |
+| — | `GET /api/v1/usage/export` | 以 CSV 下载同一数据库快照中的明细，支持与页面相同的筛选及排序 |
+
+第三方程序集成使用站点启用的 MCP 和个人只读授权。REST 接口使用用户面板登录凭证。MCP 授权期限和续期方式见上文「授权与撤销」。
+
+首次调用 `user_sync_usage` 可传 `{"query":{"page_size":100}}`。从返回的业务数据中读取 `items`、`next_cursor` 和 `has_more`。将每行按明细 `id` 写入本地，并在同一本地事务中保存 `next_cursor`。下一次调用携带同一组筛选条件，以及 `query.cursor`。当 `has_more` 为真时继续翻页，为假时保存游标，稍后再次轮询。相同游标可用于失败重试。遇到 429 时按限流提示延迟重试。长期连续同步请省略结束日期。切换账号、筛选条件或服务端签名密钥后，从首批重新读取，按明细 ID 去重。
+
+每条明细包括请求 ID、Key ID 和名称、时间、请求模型、输入和输出 Token、缓存写入和读取 Token，以及客户计费金额 `actual_cost`（USD）。金额使用十进制字符串，汇总时使用十进制运算。已采集的 `http_status` 表示实际发送的 HTTP 响应头状态。历史缺失值、WebSocket 独立轮次显示为空；流式请求还可能在响应头发出后失败。失败请求详情继续遵循站点的用户错误日志可见性设置。
+
+同步按数据库写入事务及明细 ID 推进，同一请求时间可以对应多条记录。存在较早未提交事务时，新记录可能延迟到后续轮询。用户只能读取仍保留的原始记录；延长保留时长无法恢复已清理数据。CSV 在生成成功后开始下载，包含 UTF-8 BOM。单次文件上限 128 MiB，生成上限 2 分钟；超出时可以按日期、Key 或模型分批，或使用游标同步。

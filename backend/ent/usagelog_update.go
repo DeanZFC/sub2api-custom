@@ -624,6 +624,20 @@ func (_u *UsageLogUpdate) AddRateMultiplier(v float64) *UsageLogUpdate {
 	return _u
 }
 
+// SetServiceTierSurchargeWaived sets the "service_tier_surcharge_waived" field.
+func (_u *UsageLogUpdate) SetServiceTierSurchargeWaived(v bool) *UsageLogUpdate {
+	_u.mutation.SetServiceTierSurchargeWaived(v)
+	return _u
+}
+
+// SetNillableServiceTierSurchargeWaived sets the "service_tier_surcharge_waived" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableServiceTierSurchargeWaived(v *bool) *UsageLogUpdate {
+	if v != nil {
+		_u.SetServiceTierSurchargeWaived(*v)
+	}
+	return _u
+}
+
 // SetLongContextBillingApplied sets the "long_context_billing_applied" field.
 func (_u *UsageLogUpdate) SetLongContextBillingApplied(v bool) *UsageLogUpdate {
 	_u.mutation.SetLongContextBillingApplied(v)
@@ -989,6 +1003,33 @@ func (_u *UsageLogUpdate) SetNillableCacheTTLOverridden(v *bool) *UsageLogUpdate
 	return _u
 }
 
+// SetHTTPStatus sets the "http_status" field.
+func (_u *UsageLogUpdate) SetHTTPStatus(v int16) *UsageLogUpdate {
+	_u.mutation.ResetHTTPStatus()
+	_u.mutation.SetHTTPStatus(v)
+	return _u
+}
+
+// SetNillableHTTPStatus sets the "http_status" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableHTTPStatus(v *int16) *UsageLogUpdate {
+	if v != nil {
+		_u.SetHTTPStatus(*v)
+	}
+	return _u
+}
+
+// AddHTTPStatus adds value to the "http_status" field.
+func (_u *UsageLogUpdate) AddHTTPStatus(v int16) *UsageLogUpdate {
+	_u.mutation.AddHTTPStatus(v)
+	return _u
+}
+
+// ClearHTTPStatus clears the value of the "http_status" field.
+func (_u *UsageLogUpdate) ClearHTTPStatus() *UsageLogUpdate {
+	_u.mutation.ClearHTTPStatus()
+	return _u
+}
+
 // SetUser sets the "user" edge to the User entity.
 func (_u *UsageLogUpdate) SetUser(v *User) *UsageLogUpdate {
 	return _u.SetUserID(v.ID)
@@ -1324,6 +1365,9 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.AddedRateMultiplier(); ok {
 		_spec.AddField(usagelog.FieldRateMultiplier, field.TypeFloat64, value)
 	}
+	if value, ok := _u.mutation.ServiceTierSurchargeWaived(); ok {
+		_spec.SetField(usagelog.FieldServiceTierSurchargeWaived, field.TypeBool, value)
+	}
 	if value, ok := _u.mutation.LongContextBillingApplied(); ok {
 		_spec.SetField(usagelog.FieldLongContextBillingApplied, field.TypeBool, value)
 	}
@@ -1434,6 +1478,18 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.HTTPStatus(); ok {
+		_spec.SetField(usagelog.FieldHTTPStatus, field.TypeInt16, value)
+	}
+	if value, ok := _u.mutation.AddedHTTPStatus(); ok {
+		_spec.AddField(usagelog.FieldHTTPStatus, field.TypeInt16, value)
+	}
+	if _u.mutation.HTTPStatusCleared() {
+		_spec.ClearField(usagelog.FieldHTTPStatus, field.TypeInt16)
+	}
+	if _u.mutation.SyncXidCleared() {
+		_spec.ClearField(usagelog.FieldSyncXid, field.TypeInt64)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -2192,6 +2248,20 @@ func (_u *UsageLogUpdateOne) AddRateMultiplier(v float64) *UsageLogUpdateOne {
 	return _u
 }
 
+// SetServiceTierSurchargeWaived sets the "service_tier_surcharge_waived" field.
+func (_u *UsageLogUpdateOne) SetServiceTierSurchargeWaived(v bool) *UsageLogUpdateOne {
+	_u.mutation.SetServiceTierSurchargeWaived(v)
+	return _u
+}
+
+// SetNillableServiceTierSurchargeWaived sets the "service_tier_surcharge_waived" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableServiceTierSurchargeWaived(v *bool) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetServiceTierSurchargeWaived(*v)
+	}
+	return _u
+}
+
 // SetLongContextBillingApplied sets the "long_context_billing_applied" field.
 func (_u *UsageLogUpdateOne) SetLongContextBillingApplied(v bool) *UsageLogUpdateOne {
 	_u.mutation.SetLongContextBillingApplied(v)
@@ -2554,6 +2624,33 @@ func (_u *UsageLogUpdateOne) SetNillableCacheTTLOverridden(v *bool) *UsageLogUpd
 	if v != nil {
 		_u.SetCacheTTLOverridden(*v)
 	}
+	return _u
+}
+
+// SetHTTPStatus sets the "http_status" field.
+func (_u *UsageLogUpdateOne) SetHTTPStatus(v int16) *UsageLogUpdateOne {
+	_u.mutation.ResetHTTPStatus()
+	_u.mutation.SetHTTPStatus(v)
+	return _u
+}
+
+// SetNillableHTTPStatus sets the "http_status" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableHTTPStatus(v *int16) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetHTTPStatus(*v)
+	}
+	return _u
+}
+
+// AddHTTPStatus adds value to the "http_status" field.
+func (_u *UsageLogUpdateOne) AddHTTPStatus(v int16) *UsageLogUpdateOne {
+	_u.mutation.AddHTTPStatus(v)
+	return _u
+}
+
+// ClearHTTPStatus clears the value of the "http_status" field.
+func (_u *UsageLogUpdateOne) ClearHTTPStatus() *UsageLogUpdateOne {
+	_u.mutation.ClearHTTPStatus()
 	return _u
 }
 
@@ -2922,6 +3019,9 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	if value, ok := _u.mutation.AddedRateMultiplier(); ok {
 		_spec.AddField(usagelog.FieldRateMultiplier, field.TypeFloat64, value)
 	}
+	if value, ok := _u.mutation.ServiceTierSurchargeWaived(); ok {
+		_spec.SetField(usagelog.FieldServiceTierSurchargeWaived, field.TypeBool, value)
+	}
 	if value, ok := _u.mutation.LongContextBillingApplied(); ok {
 		_spec.SetField(usagelog.FieldLongContextBillingApplied, field.TypeBool, value)
 	}
@@ -3032,6 +3132,18 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.HTTPStatus(); ok {
+		_spec.SetField(usagelog.FieldHTTPStatus, field.TypeInt16, value)
+	}
+	if value, ok := _u.mutation.AddedHTTPStatus(); ok {
+		_spec.AddField(usagelog.FieldHTTPStatus, field.TypeInt16, value)
+	}
+	if _u.mutation.HTTPStatusCleared() {
+		_spec.ClearField(usagelog.FieldHTTPStatus, field.TypeInt16)
+	}
+	if _u.mutation.SyncXidCleared() {
+		_spec.ClearField(usagelog.FieldSyncXid, field.TypeInt64)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{

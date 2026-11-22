@@ -265,7 +265,7 @@ func (h *GatewayHandler) recordSystemOneUsage(c *gin.Context, apiKey *service.AP
 	// response body while usage waits in the queue. Copy only billing metadata.
 	forwardResult := result.ForwardResult
 	channelUsageFields := clientRequestedUsageFields(c, mapping, model, result.UpstreamModel)
-	h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+	h.submitMandatoryUsageRecordTask(usageHTTPContext(c), func(ctx context.Context) {
 		if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 			Result:             &forwardResult,
 			APIKey:             apiKey,

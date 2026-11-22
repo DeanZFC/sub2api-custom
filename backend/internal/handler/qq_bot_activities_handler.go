@@ -56,7 +56,7 @@ func (h *QQBotHandler) GetCheckinConfig(c *gin.Context) {
 		return
 	}
 	c.Header("ETag", `"`+qqbot.ConfigVersion(cfg)+`"`)
-	for _, section := range []string{"checkin", "tasks", "periodic_tasks", "lottery_recharge"} {
+	for _, section := range []string{"checkin", "tasks", "periodic_tasks"} {
 		c.Header("X-QQBot-"+section+"-Version", qqbot.CheckinSectionVersion(cfg, section))
 	}
 	c.Header("Cache-Control", "no-store")
@@ -82,7 +82,7 @@ func (h *QQBotHandler) SaveCheckinConfig(c *gin.Context) {
 		return
 	}
 	c.Header("ETag", `"`+qqbot.ConfigVersion(saved)+`"`)
-	for _, section := range []string{"checkin", "tasks", "periodic_tasks", "lottery_recharge"} {
+	for _, section := range []string{"checkin", "tasks", "periodic_tasks"} {
 		c.Header("X-QQBot-"+section+"-Version", qqbot.CheckinSectionVersion(saved, section))
 	}
 	c.Header("Cache-Control", "no-store")

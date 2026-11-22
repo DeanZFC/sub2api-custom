@@ -680,6 +680,7 @@ func writeUsageLogBestEffort(ctx context.Context, repo UsageLogRepository, usage
 	if repo == nil || usageLog == nil {
 		return
 	}
+	usageLog.HTTPStatus = UsageHTTPStatus(ctx)
 	usageCtx, cancel := detachedBillingContext(ctx)
 	defer cancel()
 

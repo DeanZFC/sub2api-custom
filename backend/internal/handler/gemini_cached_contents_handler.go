@@ -284,9 +284,9 @@ func (h *GatewayHandler) GeminiCachedContentsCreate(c *gin.Context) {
 		if err != nil {
 			reqLog.Info("gemini.cached_content.storage_charge_rejected", zap.Float64("amount", amount), zap.Error(err))
 			h.cleanupGeminiCachedContentUpstream(reqLog, account, upstream.Name)
+			writeGeminiCachedContentBillingError(c, err)
 			h.submitGeminiCachedContentUsage(c, apiKey, account, subscription, pricingAt,
 				service.GeminiCachedContentCreateUsageRequestID(publicID), modelName, mappedModel, int(tokens), 0, usageFields, body)
-			writeGeminiCachedContentBillingError(c, err)
 			return
 		}
 		defer chargeDone()
@@ -316,9 +316,10 @@ func (h *GatewayHandler) GeminiCachedContentsCreate(c *gin.Context) {
 			return
 		}
 
+		c.JSON(http.StatusOK, service.GeminiCachedContentView(record))
+
 		h.submitGeminiCachedContentUsage(c, apiKey, account, subscription, pricingAt,
 			service.GeminiCachedContentCreateUsageRequestID(publicID), modelName, mappedModel, int(tokens), storageTokenHours, usageFields, body)
-		c.JSON(http.StatusOK, service.GeminiCachedContentView(record))
 		return
 	}
 
@@ -511,13 +512,13 @@ func (h *GatewayHandler) GeminiCachedContentsPatch(c *gin.Context) {
 		googleError(c, http.StatusInternalServerError, "Failed to persist cached content expiration")
 		return
 	}
+	c.JSON(http.StatusOK, service.GeminiCachedContentView(record))
 	// 提交前库中的到期时间一直是修改前的值：按本次实际推进的时长收费。
 	if extended := expireTime.Sub(mutation.Baseline()); extended > 0 {
 		h.submitGeminiCachedContentUsage(c, apiKey, account, subscription, pricingAt,
 			service.GeminiCachedContentPatchUsageRequestID(record.PublicID), record.Model, record.UpstreamModelID(), 0,
 			service.GeminiCachedContentStorageTokenHours(record.TotalTokenCount, extended), record.ChannelUsage, body)
 	}
-	c.JSON(http.StatusOK, service.GeminiCachedContentView(record))
 }
 
 // GeminiCachedContentsDelete DELETE /v1beta/cachedContents/:cacheID
@@ -693,7 +694,7 @@ func (h *GatewayHandler) submitGeminiCachedContentUsage(
 	clientIP := ip.GetClientIP(c)
 	requestPayloadHash := service.HashUsageRequestPayload(payload)
 	quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
-	h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+	h.submitMandatoryUsageRecordTask(usageHTTPContext(c), func(ctx context.Context) {
 		if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 			Result:             result,
 			APIKey:             apiKey,

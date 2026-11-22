@@ -89,7 +89,19 @@ func activityTemplate(old ActivityBundle, name string) ActivityBundle {
 		}
 	}
 	b.Checkin.Growth.Tasks = tasks
-	b.Checkin.Growth.LotteryRecharge = &LotteryRechargeRule{RechargeStep: 10, ChancesPerStep: 1}
+	replacedRechargeTask := false
+	for i, task := range b.Checkin.Growth.PeriodicTasks {
+		if task.LiveLotteryRecharge {
+			rechargeTask := newLotteryRechargeTask(10, 1)
+			rechargeTask.ID = task.ID
+			b.Checkin.Growth.PeriodicTasks[i] = rechargeTask
+			replacedRechargeTask = true
+			break
+		}
+	}
+	if !replacedRechargeTask {
+		b.Checkin.Growth.appendLotteryRechargeTask(10, 1)
+	}
 	b.Lottery.Enabled = name == "active"
 	b.Lottery.Title = "幸运抽奖"
 	b.Lottery.Prizes = []LotteryPrize{{Name: "普通奖励", Amount: .01, ProbabilityBPS: 9000}, {Name: "幸运奖励", Amount: .1, ProbabilityBPS: 1000}}

@@ -132,8 +132,8 @@ func loadLotteryConfig(ctx context.Context, db queryRower) (LotteryConfig, error
 	}
 	var checkin CheckinConfig
 	_, err = readActivityConfig(ctx, db, checkinConfigKey, &checkin)
-	if rule := checkin.Growth.LotteryRecharge; rule != nil {
-		c.RechargeStep, c.ChancesPerStep = rule.RechargeStep, rule.ChancesPerStep
+	if task := checkin.Growth.lotteryRechargeTask(); task != nil {
+		c.RechargeStep, c.ChancesPerStep = task.Target, int64(task.reward().Quantity)
 	}
 	return c, err
 }
@@ -290,12 +290,7 @@ func (s *Service) saveActivityConfig(ctx context.Context, key string, lock int64
 		case "periodic_tasks":
 			current.Growth.PeriodicTasks = next.Growth.PeriodicTasks
 			next = current
-		case "lottery_recharge":
-			current.Growth.LotteryRecharge = next.Growth.LotteryRecharge
-			next = current
 		case "":
-			// Older clients can still save these settings without a section.
-			next.Growth.LotteryRecharge = current.Growth.LotteryRecharge
 		default:
 			return errors.New("未知活动配置模块")
 		}

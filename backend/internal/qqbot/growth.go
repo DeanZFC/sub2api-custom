@@ -11,12 +11,11 @@ import (
 // Zero disables each reward independently. Entitlements are keyed by website
 // account, so rebinding, multiple groups and process restarts cannot reset them.
 type GrowthConfig struct {
-	Tasks             []GrowthTask         `json:"tasks"`
-	PeriodicTasks     []GrowthTask         `json:"periodic_tasks,omitempty"`
-	LotteryRecharge   *LotteryRechargeRule `json:"lottery_recharge"`
-	BindingChances    int                  `json:"binding_chances"`
-	FirstUsageChances int                  `json:"first_usage_chances"`
-	Checkin30Chances  int                  `json:"checkin_30_chances"`
+	Tasks             []GrowthTask `json:"tasks"`
+	PeriodicTasks     []GrowthTask `json:"periodic_tasks,omitempty"`
+	BindingChances    int          `json:"binding_chances"`
+	FirstUsageChances int          `json:"first_usage_chances"`
+	Checkin30Chances  int          `json:"checkin_30_chances"`
 }
 
 func checkinProgress(ctx context.Context, db queryRower, uid int64, at time.Time) (total, streak int, err error) {
@@ -86,9 +85,6 @@ func (s *Service) processGrowthTasks(ctx context.Context, c Config, j Job, at ti
 		return "", 0, err
 	}
 	if render {
-		if rule := cfg.Growth.LotteryRecharge; rule != nil {
-			text += fmt.Sprintf("\n\n**充值奖励抽奖次数**\n累计有效充值每满 %s 送 %d 次，发「抽奖次数」查询。", money(rule.RechargeStep), rule.ChancesPerStep)
-		}
 		periodic, e := rankingGrowthTasks(ctx, tx, current.AppID, uid)
 		if e != nil {
 			return "", 0, e
@@ -136,7 +132,7 @@ func settleGrowthForUser(ctx context.Context, tx *sql.Tx, c Config, j Job, uid i
 		}
 	}
 	for _, task := range cfg.Growth.PeriodicTasks {
-		if task.Enabled && task.reward().enabled() {
+		if !task.LiveLotteryRecharge && task.Enabled && task.reward().enabled() {
 			progressTasks = append(progressTasks, task)
 		}
 	}

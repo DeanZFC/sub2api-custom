@@ -157,6 +157,7 @@ func TestCompositeCompatibleImagesEndToEnd(t *testing.T) {
 			require.Contains(t, string(upstream.body), model)
 			require.Contains(t, rec.Body.String(), "aW1hZ2U=")
 			require.Len(t, usage.logs, 1, "the image must reach usage recording, not just return HTTP 200")
+			require.Equal(t, &rec.Code, usage.logs[0].HTTPStatus)
 			require.Equal(t, 1, usage.logs[0].ImageCount)
 			require.InDelta(t, price, usage.logs[0].ActualCost, 1e-9)
 			require.Equal(t, publicModel, usage.logs[0].RequestedModel)

@@ -139,6 +139,10 @@ func RegisterUserRoutes(
 		usage.Use(panelRateLimiter.Heavy())
 		{
 			usage.GET("", h.Usage.List)
+			usage.GET("/keys", h.Usage.BillingKeys)
+			usage.GET("/sync", h.Usage.Sync)
+			usage.GET("/export", h.Usage.ExportCSV)
+			usage.GET("/retention", h.Usage.Retention)
 			usage.GET("/errors", h.Usage.ListErrors)
 			usage.GET("/errors/:id", h.Usage.GetErrorDetail)
 			usage.GET("/:id", h.Usage.GetByID)

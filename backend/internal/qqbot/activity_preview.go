@@ -116,20 +116,6 @@ func (s *Service) PreviewActivities(ctx context.Context, uid int64) (ActivityPre
 	if out.Lottery.DrawsUntilGuarantee == 1 {
 		out.LotteryNextExpected = expectedPrize(lottery.GuaranteePrizes)
 	}
-	if lottery.rechargeRuleEnabled() {
-		status := "抽奖次数实时计算"
-		if !lottery.Enabled {
-			status = "抽奖活动未开启"
-		}
-		out.Tasks = append(out.Tasks, PreviewTask{
-			ID:       "lottery:recharge",
-			Name:     "充值送抽奖次数",
-			Progress: fmt.Sprintf("累计有效充值 %s，距下一档还差 %s", money(out.Lottery.RechargeTotal), money(out.Lottery.NextRecharge)),
-			Eligible: out.Bound && c.Enabled && lottery.Enabled && out.Lottery.Earned > out.Lottery.BonusChances,
-			Status:   status,
-			Reward:   fmt.Sprintf("每满 %s 送 %d 次", money(lottery.RechargeStep), lottery.ChancesPerStep),
-		})
-	}
 	at := time.Now()
 	total, streak, err := checkinProgress(ctx, tx, uid, at)
 	if err != nil {
@@ -156,6 +142,26 @@ func (s *Service) PreviewActivities(ctx context.Context, uid int64) (ActivityPre
 	}
 	progress := progressByPeriod["once"]
 	for _, task := range checkin.Growth.PeriodicTasks {
+		if task.LiveLotteryRecharge {
+			status := "未开启"
+			progress := "累计有效充值 " + money(out.Lottery.RechargeTotal)
+			if task.Enabled {
+				status = "抽奖次数实时计算"
+				if !lottery.Enabled {
+					status = "抽奖活动未开启"
+				}
+				progress += "，距下一档还差 " + money(out.Lottery.NextRecharge)
+			}
+			out.Tasks = append(out.Tasks, PreviewTask{
+				ID:       "periodic:" + task.ID,
+				Name:     task.Name,
+				Progress: progress,
+				Eligible: out.Bound && c.Enabled && lottery.Enabled && task.Enabled && out.Lottery.Earned > out.Lottery.BonusChances,
+				Status:   status,
+				Reward:   fmt.Sprintf("每满 %s 送 %d 次", money(task.Target), task.reward().Quantity),
+			})
+			continue
+		}
 		if isGrowthAmountDayKind(task.Kind) {
 			var cursor time.Time
 			var cycles int64

@@ -74,6 +74,8 @@ const (
 	FieldActualCost = "actual_cost"
 	// FieldRateMultiplier holds the string denoting the rate_multiplier field in the database.
 	FieldRateMultiplier = "rate_multiplier"
+	// FieldServiceTierSurchargeWaived holds the string denoting the service_tier_surcharge_waived field in the database.
+	FieldServiceTierSurchargeWaived = "service_tier_surcharge_waived"
 	// FieldLongContextBillingApplied holds the string denoting the long_context_billing_applied field in the database.
 	FieldLongContextBillingApplied = "long_context_billing_applied"
 	// FieldAccountRateMultiplier holds the string denoting the account_rate_multiplier field in the database.
@@ -110,6 +112,10 @@ const (
 	FieldVideoDurationSeconds = "video_duration_seconds"
 	// FieldCacheTTLOverridden holds the string denoting the cache_ttl_overridden field in the database.
 	FieldCacheTTLOverridden = "cache_ttl_overridden"
+	// FieldHTTPStatus holds the string denoting the http_status field in the database.
+	FieldHTTPStatus = "http_status"
+	// FieldSyncXid holds the string denoting the sync_xid field in the database.
+	FieldSyncXid = "sync_xid"
 	// FieldCreatedAt holds the string denoting the created_at field in the database.
 	FieldCreatedAt = "created_at"
 	// EdgeUser holds the string denoting the user edge name in mutations.
@@ -194,6 +200,7 @@ var Columns = []string{
 	FieldTotalCost,
 	FieldActualCost,
 	FieldRateMultiplier,
+	FieldServiceTierSurchargeWaived,
 	FieldLongContextBillingApplied,
 	FieldAccountRateMultiplier,
 	FieldBillingType,
@@ -212,6 +219,8 @@ var Columns = []string{
 	FieldVideoResolution,
 	FieldVideoDurationSeconds,
 	FieldCacheTTLOverridden,
+	FieldHTTPStatus,
+	FieldSyncXid,
 	FieldCreatedAt,
 }
 
@@ -272,6 +281,8 @@ var (
 	DefaultActualCost float64
 	// DefaultRateMultiplier holds the default value on creation for the "rate_multiplier" field.
 	DefaultRateMultiplier float64
+	// DefaultServiceTierSurchargeWaived holds the default value on creation for the "service_tier_surcharge_waived" field.
+	DefaultServiceTierSurchargeWaived bool
 	// DefaultLongContextBillingApplied holds the default value on creation for the "long_context_billing_applied" field.
 	DefaultLongContextBillingApplied bool
 	// DefaultBillingType holds the default value on creation for the "billing_type" field.
@@ -460,6 +471,11 @@ func ByRateMultiplier(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRateMultiplier, opts...).ToFunc()
 }
 
+// ByServiceTierSurchargeWaived orders the results by the service_tier_surcharge_waived field.
+func ByServiceTierSurchargeWaived(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldServiceTierSurchargeWaived, opts...).ToFunc()
+}
+
 // ByLongContextBillingApplied orders the results by the long_context_billing_applied field.
 func ByLongContextBillingApplied(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldLongContextBillingApplied, opts...).ToFunc()
@@ -543,6 +559,16 @@ func ByVideoDurationSeconds(opts ...sql.OrderTermOption) OrderOption {
 // ByCacheTTLOverridden orders the results by the cache_ttl_overridden field.
 func ByCacheTTLOverridden(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldCacheTTLOverridden, opts...).ToFunc()
+}
+
+// ByHTTPStatus orders the results by the http_status field.
+func ByHTTPStatus(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldHTTPStatus, opts...).ToFunc()
+}
+
+// BySyncXid orders the results by the sync_xid field.
+func BySyncXid(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSyncXid, opts...).ToFunc()
 }
 
 // ByCreatedAt orders the results by the created_at field.

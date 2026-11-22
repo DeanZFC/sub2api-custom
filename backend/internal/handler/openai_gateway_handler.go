@@ -250,6 +250,14 @@ func newOpenAIModelMappedBodyCache(body []byte, replace openAIModelBodyReplaceFu
 	}
 }
 
+func usageHTTPContext(c *gin.Context) context.Context {
+	ctx := c.Request.Context()
+	if !c.IsWebsocket() && c.Writer.Written() && c.Writer.Status() >= 100 && c.Writer.Status() <= 599 {
+		return service.WithUsageHTTPStatus(ctx, c.Writer.Status())
+	}
+	return ctx
+}
+
 func usageRecordContext(parent context.Context, base context.Context) context.Context {
 	if base == nil {
 		base = context.Background()
@@ -268,6 +276,9 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 	// worker's bounded timeout context.
 	if snapshot, ok := service.APIKeyUsageSnapshotFromContext(parent); ok {
 		base = service.WithAPIKeyUsageSnapshot(base, snapshot)
+	}
+	if status := service.UsageHTTPStatus(parent); status != nil {
+		base = service.WithUsageHTTPStatus(base, *status)
 	}
 	base = service.CopyAPIKeyFallbackSubscription(parent, base)
 	return base
@@ -882,7 +893,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			sessionID := service.ExtractClientSessionID(c)
 			cyberBlocked := service.GetOpsCyberPolicy(c) != nil
 			channelUsageFields := clientRequestedUsageFields(c, channelMapping, reqModel, res.UpstreamModel)
-			h.submitOpenAIUsageRecordTask(c.Request.Context(), res, func(ctx context.Context) {
+			h.submitOpenAIUsageRecordTask(usageHTTPContext(c), res, func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 					Result:             res,
 					APIKey:             apiKey,
@@ -1494,7 +1505,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			sessionID := service.ExtractClientSessionID(c)
 			cyberBlocked := service.GetOpsCyberPolicy(c) != nil
 			channelUsageFields := clientRequestedUsageFields(c, channelMappingMsg, reqModel, res.UpstreamModel)
-			h.submitOpenAIUsageRecordTask(c.Request.Context(), res, func(ctx context.Context) {
+			h.submitOpenAIUsageRecordTask(usageHTTPContext(c), res, func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 					Result:             res,
 					APIKey:             apiKey,
@@ -4157,7 +4168,7 @@ func (h *OpenAIGatewayHandler) ensureForwardErrorResponse(c *gin.Context, stream
 	if (service.IsResponseCommitted(c) && (!compactKeepaliveCommitted || compactKeepaliveHasMeaningfulOutput)) || (!compactKeepaliveCommitted && imageKeepaliveResponseWritten) {
 		return false
 	}
-	if c.Writer.Written() && !imageKeepalivePaddingOnly {
+	if !c.IsWebsocket() && c.Writer.Written() && !imageKeepalivePaddingOnly {
 		streamStarted = true
 	}
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed", streamStarted)
@@ -4789,8 +4800,12 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 			cancel()
 		}
 	}
+	usageContext := context.Background()
+	if c.Request != nil && !c.IsWebsocket() {
+		usageContext = usageRecordContext(usageHTTPContext(c), usageContext)
+	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(usageContext, 30*time.Second)
 		defer cancel()
 		if cmSvc != nil {
 			cmSvc.RecordCyberPolicyEvent(ctx, service.CyberPolicyRecordInput{

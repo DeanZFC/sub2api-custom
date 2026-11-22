@@ -16,7 +16,11 @@ func TestSplitCommandsKeepRepliesFocusedAndDeduplicateDraw(t *testing.T) {
 	s, db, c, uid, _ := lotteryFixture(t, 20)
 	insightsUsageTable(t, db)
 	ctx := context.Background()
-	require.NoError(t, s.SaveCheckinConfig(ctx, CheckinConfig{Enabled: true, Growth: GrowthConfig{BindingChances: 2}}))
+	require.NoError(t, s.SaveCheckinConfig(WithCheckinSection(ctx, "tasks"), CheckinConfig{
+		Growth: GrowthConfig{Tasks: []GrowthTask{
+			{ID: "binding", Name: "完成账号绑定", Kind: "binding", Target: 1, Enabled: true, Chances: 2},
+		}},
+	}))
 	_, err := db.Exec(`UPDATE users SET balance=12.5 WHERE id=$1`, uid)
 	require.NoError(t, err)
 	sender, replies := helpTestSender(t)
@@ -69,7 +73,7 @@ func TestSplitCommandsKeepRepliesFocusedAndDeduplicateDraw(t *testing.T) {
 	}
 	require.Len(t, *replies, before)
 	// Invalid pages must not grant an eligible task.
-	require.NoError(t, s.SaveCheckinConfig(ctx, CheckinConfig{Growth: GrowthConfig{Tasks: []GrowthTask{{ID: "invalid-page", Name: "Not yet", Kind: "binding", Target: 1, Enabled: true, Chances: 10}}}}))
+	require.NoError(t, s.SaveCheckinConfig(WithCheckinSection(ctx, "tasks"), CheckinConfig{Growth: GrowthConfig{Tasks: []GrowthTask{{ID: "invalid-page", Name: "Not yet", Kind: "binding", Target: 1, Enabled: true, Chances: 10}}}}))
 	require.NoError(t, s.message(ctx, c, &Job{GroupID: "group", MemberID: "member", MessageID: "invalid", CreatedAt: time.Now()}, Event{Content: "/成长任务 R1"}))
 	require.Contains(t, (*replies)[len(*replies)-1].text(), "用法")
 	state, err = s.LotteryState(ctx, uid)

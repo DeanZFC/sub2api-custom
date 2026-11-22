@@ -13,6 +13,10 @@ import (
 	"go.uber.org/zap"
 )
 
+func (s *OpsService) RequestRetentionDays(ctx context.Context) (int, error) {
+	return readRequestRetentionDays(ctx, s.cfg.DashboardAgg, s.settingRepo)
+}
+
 func defaultOpsRuntimeLogConfig(cfg *config.Config) *OpsRuntimeLogConfig {
 	requestRetentionDays := 90
 	if cfg != nil {

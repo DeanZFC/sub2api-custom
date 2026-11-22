@@ -302,6 +302,13 @@ func prepareNonTransactionalMigration(ctx context.Context, db migrationConnectio
 		return dropInvalidIndexIfPresent(ctx, db, latestAPIKeyIPIndex)
 	case usageLogsUpstreamModelMismatchIndexMigration:
 		return dropInvalidIndexIfPresent(ctx, db, usageLogsUpstreamModelMismatchIndex)
+	case "361_customer_usage_sync_indexes_notx.sql":
+		for _, index := range []string{"idx_usage_sync_user", "idx_usage_sync_key"} {
+			if err := dropInvalidIndexIfPresent(ctx, db, index); err != nil {
+				return err
+			}
+		}
+		return nil
 	case usageLogsEffectiveModelIndexesMigration:
 		for _, indexName := range []string{usageLogsEffectiveRequestedModelIndex, usageLogsEffectiveUpstreamModelIndex} {
 			if err := dropInvalidIndexIfPresent(ctx, db, indexName); err != nil {

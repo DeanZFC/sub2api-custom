@@ -228,9 +228,16 @@ func TestCouponPeriodicMilestoneAndGuaranteedRewards(t *testing.T) {
 	insightsUsageTable(t, db)
 	tid := couponFixture(t, db)
 	reward := GrowthReward{Type: "coupon", CouponTemplateID: tid, Quantity: 1}
-	cfg := CheckinConfig{Enabled: true, Milestones: []CheckinMilestone{{ID: "coupon_day", Name: "签到送券", Days: 1, Enabled: true, Reward: reward}}, Growth: GrowthConfig{Tasks: []GrowthTask{}, PeriodicTasks: []GrowthTask{{ID: "coupon_spend", Name: "消费送券", Kind: "usage_amount", Target: 10, Enabled: true, Reward: &reward}}}}
+	cfg, err := s.CheckinConfig(ctx)
+	require.NoError(t, err)
+	cfg.Enabled = true
+	cfg.Milestones = []CheckinMilestone{{ID: "coupon_day", Name: "签到送券", Days: 1, Enabled: true, Reward: reward}}
+	cfg.Growth.Tasks = []GrowthTask{}
+	cfg.Growth.PeriodicTasks = append(cfg.Growth.PeriodicTasks, GrowthTask{
+		ID: "coupon_spend", Name: "消费送券", Kind: "usage_amount", Target: 10, Enabled: true, Reward: &reward,
+	})
 	require.NoError(t, s.SaveCheckinConfig(ctx, cfg))
-	_, err := s.reward(ctx, c, Job{GroupID: "group", MemberID: "member"}, "checkin")
+	_, err = s.reward(ctx, c, Job{GroupID: "group", MemberID: "member"}, "checkin")
 	require.NoError(t, err)
 	rankingUsage(t, db, uid, 1000, "25", time.Now().Add(-time.Minute))
 	_, n, err := s.processGrowthTasks(ctx, c, Job{GroupID: "group", MemberID: "member"}, time.Now(), true)

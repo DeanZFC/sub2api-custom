@@ -328,15 +328,18 @@ func siteLotteryRules(c LotteryConfig) string {
 func siteGrowthRules(c GrowthConfig) string {
 	text := "🌱 **成长任务规则**"
 	count := 0
-	if rule := c.LotteryRecharge; rule != nil {
-		text += fmt.Sprintf("\n\n**充值送抽奖次数**\n累计有效充值每满 %s 送 %d 次，抽奖时实时计算。", siteRuleMoney(rule.RechargeStep), rule.ChancesPerStep)
-	}
+	hasLotteryRecharge := false
 	for _, set := range []struct {
 		tasks    []GrowthTask
 		periodic bool
 	}{{c.tasks(), false}, {c.PeriodicTasks, true}} {
 		for _, task := range set.tasks {
 			if !task.Enabled || !task.reward().enabled() {
+				continue
+			}
+			if task.LiveLotteryRecharge {
+				hasLotteryRecharge = true
+				text += fmt.Sprintf("\n\n**%s**\n累计有效充值每满 %s 送 %d 次，抽奖时实时计算。", replyPlainLabel(task.Name), siteRuleMoney(task.Target), task.reward().Quantity)
 				continue
 			}
 			count++
@@ -361,7 +364,7 @@ func siteGrowthRules(c GrowthConfig) string {
 		}
 	}
 	if count == 0 {
-		if c.LotteryRecharge != nil {
+		if hasLotteryRecharge {
 			return text + "\n\n需绑定网站账号。\n个人进度：成长任务"
 		}
 		return text + "\n暂无已开启的成长任务。"

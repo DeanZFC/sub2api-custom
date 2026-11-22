@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -46,6 +47,9 @@ type userGroupStat struct {
 
 // UsageHandler handles usage-related requests
 type UsageHandler struct {
+	billing        service.CustomerUsageRepository
+	cursorKey      []byte
+	exportSlots    chan struct{}
 	usageService   *service.UsageService
 	apiKeyService  *service.APIKeyService
 	opsService     *service.OpsService
@@ -58,8 +62,10 @@ func NewUsageHandler(
 	apiKeyService *service.APIKeyService,
 	opsService *service.OpsService,
 	settingService *service.SettingService,
+	billing service.CustomerUsageRepository, cfg *config.Config,
 ) *UsageHandler {
 	return &UsageHandler{
+		billing: billing, cursorKey: []byte(cfg.JWT.Secret), exportSlots: make(chan struct{}, 2),
 		usageService:   usageService,
 		apiKeyService:  apiKeyService,
 		opsService:     opsService,
@@ -69,7 +75,7 @@ func NewUsageHandler(
 
 func (h *UsageHandler) parseUserUsageFilters(c *gin.Context, requireRange bool) (*userUsageFilters, bool) {
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
-	if !ok {
+	if !ok || subject.UserID <= 0 {
 		response.Unauthorized(c, "User not authenticated")
 		return nil, false
 	}
@@ -81,17 +87,11 @@ func (h *UsageHandler) parseUserUsageFilters(c *gin.Context, requireRange bool) 
 			response.BadRequest(c, "Invalid api_key_id")
 			return nil, false
 		}
-		if h.apiKeyService == nil {
-			response.InternalError(c, "API key service not available")
+		if id <= 0 {
+			response.BadRequest(c, "Invalid api_key_id")
 			return nil, false
 		}
-		apiKey, err := h.apiKeyService.GetByID(c.Request.Context(), id)
-		if err != nil {
-			response.ErrorFrom(c, err)
-			return nil, false
-		}
-		if apiKey.UserID != subject.UserID {
-			response.Forbidden(c, "Not authorized to access this API key's usage records")
+		if !h.checkBillingKey(c, subject.UserID, id) {
 			return nil, false
 		}
 		apiKeyID = id
@@ -179,6 +179,10 @@ func (h *UsageHandler) parseUserUsageFilters(c *gin.Context, requireRange bool) 
 		endPtr = &endTime
 	}
 
+	if startPtr != nil && endPtr != nil && !startTime.Before(endTime) {
+		response.BadRequest(c, "Invalid date range")
+		return nil, false
+	}
 	if requireRange {
 		if startPtr == nil {
 			switch c.DefaultQuery("period", "") {
@@ -402,6 +406,14 @@ func (h *UsageHandler) GetByID(c *gin.Context) {
 		return
 	}
 
+	key, err := h.billing.Key(c.Request.Context(), subject.UserID, record.APIKeyID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if key != nil {
+		record.APIKey = &service.APIKey{ID: key.ID, UserID: subject.UserID, Name: key.Name, Status: key.Status}
+	}
 	response.Success(c, dto.UsageLogFromService(record).Localized(c.GetHeader("Accept-Language")))
 }
 

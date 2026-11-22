@@ -107,16 +107,23 @@ func TestLotteryProbabilityDistributionAndValidation(t *testing.T) {
 
 func TestGrowthLotteryRechargeRuleValidation(t *testing.T) {
 	require.NoError(t, validateGrowth(CheckinConfig{}))
-	require.NoError(t, validateGrowth(CheckinConfig{Growth: GrowthConfig{
-		LotteryRecharge: &LotteryRechargeRule{RechargeStep: 50, ChancesPerStep: 1},
-	}}))
-	for _, invalid := range []LotteryRechargeRule{
-		{RechargeStep: 0, ChancesPerStep: 1},
-		{RechargeStep: .001, ChancesPerStep: 1},
-		{RechargeStep: math.NaN(), ChancesPerStep: 1},
-		{RechargeStep: 10, ChancesPerStep: 0},
-		{RechargeStep: 10, ChancesPerStep: 1001},
+	valid := newLotteryRechargeTask(50, 1)
+	require.NoError(t, validateGrowth(CheckinConfig{Growth: GrowthConfig{PeriodicTasks: []GrowthTask{valid}}}))
+	require.Error(t, validateGrowth(CheckinConfig{Growth: GrowthConfig{Tasks: []GrowthTask{valid}}}))
+	duplicate := valid
+	duplicate.ID += "_1"
+	require.Error(t, validateGrowth(CheckinConfig{Growth: GrowthConfig{PeriodicTasks: []GrowthTask{valid, duplicate}}}))
+	for _, mutate := range []func(*GrowthTask){
+		func(task *GrowthTask) { task.Target = 0 },
+		func(task *GrowthTask) { task.Target = .001 },
+		func(task *GrowthTask) { task.Target = math.NaN() },
+		func(task *GrowthTask) { task.Reward.Quantity = 0 },
+		func(task *GrowthTask) { task.Reward.Quantity = 1001 },
+		func(task *GrowthTask) { task.Reward.Type = "physical" },
+		func(task *GrowthTask) { task.Kind = "usage_amount" },
 	} {
-		require.Error(t, validateGrowth(CheckinConfig{Growth: GrowthConfig{LotteryRecharge: &invalid}}))
+		task := newLotteryRechargeTask(50, 1)
+		mutate(&task)
+		require.Error(t, validateGrowth(CheckinConfig{Growth: GrowthConfig{PeriodicTasks: []GrowthTask{task}}}))
 	}
 }

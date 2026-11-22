@@ -223,6 +223,11 @@
             <div class="flex items-center gap-1.5">
               <span class="font-medium text-green-600 dark:text-green-400">${{ row.actual_cost?.toFixed(6) || '0.000000' }}</span>
               <span
+                v-if="row.service_tier_surcharge_waived"
+                :title="t('usage.freeFastBillingHint')"
+                class="inline-flex whitespace-nowrap rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold leading-tight text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
+              >{{ t(normalizeUsageServiceTier(row.service_tier) === 'ultrafast' ? 'usage.freeUltrafast' : 'usage.freeFast') }}</span>
+              <span
                 v-if="row.long_context_billing_applied"
                 data-testid="long-context-billing-marker"
                 :title="t('admin.usage.longContextPricingTooltip')"
@@ -270,6 +275,8 @@
             </div>
           </div>
         </template>
+
+        <template #cell-http_status="{ value }">{{ value ?? '—' }}</template>
 
         <template #cell-created_at="{ value }">
           <span class="text-sm text-gray-600 dark:text-gray-400">{{ formatDateTime(value) }}</span>
@@ -576,7 +583,7 @@ import { formatDateTime, formatReasoningEffort, reasoningEffortValuesEqual } fro
 import { formatCacheTokens, formatMultiplier } from '@/utils/formatters'
 import { calculateCacheHitRate, formatCacheRate, isCacheEligibleRequest } from '@/utils/cacheHitRate'
 import { formatTokenPricePerMillion } from '@/utils/usagePricing'
-import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
+import { getUsageServiceTierLabel, normalizeUsageServiceTier } from '@/utils/usageServiceTier'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import {

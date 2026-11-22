@@ -3277,6 +3277,7 @@ func TestOpenAIGatewayServiceRecordUsage_OutboundTierIgnoresUpstreamTier(t *test
 						log := usageRepo.lastLog
 						require.NotNil(t, log.ServiceTier)
 						require.Equal(t, tierCase.tier, *log.ServiceTier)
+						require.Equal(t, tierCase.freeUltrafast && tierCase.tier == "ultrafast", log.ServiceTierSurchargeWaived)
 						require.Same(t, &serviceTier, result.ServiceTier, "billing must not rewrite the outbound tier")
 						require.Equal(t, observed, result.UpstreamResponseServiceTier, "preserve the upstream declaration for diagnostics")
 						base, err := svc.billingService.CalculateCost(tierCase.model, UsageTokens{InputTokens: 100, OutputTokens: 50, CacheReadTokens: 20}, 1)
@@ -3463,6 +3464,7 @@ func TestOpenAIGatewayServiceRecordUsage_FreeOpenAIFastChargesStandard(t *testin
 				require.InDelta(t, 0.5, usageRepo.lastLog.RateMultiplier, 1e-12)
 
 				standardTotal := float64(tokens.InputTokens)*inputPrice + float64(tokens.OutputTokens)*outputPrice
+				require.True(t, usageRepo.lastLog.ServiceTierSurchargeWaived)
 				require.InDelta(t, standardTotal*fastMultiplier, usageRepo.lastLog.TotalCost, 1e-10)
 				require.InDelta(t, standardTotal*0.5, usageRepo.lastLog.ActualCost, 1e-10)
 				require.Equal(t, 1, userRepo.deductCalls)
@@ -3509,6 +3511,7 @@ func TestOpenAIGatewayServiceRecordUsage_FreeOpenAIFastMissingPricingRecordsZero
 	require.Equal(t, 1, usageRepo.calls)
 	require.NotNil(t, usageRepo.lastLog)
 	require.Equal(t, "resp_free_fast_missing_pricing", usageRepo.lastLog.RequestID)
+	require.False(t, usageRepo.lastLog.ServiceTierSurchargeWaived)
 	require.Equal(t, 1200, usageRepo.lastLog.InputTokens)
 	require.Equal(t, 300, usageRepo.lastLog.OutputTokens)
 	require.NotNil(t, usageRepo.lastLog.ServiceTier)

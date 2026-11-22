@@ -32,14 +32,15 @@ func lotteryFixture(t *testing.T, amount float64) (*Service, *sql.DB, Config, in
 	lottery.Enabled = true
 	lottery.Prizes = []LotteryPrize{{Name: "win", Amount: 1, ProbabilityBPS: 10000}}
 	require.NoError(t, s.SaveLotteryConfig(context.Background(), lottery))
-	saveLotteryRechargeRule(t, s, &LotteryRechargeRule{RechargeStep: 10, ChancesPerStep: 1})
+	saveLotteryRechargeTask(t, s, 10, 1)
 	return s, db, c, uid, lottery
 }
 
-func saveLotteryRechargeRule(t *testing.T, s *Service, rule *LotteryRechargeRule) {
+func saveLotteryRechargeTask(t *testing.T, s *Service, target float64, chances int) {
 	t.Helper()
-	ctx := WithCheckinSection(context.Background(), "lottery_recharge")
-	require.NoError(t, s.SaveCheckinConfig(ctx, CheckinConfig{Growth: GrowthConfig{LotteryRecharge: rule}}))
+	ctx := WithCheckinSection(context.Background(), "periodic_tasks")
+	cfg := CheckinConfig{Growth: GrowthConfig{PeriodicTasks: []GrowthTask{newLotteryRechargeTask(target, chances)}}}
+	require.NoError(t, s.SaveCheckinConfig(ctx, cfg))
 }
 
 func TestCheckinRandomRangeLegacyAndZeroDedup(t *testing.T) {
@@ -162,7 +163,7 @@ func TestLotteryHistoricalPrincipalAndRefunds(t *testing.T) {
 	uid2 := user(t, db)
 	_, err = db.Exec(`INSERT INTO payment_orders(user_id,amount) VALUES($1,.1),($1,.2)`, uid2)
 	require.NoError(t, err)
-	saveLotteryRechargeRule(t, s, &LotteryRechargeRule{RechargeStep: .3, ChancesPerStep: 1})
+	saveLotteryRechargeTask(t, s, .3, 1)
 	state, err = s.LotteryState(ctx, uid2)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), state.Remaining)
@@ -193,7 +194,7 @@ func TestLotteryRefundDeficitAndRuleChangesNeverResetUsage(t *testing.T) {
 	text, err = s.drawLottery(ctx, c, Job{ID: "covered", GroupID: "group", MemberID: "member"})
 	require.NoError(t, err)
 	require.Contains(t, text, "奖励额度：USD 1.")
-	saveLotteryRechargeRule(t, s, &LotteryRechargeRule{RechargeStep: 5, ChancesPerStep: 1})
+	saveLotteryRechargeTask(t, s, 5, 1)
 	state, err = s.LotteryState(ctx, uid)
 	require.NoError(t, err)
 	require.Equal(t, int64(6), state.Earned)

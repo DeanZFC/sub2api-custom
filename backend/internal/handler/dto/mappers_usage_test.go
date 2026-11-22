@@ -101,12 +101,13 @@ func TestUsageLogFromService_IncludesServiceTierForUserAndAdmin(t *testing.T) {
 	inboundEndpoint := "/v1/chat/completions"
 	upstreamEndpoint := "/v1/responses"
 	log := &service.UsageLog{
-		RequestID:             "req_3",
-		Model:                 "gpt-5.4",
-		ServiceTier:           &serviceTier,
-		InboundEndpoint:       &inboundEndpoint,
-		UpstreamEndpoint:      &upstreamEndpoint,
-		AccountRateMultiplier: f64Ptr(1.5),
+		RequestID:                  "req_3",
+		Model:                      "gpt-5.4",
+		ServiceTier:                &serviceTier,
+		ServiceTierSurchargeWaived: true,
+		InboundEndpoint:            &inboundEndpoint,
+		UpstreamEndpoint:           &upstreamEndpoint,
+		AccountRateMultiplier:      f64Ptr(1.5),
 	}
 
 	userDTO := UsageLogFromService(log)
@@ -119,6 +120,8 @@ func TestUsageLogFromService_IncludesServiceTierForUserAndAdmin(t *testing.T) {
 	require.Nil(t, userDTO.UpstreamEndpoint)
 	require.NotNil(t, adminDTO.ServiceTier)
 	require.Equal(t, serviceTier, *adminDTO.ServiceTier)
+	require.True(t, userDTO.ServiceTierSurchargeWaived)
+	require.True(t, adminDTO.ServiceTierSurchargeWaived)
 	require.NotNil(t, adminDTO.InboundEndpoint)
 	require.Equal(t, inboundEndpoint, *adminDTO.InboundEndpoint)
 	require.NotNil(t, adminDTO.UpstreamEndpoint)

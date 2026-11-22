@@ -407,6 +407,20 @@ func (_c *UsageLogCreate) SetNillableRateMultiplier(v *float64) *UsageLogCreate 
 	return _c
 }
 
+// SetServiceTierSurchargeWaived sets the "service_tier_surcharge_waived" field.
+func (_c *UsageLogCreate) SetServiceTierSurchargeWaived(v bool) *UsageLogCreate {
+	_c.mutation.SetServiceTierSurchargeWaived(v)
+	return _c
+}
+
+// SetNillableServiceTierSurchargeWaived sets the "service_tier_surcharge_waived" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableServiceTierSurchargeWaived(v *bool) *UsageLogCreate {
+	if v != nil {
+		_c.SetServiceTierSurchargeWaived(*v)
+	}
+	return _c
+}
+
 // SetLongContextBillingApplied sets the "long_context_billing_applied" field.
 func (_c *UsageLogCreate) SetLongContextBillingApplied(v bool) *UsageLogCreate {
 	_c.mutation.SetLongContextBillingApplied(v)
@@ -651,6 +665,34 @@ func (_c *UsageLogCreate) SetNillableCacheTTLOverridden(v *bool) *UsageLogCreate
 	return _c
 }
 
+// SetHTTPStatus sets the "http_status" field.
+func (_c *UsageLogCreate) SetHTTPStatus(v int16) *UsageLogCreate {
+	_c.mutation.SetHTTPStatus(v)
+	return _c
+}
+
+// SetNillableHTTPStatus sets the "http_status" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableHTTPStatus(v *int16) *UsageLogCreate {
+	if v != nil {
+		_c.SetHTTPStatus(*v)
+	}
+	return _c
+}
+
+// SetSyncXid sets the "sync_xid" field.
+func (_c *UsageLogCreate) SetSyncXid(v int64) *UsageLogCreate {
+	_c.mutation.SetSyncXid(v)
+	return _c
+}
+
+// SetNillableSyncXid sets the "sync_xid" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableSyncXid(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetSyncXid(*v)
+	}
+	return _c
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (_c *UsageLogCreate) SetCreatedAt(v time.Time) *UsageLogCreate {
 	_c.mutation.SetCreatedAt(v)
@@ -785,6 +827,10 @@ func (_c *UsageLogCreate) defaults() {
 		v := usagelog.DefaultRateMultiplier
 		_c.mutation.SetRateMultiplier(v)
 	}
+	if _, ok := _c.mutation.ServiceTierSurchargeWaived(); !ok {
+		v := usagelog.DefaultServiceTierSurchargeWaived
+		_c.mutation.SetServiceTierSurchargeWaived(v)
+	}
 	if _, ok := _c.mutation.LongContextBillingApplied(); !ok {
 		v := usagelog.DefaultLongContextBillingApplied
 		_c.mutation.SetLongContextBillingApplied(v)
@@ -916,6 +962,9 @@ func (_c *UsageLogCreate) check() error {
 	}
 	if _, ok := _c.mutation.RateMultiplier(); !ok {
 		return &ValidationError{Name: "rate_multiplier", err: errors.New(`ent: missing required field "UsageLog.rate_multiplier"`)}
+	}
+	if _, ok := _c.mutation.ServiceTierSurchargeWaived(); !ok {
+		return &ValidationError{Name: "service_tier_surcharge_waived", err: errors.New(`ent: missing required field "UsageLog.service_tier_surcharge_waived"`)}
 	}
 	if _, ok := _c.mutation.LongContextBillingApplied(); !ok {
 		return &ValidationError{Name: "long_context_billing_applied", err: errors.New(`ent: missing required field "UsageLog.long_context_billing_applied"`)}
@@ -1109,6 +1158,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldRateMultiplier, field.TypeFloat64, value)
 		_node.RateMultiplier = value
 	}
+	if value, ok := _c.mutation.ServiceTierSurchargeWaived(); ok {
+		_spec.SetField(usagelog.FieldServiceTierSurchargeWaived, field.TypeBool, value)
+		_node.ServiceTierSurchargeWaived = value
+	}
 	if value, ok := _c.mutation.LongContextBillingApplied(); ok {
 		_spec.SetField(usagelog.FieldLongContextBillingApplied, field.TypeBool, value)
 		_node.LongContextBillingApplied = value
@@ -1180,6 +1233,14 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
 		_node.CacheTTLOverridden = value
+	}
+	if value, ok := _c.mutation.HTTPStatus(); ok {
+		_spec.SetField(usagelog.FieldHTTPStatus, field.TypeInt16, value)
+		_node.HTTPStatus = &value
+	}
+	if value, ok := _c.mutation.SyncXid(); ok {
+		_spec.SetField(usagelog.FieldSyncXid, field.TypeInt64, value)
+		_node.SyncXid = &value
 	}
 	if value, ok := _c.mutation.CreatedAt(); ok {
 		_spec.SetField(usagelog.FieldCreatedAt, field.TypeTime, value)
@@ -1838,6 +1899,18 @@ func (u *UsageLogUpsert) AddRateMultiplier(v float64) *UsageLogUpsert {
 	return u
 }
 
+// SetServiceTierSurchargeWaived sets the "service_tier_surcharge_waived" field.
+func (u *UsageLogUpsert) SetServiceTierSurchargeWaived(v bool) *UsageLogUpsert {
+	u.Set(usagelog.FieldServiceTierSurchargeWaived, v)
+	return u
+}
+
+// UpdateServiceTierSurchargeWaived sets the "service_tier_surcharge_waived" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateServiceTierSurchargeWaived() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldServiceTierSurchargeWaived)
+	return u
+}
+
 // SetLongContextBillingApplied sets the "long_context_billing_applied" field.
 func (u *UsageLogUpsert) SetLongContextBillingApplied(v bool) *UsageLogUpsert {
 	u.Set(usagelog.FieldLongContextBillingApplied, v)
@@ -2168,6 +2241,30 @@ func (u *UsageLogUpsert) UpdateCacheTTLOverridden() *UsageLogUpsert {
 	return u
 }
 
+// SetHTTPStatus sets the "http_status" field.
+func (u *UsageLogUpsert) SetHTTPStatus(v int16) *UsageLogUpsert {
+	u.Set(usagelog.FieldHTTPStatus, v)
+	return u
+}
+
+// UpdateHTTPStatus sets the "http_status" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateHTTPStatus() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldHTTPStatus)
+	return u
+}
+
+// AddHTTPStatus adds v to the "http_status" field.
+func (u *UsageLogUpsert) AddHTTPStatus(v int16) *UsageLogUpsert {
+	u.Add(usagelog.FieldHTTPStatus, v)
+	return u
+}
+
+// ClearHTTPStatus clears the value of the "http_status" field.
+func (u *UsageLogUpsert) ClearHTTPStatus() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldHTTPStatus)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -2179,6 +2276,9 @@ func (u *UsageLogUpsert) UpdateCacheTTLOverridden() *UsageLogUpsert {
 func (u *UsageLogUpsertOne) UpdateNewValues() *UsageLogUpsertOne {
 	u.create.conflict = append(u.create.conflict, sql.ResolveWithNewValues())
 	u.create.conflict = append(u.create.conflict, sql.ResolveWith(func(s *sql.UpdateSet) {
+		if _, exists := u.create.mutation.SyncXid(); exists {
+			s.SetIgnore(usagelog.FieldSyncXid)
+		}
 		if _, exists := u.create.mutation.CreatedAt(); exists {
 			s.SetIgnore(usagelog.FieldCreatedAt)
 		}
@@ -2815,6 +2915,20 @@ func (u *UsageLogUpsertOne) UpdateRateMultiplier() *UsageLogUpsertOne {
 	})
 }
 
+// SetServiceTierSurchargeWaived sets the "service_tier_surcharge_waived" field.
+func (u *UsageLogUpsertOne) SetServiceTierSurchargeWaived(v bool) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetServiceTierSurchargeWaived(v)
+	})
+}
+
+// UpdateServiceTierSurchargeWaived sets the "service_tier_surcharge_waived" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateServiceTierSurchargeWaived() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateServiceTierSurchargeWaived()
+	})
+}
+
 // SetLongContextBillingApplied sets the "long_context_billing_applied" field.
 func (u *UsageLogUpsertOne) SetLongContextBillingApplied(v bool) *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
@@ -3200,6 +3314,34 @@ func (u *UsageLogUpsertOne) UpdateCacheTTLOverridden() *UsageLogUpsertOne {
 	})
 }
 
+// SetHTTPStatus sets the "http_status" field.
+func (u *UsageLogUpsertOne) SetHTTPStatus(v int16) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetHTTPStatus(v)
+	})
+}
+
+// AddHTTPStatus adds v to the "http_status" field.
+func (u *UsageLogUpsertOne) AddHTTPStatus(v int16) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddHTTPStatus(v)
+	})
+}
+
+// UpdateHTTPStatus sets the "http_status" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateHTTPStatus() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateHTTPStatus()
+	})
+}
+
+// ClearHTTPStatus clears the value of the "http_status" field.
+func (u *UsageLogUpsertOne) ClearHTTPStatus() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearHTTPStatus()
+	})
+}
+
 // Exec executes the query.
 func (u *UsageLogUpsertOne) Exec(ctx context.Context) error {
 	if len(u.create.conflict) == 0 {
@@ -3376,6 +3518,9 @@ func (u *UsageLogUpsertBulk) UpdateNewValues() *UsageLogUpsertBulk {
 	u.create.conflict = append(u.create.conflict, sql.ResolveWithNewValues())
 	u.create.conflict = append(u.create.conflict, sql.ResolveWith(func(s *sql.UpdateSet) {
 		for _, b := range u.create.builders {
+			if _, exists := b.mutation.SyncXid(); exists {
+				s.SetIgnore(usagelog.FieldSyncXid)
+			}
 			if _, exists := b.mutation.CreatedAt(); exists {
 				s.SetIgnore(usagelog.FieldCreatedAt)
 			}
@@ -4013,6 +4158,20 @@ func (u *UsageLogUpsertBulk) UpdateRateMultiplier() *UsageLogUpsertBulk {
 	})
 }
 
+// SetServiceTierSurchargeWaived sets the "service_tier_surcharge_waived" field.
+func (u *UsageLogUpsertBulk) SetServiceTierSurchargeWaived(v bool) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetServiceTierSurchargeWaived(v)
+	})
+}
+
+// UpdateServiceTierSurchargeWaived sets the "service_tier_surcharge_waived" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateServiceTierSurchargeWaived() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateServiceTierSurchargeWaived()
+	})
+}
+
 // SetLongContextBillingApplied sets the "long_context_billing_applied" field.
 func (u *UsageLogUpsertBulk) SetLongContextBillingApplied(v bool) *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
@@ -4395,6 +4554,34 @@ func (u *UsageLogUpsertBulk) SetCacheTTLOverridden(v bool) *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) UpdateCacheTTLOverridden() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateCacheTTLOverridden()
+	})
+}
+
+// SetHTTPStatus sets the "http_status" field.
+func (u *UsageLogUpsertBulk) SetHTTPStatus(v int16) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetHTTPStatus(v)
+	})
+}
+
+// AddHTTPStatus adds v to the "http_status" field.
+func (u *UsageLogUpsertBulk) AddHTTPStatus(v int16) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddHTTPStatus(v)
+	})
+}
+
+// UpdateHTTPStatus sets the "http_status" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateHTTPStatus() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateHTTPStatus()
+	})
+}
+
+// ClearHTTPStatus clears the value of the "http_status" field.
+func (u *UsageLogUpsertBulk) ClearHTTPStatus() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearHTTPStatus()
 	})
 }
 

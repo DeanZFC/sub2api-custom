@@ -13,37 +13,51 @@ import (
 )
 
 const maxGrowthTasks = 12
+const lotteryRechargeTaskID = "lottery_recharge"
 
 var growthTaskIDPattern = regexp.MustCompile("^[a-z][a-z0-9_-]{0,63}$")
 
 type GrowthTask struct {
-	Reward      *GrowthReward `json:"reward,omitempty"`
-	ID          string        `json:"id"`
-	Name        string        `json:"name"`
-	Kind        string        `json:"kind"`
-	Period      string        `json:"period,omitempty"`
-	Target      float64       `json:"target"`
-	DailyAmount float64       `json:"daily_amount,omitempty"`
-	Chances     int           `json:"chances"`
-	Enabled     bool          `json:"enabled"`
+	Reward              *GrowthReward `json:"reward,omitempty"`
+	ID                  string        `json:"id"`
+	Name                string        `json:"name"`
+	Kind                string        `json:"kind"`
+	Period              string        `json:"period,omitempty"`
+	Target              float64       `json:"target"`
+	DailyAmount         float64       `json:"daily_amount,omitempty"`
+	Chances             int           `json:"chances"`
+	Enabled             bool          `json:"enabled"`
+	LiveLotteryRecharge bool          `json:"live_lottery_recharge,omitempty"`
 }
 
-// LotteryRechargeRule keeps the live recharge calculation for the draw quota.
-type LotteryRechargeRule struct {
-	RechargeStep   float64 `json:"recharge_step"`
-	ChancesPerStep int64   `json:"chances_per_step"`
+func newLotteryRechargeTask(target float64, chances int) GrowthTask {
+	return GrowthTask{
+		ID: lotteryRechargeTaskID, Name: "累计充值赠抽奖次数", Kind: "recharge_total",
+		Target: target, Chances: chances, Reward: &GrowthReward{Type: "chances", Quantity: chances},
+		Enabled: true, LiveLotteryRecharge: true,
+	}
 }
 
-func (r *LotteryRechargeRule) validate() error {
-	if r == nil {
-		return nil
+func (g *GrowthConfig) appendLotteryRechargeTask(target float64, chances int) {
+	task := newLotteryRechargeTask(target, chances)
+	ids := make(map[string]bool, len(g.Tasks)+len(g.PeriodicTasks))
+	for _, tasks := range [][]GrowthTask{g.tasks(), g.PeriodicTasks} {
+		for _, existing := range tasks {
+			ids[existing.ID] = true
+		}
 	}
-	step := r.RechargeStep
-	if math.IsNaN(step) || math.IsInf(step, 0) || step < .01 || step > 1e9 || math.Abs(step*100-math.Round(step*100)) > .001 {
-		return errors.New("累计充值门槛需为 0.01 到 1000000000 USD，最多 2 位小数")
+	for suffix := 1; ids[task.ID]; suffix++ {
+		task.ID = fmt.Sprintf("%s_%d", lotteryRechargeTaskID, suffix)
 	}
-	if r.ChancesPerStep < 1 || r.ChancesPerStep > 1000 {
-		return errors.New("每档赠送次数需在 1 到 1000 之间")
+	g.PeriodicTasks = append(g.PeriodicTasks, task)
+}
+
+// The draw quota uses the current valid recharge total, including refunds.
+func (g GrowthConfig) lotteryRechargeTask() *GrowthTask {
+	for i, task := range g.PeriodicTasks {
+		if task.LiveLotteryRecharge && task.Enabled {
+			return &g.PeriodicTasks[i]
+		}
 	}
 	return nil
 }
@@ -68,9 +82,6 @@ func (c CheckinConfig) streakDays() int {
 }
 
 func validateGrowth(c CheckinConfig) error {
-	if err := c.Growth.LotteryRecharge.validate(); err != nil {
-		return err
-	}
 	if err := c.streakReward().validate(); err != nil {
 		return err
 	}
@@ -86,9 +97,12 @@ func validateGrowth(c CheckinConfig) error {
 	if len(tasks) > maxGrowthTasks {
 		return fmt.Errorf("最多配置 %d 项成长任务", maxGrowthTasks)
 	}
-	if len(c.Growth.PeriodicTasks) > maxGrowthTasks {
-		return fmt.Errorf("最多配置 %d 项周期任务", maxGrowthTasks)
+	for _, task := range tasks {
+		if task.LiveLotteryRecharge {
+			return errors.New("充值赠抽奖次数须配置在循环任务中")
+		}
 	}
+	liveRecharge := 0
 	for _, task := range c.Growth.PeriodicTasks {
 		if growthTaskPeriod(task) != "once" {
 			return errors.New("循环任务按累计进度结算，不能同时设置每日或每周重置")
@@ -98,6 +112,19 @@ func validateGrowth(c CheckinConfig) error {
 		default:
 			return errors.New("周期任务仅支持累计消费、Token、调用、充值、签到或按日金额达标任务")
 		}
+		if task.LiveLotteryRecharge {
+			liveRecharge++
+			reward := task.reward()
+			if task.Kind != "recharge_total" || reward.Type != "chances" || reward.Quantity < 1 {
+				return errors.New("实时抽奖次数任务须使用累计有效充值条件，奖励至少 1 次抽奖")
+			}
+		}
+	}
+	if liveRecharge > 1 {
+		return errors.New("仅能配置一项实时抽奖次数任务")
+	}
+	if len(c.Growth.PeriodicTasks)-liveRecharge > maxGrowthTasks {
+		return fmt.Errorf("最多配置 %d 项普通周期任务", maxGrowthTasks)
 	}
 	tasks = append(append([]GrowthTask(nil), tasks...), c.Growth.PeriodicTasks...)
 	ids := make(map[string]bool, len(tasks))
@@ -161,7 +188,13 @@ func validateGrowth(c CheckinConfig) error {
 				return errors.New("累计 Token 目标须为 1～1000000000000000 的整数")
 			}
 		case "recharge_total", "usage_amount":
-			if task.Target < .01 || !validRechargeThreshold(task.Target) {
+			validAmount := validRechargeThreshold(task.Target)
+			if task.LiveLotteryRecharge {
+				// Honor the precision tolerance of saved lottery rules.
+				amount := task.Target
+				validAmount = amount <= 1e9 && math.Abs(amount*100-math.Round(amount*100)) <= .001
+			}
+			if task.Target < .01 || !validAmount {
 				return errors.New("累计金额目标须为 0.01～1000000000 USD，最多两位小数")
 			}
 		default:

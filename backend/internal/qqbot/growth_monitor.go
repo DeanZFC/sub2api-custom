@@ -69,7 +69,7 @@ func (s *Service) settleGrowthBatch(ctx context.Context, c Config, after int64) 
 		periodic = periodic || (cfg.Enabled && milestone.Enabled && milestone.reward().enabled())
 	}
 	for _, task := range cfg.Growth.PeriodicTasks {
-		periodic = periodic || (task.Enabled && task.reward().enabled())
+		periodic = periodic || (!task.LiveLotteryRecharge && task.Enabled && task.reward().enabled())
 	}
 	if len(ids) == 0 && !periodic {
 		return 0, nil

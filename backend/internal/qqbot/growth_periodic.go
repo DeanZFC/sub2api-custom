@@ -53,6 +53,13 @@ func settlePeriodicGrowth(ctx context.Context, tx *sql.Tx, c Config, j Job, uid 
 	for i, task := range tasks {
 		reward := task.reward()
 		status := "未开启"
+		if task.LiveLotteryRecharge {
+			if task.Enabled {
+				status = "按累计有效充值实时计算，发「抽奖次数」查询"
+			}
+			text += fmt.Sprintf("\n\n**%d. %s**\n状态：%s\n每满 %s 奖励：%s", i+1, replyPlainLabel(task.Name), status, money(task.Target), reward.description())
+			continue
+		}
 		if task.Enabled && reward.enabled() {
 			if isGrowthAmountDayKind(task.Kind) {
 				detail, n, changed, e := settlePeriodicAmountDays(ctx, tx, c, j, uid, task, progress, at)

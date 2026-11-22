@@ -26,6 +26,12 @@ function growthConfig(chances = [0, 0, 0]) {
     { id: 'explorer', name: '模型探险家', kind: 'model_count', target: 3, chances: chances[2], enabled: chances[2]! > 0 }
   ].map(task => ({ ...task, period: 'once', reward: rewardConfig(task.chances) })) }
 }
+function rechargeTask() {
+  return {
+    id: 'lottery_recharge', name: '累计充值赠抽奖次数', kind: 'recharge_total', target: 50,
+    enabled: true, chances: 1, reward: rewardConfig(1), live_lottery_recharge: true
+  }
+}
 
 describe('QQ activity pages with real translations', () => {
   beforeEach(() => {
@@ -38,14 +44,7 @@ describe('QQ activity pages with real translations', () => {
     api.rewardCodes.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 })
     let checkin = { enabled: true, min_amount: 0.1, max_amount: 0.5, min_recharge_total: 0, min_recharge_30d: 0, milestones: [], growth: growthConfig() }
     api.checkinConfig.mockImplementation(async () => structuredClone(checkin))
-    api.saveCheckin.mockImplementation(async c => {
-      if (c._section === 'lottery_recharge') {
-        checkin = { ...checkin, growth: { ...checkin.growth, ...c.growth } }
-        return { ...structuredClone(checkin), _sections: { lottery_recharge: 'saved-rule' } }
-      }
-      checkin = structuredClone(c)
-      return structuredClone(checkin)
-    })
+    api.saveCheckin.mockImplementation(async c => { checkin = structuredClone(c); return structuredClone(checkin) })
     api.inviteConfig.mockResolvedValue({ enabled: true, invite_reward: 1, invite_daily_limit: 10, min_recharge_total: 0, min_recharge_30d: 0 })
     api.saveInvite.mockImplementation(async c => c)
     api.transferConfig.mockResolvedValue({ transfer_enabled: true, transfer_fee_percent: 1, transfer_min_amount: 0.1, transfer_max_amount: 100 })
@@ -278,7 +277,7 @@ describe('QQ activity pages with real translations', () => {
     const w = mount(QQBotGrowthSettings, { global: { plugins: [translation] } })
     await flushPromises()
     expect(w.find('form form').exists()).toBe(false)
-    expect(w.get('[data-testid="periodic-preset"]').findAll('option').map(option => option.attributes('value'))).toEqual(['usage_amount', 'usage_tokens', 'usage_count', 'recharge_total', 'usage_amount_days', 'usage_amount_streak', 'recharge_days', 'recharge_streak'])
+    expect(w.get('[data-testid="periodic-preset"]').findAll('option').map(option => option.attributes('value'))).toEqual(['usage_amount', 'usage_tokens', 'usage_count', 'recharge_total', 'usage_amount_days', 'usage_amount_streak', 'recharge_days', 'recharge_streak', 'live_lottery_recharge'])
     await w.get('[data-testid="add-periodic-task"]').trigger('click')
     expect((w.get('[data-testid="periodic-enabled-0"]').element as HTMLInputElement).checked).toBe(false)
     await w.get('[data-testid="periodic-name-0"]').setValue('Every USD 10')
@@ -336,42 +335,64 @@ describe('QQ activity pages with real translations', () => {
     expect(w.get('[data-testid="add-periodic-task"]').attributes('disabled')).toBeDefined()
     await w.get('[data-testid="periodic-growth-form"]').trigger('submit'); await flushPromises()
     expect(api.saveCheckin.mock.lastCall![0].growth.periodic_tasks).toHaveLength(12)
+    await w.get('[data-testid="periodic-preset"]').setValue('live_lottery_recharge')
+    await w.get('[data-testid="add-periodic-task"]').trigger('click')
+    expect(w.findAll('[data-testid="periodic-task"]')).toHaveLength(13)
+    expect(w.get('option[value="live_lottery_recharge"]').attributes('disabled')).toBeDefined()
+    expect(w.get('[data-testid="add-periodic-task"]').attributes('disabled')).toBeDefined()
+    await w.get('[data-testid="periodic-growth-form"]').trigger('submit')
+    await flushPromises()
+    expect(api.saveCheckin.mock.lastCall![0].growth.periodic_tasks[12]).toEqual(expect.objectContaining({
+      kind: 'recharge_total', live_lottery_recharge: true, reward: rewardConfig(1)
+    }))
     w.unmount()
   })
-  it.each(['zh', 'en'] as const)('%s loads, edits and disables the recharge rule under growth tasks', async locale => {
+  it.each(['zh', 'en'] as const)('%s saves the migrated recharge rule alongside other repeating challenges', async locale => {
     const translation = i18n(locale)
     api.checkinConfig.mockResolvedValueOnce({
       _version: 'whole-config',
-      _sections: { lottery_recharge: 'original-rule' },
-      growth: { ...growthConfig(), lottery_recharge: { recharge_step: 50, chances_per_step: 1 } }
+      _sections: { periodic_tasks: 'original-tasks' },
+      growth: { ...growthConfig(), periodic_tasks: [rechargeTask()] }
     })
     const w = mount(QQBotGrowthSettings, { global: { plugins: [translation] } })
     await flushPromises()
-    const form = w.get('[data-testid="lottery-recharge-form"]')
-    expect(form.text()).toContain(translation.global.t('qqbot.historicalRechargeHelp'))
-    const threshold = form.get<HTMLInputElement>('[data-testid="recharge-step"]')
+    const form = w.get('[data-testid="periodic-growth-form"]')
+    expect(form.findAll('button[type="submit"]')).toHaveLength(1)
+    expect(form.text()).toContain(translation.global.t('qqbot.growth.lotteryRechargeHelp'))
+    const threshold = form.get<HTMLInputElement>('[data-testid="periodic-target-0"]')
+    const chances = form.get<HTMLInputElement>('[data-testid="periodic-chances-0"]')
+    const toggle = form.get('[data-testid="periodic-enabled-0"]')
     expect(threshold.element.value).toBe('50')
-    const toggle = form.get('[data-testid="lottery-recharge-enabled"]')
-    await toggle.setValue(false)
-    expect(form.text()).toContain(translation.global.t('qqbot.growth.lotteryRechargeDisabled'))
-    await toggle.setValue(true)
-    expect(form.get<HTMLInputElement>('[data-testid="recharge-step"]').element.value).toBe('50')
-    expect(form.get('button[type="submit"]').attributes('disabled')).toBeDefined()
-    await form.get('[data-testid="recharge-step"]').setValue('20.001')
+    expect(chances.element.value).toBe('1')
+    expect(form.get('[data-testid="periodic-kind-0"]').attributes('disabled')).toBeDefined()
+    expect(form.get('[data-testid="periodic-kind-0"]').text()).toBe(translation.global.t('qqbot.growth.lotteryRechargeKind'))
+    expect(form.get('[data-testid="periodic-reward-type-0"]').attributes('disabled')).toBeDefined()
+    await threshold.setValue('20.001')
     await form.trigger('submit')
     expect(api.saveCheckin).not.toHaveBeenCalled()
-    expect(w.get('[role="alert"]').text()).toBe(translation.global.t('qqbot.growth.invalidLotteryRecharge'))
-    await form.get('[data-testid="recharge-step"]').setValue('20.25')
-    await form.get('[data-testid="chances-per-step"]').setValue('2')
+    expect(w.get('[role="alert"]').text()).toBe(translation.global.t('qqbot.growth.invalidTask'))
+    await threshold.setValue('20.25')
+    await chances.setValue('0')
+    await form.trigger('submit')
+    expect(api.saveCheckin).not.toHaveBeenCalled()
+    await chances.setValue('2')
+    await toggle.setValue(false)
+    await form.get('[data-testid="add-periodic-task"]').trigger('click')
     await form.trigger('submit')
     await flushPromises()
-    expect(api.saveCheckin).toHaveBeenLastCalledWith({ _section: 'lottery_recharge', _version: 'original-rule', growth: { lottery_recharge: { recharge_step: 20.25, chances_per_step: 2 } } })
-    expect(form.get('button[type="submit"]').attributes('disabled')).toBeDefined()
-    await form.get('[data-testid="lottery-recharge-enabled"]').setValue(false)
+    expect(api.saveCheckin).toHaveBeenLastCalledWith(expect.objectContaining({
+      _section: 'periodic_tasks', _version: 'original-tasks',
+      growth: expect.objectContaining({ periodic_tasks: [
+        { ...rechargeTask(), target: 20.25, enabled: false, chances: 2, reward: rewardConfig(2) },
+        expect.objectContaining({ kind: 'usage_amount' })
+      ] })
+    }))
+    expect(threshold.element.value).toBe('20.25')
+    await form.get('[data-testid="periodic-remove-0"]').trigger('click')
     await form.trigger('submit')
     await flushPromises()
-    expect(api.saveCheckin).toHaveBeenLastCalledWith({ _section: 'lottery_recharge', _version: 'saved-rule', growth: { lottery_recharge: null } })
-    expect(form.find('[data-testid="recharge-step"]').exists()).toBe(false)
+    expect(api.saveCheckin.mock.lastCall![0].growth.periodic_tasks).toEqual([expect.objectContaining({ kind: 'usage_amount' })])
+    expect(form.get('option[value="live_lottery_recharge"]').attributes('disabled')).toBeUndefined()
     w.unmount()
   })
   it.each(['zh', 'en'] as const)('%s validates and saves prize probabilities independently of the recharge rule', async locale => {
@@ -520,8 +541,9 @@ describe('QQ activity pages with real translations', () => {
     expect(api.transferConfig).not.toHaveBeenCalled()
     await w.get('[data-testid="min-amount"]').setValue('0.2')
     await w.get('#qqbot-tab-growth').trigger('click'); await flushPromises()
-    await w.get('[data-testid="lottery-recharge-enabled"]').setValue(true)
-    await w.get('[data-testid="recharge-step"]').setValue('25')
+    await w.get('[data-testid="periodic-preset"]').setValue('recharge_total')
+    await w.get('[data-testid="add-periodic-task"]').trigger('click')
+    await w.get('[data-testid="periodic-target-0"]').setValue('25')
     await w.get('#qqbot-growth-tab-invite').trigger('click'); await flushPromises()
     expect(router.currentRoute.value.query).toEqual({ tab: 'growth', section: 'invite' })
     await w.get('[data-testid="invite-reward"]').setValue('2.5')
@@ -543,7 +565,7 @@ describe('QQ activity pages with real translations', () => {
     expect(api.lotteryConfig).toHaveBeenCalledTimes(1)
     expect(api.checkinConfig).toHaveBeenCalledTimes(2)
     await w.get('#qqbot-tab-lottery').trigger('keydown', { key: 'ArrowLeft' }); await flushPromises()
-    expect((w.get('[data-testid="recharge-step"]').element as HTMLInputElement).value).toBe('25')
+    expect(w.get<HTMLInputElement>('[data-testid="periodic-target-0"]').element.value).toBe('25')
     expect((w.get('[data-testid="task-chances-0"]').element as HTMLInputElement).value).toBe('3')
     expect(api.checkinConfig).toHaveBeenCalledTimes(2)
     expect(w.find('#qqbot-tab-transfer').exists()).toBe(false)

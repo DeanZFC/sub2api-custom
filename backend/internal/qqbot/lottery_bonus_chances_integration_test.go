@@ -23,7 +23,7 @@ func TestLotteryBonusChancesCombineWithRechargeAndSurviveRuleChanges(t *testing.
 	require.Equal(t, int64(3), state.Earned)
 	require.Equal(t, int64(2), state.BonusChances)
 	// Draw from the existing pool; changing balance recharge rules cannot erase grants.
-	saveLotteryRechargeRule(t, s, &LotteryRechargeRule{RechargeStep: 100, ChancesPerStep: 1})
+	saveLotteryRechargeTask(t, s, 100, 1)
 	state, err = s.LotteryState(ctx, uid)
 	require.NoError(t, err)
 	require.Equal(t, int64(2), state.Remaining)

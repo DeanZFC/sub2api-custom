@@ -21,6 +21,10 @@ type ToolSpec struct {
 // ToolCatalog returns fresh schemas so filtering one connection's tools cannot
 // alter another connection's permissions or input validation.
 func ToolCatalog() []ToolSpec {
+	syncFields := catalogUsageFields(false)
+	delete(syncFields, "period")
+	syncFields["cursor"] = catalogText("Checkpoint returned by a previous call with the same filters", 512)
+	syncFields["page_size"] = catalogInteger("Rows per call", 1, 100)
 	keyList := catalogPage(map[string]any{
 		"search":   catalogText("Search API key names", 100),
 		"status":   catalogEnum("Key status", "active", "inactive", "quota_exhausted", "expired"),
@@ -92,6 +96,9 @@ func ToolCatalog() []ToolSpec {
 		catalogTool("user_create_api_key", "Create an API key owned by you. Returns the newly created secret once in this tool result; store it securely.", "POST", "/keys", nil, keyCreate),
 		catalogTool("user_update_api_key", "Update one of your API keys. Only supplied fields change; disabling a key immediately blocks its use. Returns metadata without its secret.", "PUT", "/keys/:id", nil, keyUpdate),
 		catalogTool("user_delete_api_key", "Permanently delete one of your API keys. Applications using it will lose access. Returns the deletion result.", "DELETE", "/keys/:id", nil, nil),
+		catalogTool("user_list_billing_keys", "List your current and deleted billing keys without secrets.", "GET", "/usage/keys", catalogPage(map[string]any{}), nil),
+		catalogTool("user_sync_usage", "Read your itemized charges. Persist next_cursor after processing items. Poll again when has_more is false.", "GET", "/usage/sync", catalogObject(syncFields), nil),
+		catalogTool("user_get_usage_retention", "Read the current raw usage retention policy.", "GET", "/usage/retention", nil, nil),
 		catalogTool("user_list_usage", "List your request usage, tokens and costs with pagination and optional date, model and key filters.", "GET", "/usage", catalogPage(catalogUsageFields(false)), nil),
 		catalogTool("user_get_usage_stats", "Get aggregate request counts, token usage and costs for your account; defaults to the last seven days. Dates are inclusive YYYY-MM-DD.", "GET", "/usage/stats", catalogObject(catalogUsageFields(false)), nil),
 		catalogTool("user_get_dashboard", "Get your dashboard totals, request counts and spending summary.", "GET", "/usage/dashboard/stats", nil, nil),

@@ -11,6 +11,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/managementmcp"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -216,4 +217,47 @@ func TestMCPDispatchRetainsBackendModeAndAdminCompliance(t *testing.T) {
 	require.True(t, result.Result.IsError)
 	require.Equal(t, http.StatusLocked, result.Result.Payload.HTTPStatus)
 	require.Contains(t, string(result.Result.Payload.Result), "ADMIN_COMPLIANCE_ACK_REQUIRED")
+}
+
+type mcpBillingFixture struct {
+	service.CustomerUsageRepository
+	uid int64
+	pos service.UsageSyncPosition
+}
+
+func (f *mcpBillingFixture) Sync(_ context.Context, filters usagestats.UsageLogFilters, pos service.UsageSyncPosition, _ int) ([]service.CustomerUsageRow, service.UsageSyncPosition, bool, error) {
+	f.uid = filters.UserID
+	f.pos = pos
+	return []service.CustomerUsageRow{{ID: 10, ActualCost: "0.0012300000"}}, service.UsageSyncPosition{XID: 12, ID: 10}, false, nil
+}
+func TestMCPReadOnlyBillingSyncResumes(t *testing.T) {
+	h := mcpRouteHandlers()
+	fixture := &mcpBillingFixture{}
+	cfg := &config.Config{}
+	cfg.JWT.Secret = "route-test"
+	h.Usage = handler.NewUsageHandler(nil, nil, nil, nil, fixture, cfg)
+	principal := &service.MCPPrincipal{GrantID: "sync", UserID: 7, Role: service.RoleUser, Scope: service.MCPScopeUser, ReadOnly: true}
+	endpoint := newMCPRouteTestEndpoint(h, principal, nil, middleware.AuditLogMiddleware(mcpRouteNext))
+	args := map[string]any{"query": map[string]any{"page_size": 10}}
+	result := callMCPRouteTool(t, endpoint, "user_sync_usage", args)
+	require.False(t, result.Result.IsError)
+	require.Equal(t, 200, result.Result.Payload.HTTPStatus)
+	var page struct {
+		Data struct {
+			Cursor string           `json:"next_cursor"`
+			Items  []map[string]any `json:"items"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(result.Result.Payload.Result, &page))
+	require.Equal(t, int64(7), fixture.uid)
+	require.NotEmpty(t, page.Data.Cursor)
+	require.Len(t, page.Data.Items, 1)
+	require.Equal(t, "0.0012300000", page.Data.Items[0]["actual_cost"])
+	for _, field := range []string{"key", "user", "session_id", "account_id", "ip_address", "upstream_request_id"} {
+		require.NotContains(t, page.Data.Items[0], field)
+	}
+	args["query"] = map[string]any{"cursor": page.Data.Cursor}
+	result = callMCPRouteTool(t, endpoint, "user_sync_usage", args)
+	require.False(t, result.Result.IsError)
+	require.EqualValues(t, 12, fixture.pos.XID)
 }

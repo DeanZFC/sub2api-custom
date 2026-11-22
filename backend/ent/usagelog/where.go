@@ -205,6 +205,11 @@ func RateMultiplier(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldRateMultiplier, v))
 }
 
+// ServiceTierSurchargeWaived applies equality check predicate on the "service_tier_surcharge_waived" field. It's identical to ServiceTierSurchargeWaivedEQ.
+func ServiceTierSurchargeWaived(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldServiceTierSurchargeWaived, v))
+}
+
 // LongContextBillingApplied applies equality check predicate on the "long_context_billing_applied" field. It's identical to LongContextBillingAppliedEQ.
 func LongContextBillingApplied(v bool) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldLongContextBillingApplied, v))
@@ -288,6 +293,16 @@ func VideoDurationSeconds(v int) predicate.UsageLog {
 // CacheTTLOverridden applies equality check predicate on the "cache_ttl_overridden" field. It's identical to CacheTTLOverriddenEQ.
 func CacheTTLOverridden(v bool) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldCacheTTLOverridden, v))
+}
+
+// HTTPStatus applies equality check predicate on the "http_status" field. It's identical to HTTPStatusEQ.
+func HTTPStatus(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldHTTPStatus, v))
+}
+
+// SyncXid applies equality check predicate on the "sync_xid" field. It's identical to SyncXidEQ.
+func SyncXid(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldSyncXid, v))
 }
 
 // CreatedAt applies equality check predicate on the "created_at" field. It's identical to CreatedAtEQ.
@@ -1665,6 +1680,16 @@ func RateMultiplierLTE(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldLTE(FieldRateMultiplier, v))
 }
 
+// ServiceTierSurchargeWaivedEQ applies the EQ predicate on the "service_tier_surcharge_waived" field.
+func ServiceTierSurchargeWaivedEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldServiceTierSurchargeWaived, v))
+}
+
+// ServiceTierSurchargeWaivedNEQ applies the NEQ predicate on the "service_tier_surcharge_waived" field.
+func ServiceTierSurchargeWaivedNEQ(v bool) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldServiceTierSurchargeWaived, v))
+}
+
 // LongContextBillingAppliedEQ applies the EQ predicate on the "long_context_billing_applied" field.
 func LongContextBillingAppliedEQ(v bool) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldLongContextBillingApplied, v))
@@ -2548,6 +2573,106 @@ func CacheTTLOverriddenEQ(v bool) predicate.UsageLog {
 // CacheTTLOverriddenNEQ applies the NEQ predicate on the "cache_ttl_overridden" field.
 func CacheTTLOverriddenNEQ(v bool) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNEQ(FieldCacheTTLOverridden, v))
+}
+
+// HTTPStatusEQ applies the EQ predicate on the "http_status" field.
+func HTTPStatusEQ(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldHTTPStatus, v))
+}
+
+// HTTPStatusNEQ applies the NEQ predicate on the "http_status" field.
+func HTTPStatusNEQ(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldHTTPStatus, v))
+}
+
+// HTTPStatusIn applies the In predicate on the "http_status" field.
+func HTTPStatusIn(vs ...int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldHTTPStatus, vs...))
+}
+
+// HTTPStatusNotIn applies the NotIn predicate on the "http_status" field.
+func HTTPStatusNotIn(vs ...int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldHTTPStatus, vs...))
+}
+
+// HTTPStatusGT applies the GT predicate on the "http_status" field.
+func HTTPStatusGT(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldHTTPStatus, v))
+}
+
+// HTTPStatusGTE applies the GTE predicate on the "http_status" field.
+func HTTPStatusGTE(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldHTTPStatus, v))
+}
+
+// HTTPStatusLT applies the LT predicate on the "http_status" field.
+func HTTPStatusLT(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldHTTPStatus, v))
+}
+
+// HTTPStatusLTE applies the LTE predicate on the "http_status" field.
+func HTTPStatusLTE(v int16) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldHTTPStatus, v))
+}
+
+// HTTPStatusIsNil applies the IsNil predicate on the "http_status" field.
+func HTTPStatusIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldHTTPStatus))
+}
+
+// HTTPStatusNotNil applies the NotNil predicate on the "http_status" field.
+func HTTPStatusNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldHTTPStatus))
+}
+
+// SyncXidEQ applies the EQ predicate on the "sync_xid" field.
+func SyncXidEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldSyncXid, v))
+}
+
+// SyncXidNEQ applies the NEQ predicate on the "sync_xid" field.
+func SyncXidNEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldSyncXid, v))
+}
+
+// SyncXidIn applies the In predicate on the "sync_xid" field.
+func SyncXidIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldSyncXid, vs...))
+}
+
+// SyncXidNotIn applies the NotIn predicate on the "sync_xid" field.
+func SyncXidNotIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldSyncXid, vs...))
+}
+
+// SyncXidGT applies the GT predicate on the "sync_xid" field.
+func SyncXidGT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldSyncXid, v))
+}
+
+// SyncXidGTE applies the GTE predicate on the "sync_xid" field.
+func SyncXidGTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldSyncXid, v))
+}
+
+// SyncXidLT applies the LT predicate on the "sync_xid" field.
+func SyncXidLT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldSyncXid, v))
+}
+
+// SyncXidLTE applies the LTE predicate on the "sync_xid" field.
+func SyncXidLTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldSyncXid, v))
+}
+
+// SyncXidIsNil applies the IsNil predicate on the "sync_xid" field.
+func SyncXidIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldSyncXid))
+}
+
+// SyncXidNotNil applies the NotNil predicate on the "sync_xid" field.
+func SyncXidNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldSyncXid))
 }
 
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.

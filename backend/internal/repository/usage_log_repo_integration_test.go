@@ -71,20 +71,27 @@ func (s *UsageLogRepoSuite) TestCreate() {
 	apiKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-create", Name: "k"})
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-create"})
 
+	tier := "ultrafast"
 	log := &service.UsageLog{
-		UserID:       user.ID,
-		APIKeyID:     apiKey.ID,
-		AccountID:    account.ID,
-		Model:        "claude-3",
-		InputTokens:  10,
-		OutputTokens: 20,
-		TotalCost:    0.5,
-		ActualCost:   0.4,
+		ServiceTier:                &tier,
+		ServiceTierSurchargeWaived: true,
+		UserID:                     user.ID,
+		APIKeyID:                   apiKey.ID,
+		AccountID:                  account.ID,
+		Model:                      "gpt-6-astra",
+		InputTokens:                10,
+		OutputTokens:               20,
+		TotalCost:                  0.5,
+		ActualCost:                 0.4,
 	}
 
 	_, err := s.repo.Create(s.ctx, log)
 	s.Require().NoError(err, "Create")
 	s.Require().NotZero(log.ID)
+	saved, err := s.repo.GetByID(s.ctx, log.ID)
+	s.Require().NoError(err)
+	s.Require().True(saved.ServiceTierSurchargeWaived)
+	s.Require().Equal(tier, *saved.ServiceTier)
 }
 
 func TestUsageLogRepositoryCreate_BatchPathConcurrent(t *testing.T) {

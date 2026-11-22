@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-6"><p v-if="tasksDraft.dirty.value || periodicDraft.dirty.value || lotteryRechargeDraft.dirty.value" class="text-sm text-amber-700">{{ t('qqbot.workspace.unsaved') }}</p>
+  <div class="space-y-6"><p v-if="tasksDraft.dirty.value || periodicDraft.dirty.value" class="text-sm text-amber-700">{{ t('qqbot.workspace.unsaved') }}</p>
     <section class="space-y-4 rounded-2xl border border-primary-100 bg-gradient-to-br from-primary-50 to-white p-5 dark:border-primary-900 dark:from-primary-950/30 dark:to-dark-800">
       <div class="flex flex-wrap items-start justify-between gap-3"><div><h2 class="text-xl font-bold">{{ t('qqbot.growth.playbookTitle') }}</h2><p class="mt-2 max-w-3xl text-sm text-gray-600 dark:text-gray-300">{{ t('qqbot.growth.help') }}</p></div><span class="badge badge-primary">{{ t('qqbot.growth.autoSettle') }}</span></div>
       <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="growth-playbook">
@@ -59,34 +59,6 @@
     <section class="space-y-4" data-testid="periodic-growth-tasks">
       <h2 class="text-lg font-semibold">{{ t('qqbot.growth.periodicTitle') }}</h2>
       <p class="text-sm text-gray-500">{{ t('qqbot.growth.periodicHelp') }}</p>
-      <form v-if="form" class="card space-y-5 p-6" data-testid="lottery-recharge-form" @submit.prevent="saveRechargeRule">
-        <fieldset class="space-y-4" :disabled="busy">
-          <legend class="mb-2 font-medium">{{ t('qqbot.growth.lotteryRechargeTitle') }}</legend>
-          <label class="flex items-center gap-2 text-sm">
-            <input v-model="lotteryRechargeEnabled" data-testid="lottery-recharge-enabled" type="checkbox" />
-            {{ t('qqbot.growth.enabled') }}
-          </label>
-          <p v-if="!lotteryRechargeEnabled" class="text-sm text-gray-500">{{ t('qqbot.growth.lotteryRechargeDisabled') }}</p>
-          <div v-if="form.growth.lottery_recharge" class="grid gap-4 sm:grid-cols-2">
-            <label class="space-y-1">
-              {{ t('qqbot.rechargeStep') }}
-              <input v-model.number="form.growth.lottery_recharge.recharge_step" data-testid="recharge-step" class="input" type="number" min="0.01" max="1000000000" step="0.01" required />
-            </label>
-            <label class="space-y-1">
-              {{ t('qqbot.chancesPerStep') }}
-              <input v-model.number="form.growth.lottery_recharge.chances_per_step" data-testid="chances-per-step" class="input" type="number" min="1" max="1000" step="1" required />
-            </label>
-          </div>
-          <details class="rounded-lg bg-gray-50 p-4 text-sm dark:bg-dark-800">
-            <summary class="cursor-pointer font-medium">{{ t('qqbot.rewardEditor.rechargeRules') }}</summary>
-            <div class="mt-3 space-y-2 text-gray-500">
-              <p>{{ t('qqbot.historicalRechargeHelp') }}</p>
-              <p>{{ t('qqbot.lotteryRuleChangeHelp') }}</p>
-            </div>
-          </details>
-        </fieldset>
-        <button type="submit" class="btn btn-primary" :disabled="busy || !lotteryRechargeDraft.dirty.value">{{ t('common.save') }}</button>
-      </form>
       <form v-if="form" data-testid="periodic-growth-form" class="card space-y-5 p-6" @submit.prevent="save('periodic_tasks')">
         <fieldset class="min-w-0 space-y-4" :disabled="busy">
           <legend class="mb-2 font-medium">{{ t('qqbot.growth.repeatTitle') }}</legend>
@@ -102,15 +74,19 @@
             <div class="grid gap-4 sm:grid-cols-2">
               <label class="block space-y-1">{{ t('qqbot.growth.name') }}<input v-model="task.name" :data-testid="'periodic-name-' + index" maxlength="40" required class="input" /></label>
               <label class="block space-y-1">{{ t('qqbot.growth.kind') }}
-                <select v-model="task.kind" :data-testid="'periodic-kind-' + index" class="input" @change="changeTaskKind(task)">
+                <select v-if="task.live_lottery_recharge" class="input" :data-testid="'periodic-kind-' + index" disabled>
+                  <option>{{ t('qqbot.growth.lotteryRechargeKind') }}</option>
+                </select>
+                <select v-else v-model="task.kind" :data-testid="'periodic-kind-' + index" class="input" @change="changeTaskKind(task)">
                   <option v-for="kind in periodicKinds" :key="kind" :value="kind">{{ t('qqbot.growth.kinds.' + kind) }}</option>
                 </select>
               </label>
-              <label class="block space-y-1">{{ t('qqbot.growth.periodicTargets.' + task.kind) }}<input v-model.number="task.target" :data-testid="'periodic-target-' + index" type="number" :min="isAmountKind(task.kind) ? 0.01 : 1" :max="targetLimit(task.kind, task.period)" :step="isAmountKind(task.kind) ? 0.01 : 1" required class="input" /></label>
+              <label class="block space-y-1">{{ t('qqbot.growth.periodicTargets.' + task.kind) }}<input v-model.number="task.target" :data-testid="'periodic-target-' + index" type="number" :min="isAmountKind(task.kind) ? 0.01 : 1" :max="targetLimit(task.kind, task.period)" :step="task.live_lottery_recharge ? 'any' : isAmountKind(task.kind) ? 0.01 : 1" required class="input" /></label>
               <label v-if="isDailyAmountKind(task.kind)" class="block space-y-1">{{ t('qqbot.growth.dailyAmount') }}<input v-model.number="task.daily_amount" :data-testid="'periodic-daily-amount-' + index" type="number" min="0.01" max="1000000000" step="0.01" required class="input" /></label>
             </div>
-            <QQBotGrowthRewardFields v-model="task.reward" prefix="periodic" :index="index" />
+            <QQBotGrowthRewardFields v-model="task.reward" prefix="periodic" :index="index" :allowed-types="task.live_lottery_recharge ? ['chances'] : undefined" :minimum-quantity="task.live_lottery_recharge ? 1 : undefined" />
             <p class="text-sm text-gray-500">{{ t('qqbot.growth.typeHelp.' + task.kind) }}</p>
+            <p v-if="task.live_lottery_recharge" class="text-sm text-gray-500">{{ t('qqbot.growth.lotteryRechargeHelp') }}</p>
             <template v-if="isDailyAmountKind(task.kind)"><p class="text-sm text-gray-500">{{ t('qqbot.growth.dailyAmountHelp') }}</p><p class="text-sm text-gray-500">{{ t('qqbot.growth.periodicDailyAmountHelp') }}</p></template>
           </article>
           <p v-if="!form.growth.periodic_tasks.length" class="rounded-lg border border-dashed p-6 text-center text-sm text-gray-500 dark:border-dark-700">{{ t('qqbot.growth.empty') }}</p>
@@ -118,9 +94,10 @@
             <label class="min-w-0 flex-1 space-y-1">{{ t('qqbot.growth.preset') }}
               <select v-model="newPeriodicKind" data-testid="periodic-preset" class="input">
                 <option v-for="kind in periodicKinds" :key="kind" :value="kind">{{ t('qqbot.growth.kinds.' + kind) }}</option>
+                <option value="live_lottery_recharge" :disabled="hasLotteryRechargeTask">{{ t('qqbot.growth.lotteryRechargeKind') }}</option>
               </select>
             </label>
-            <button type="button" class="btn btn-secondary" data-testid="add-periodic-task" :disabled="form.growth.periodic_tasks.length >= maxTasks" @click="addTask('periodic_tasks')">{{ t('qqbot.growth.addTask') }}</button>
+            <button type="button" class="btn btn-secondary" data-testid="add-periodic-task" :disabled="!canAddPeriodicTask" @click="addTask('periodic_tasks')">{{ t('qqbot.growth.addTask') }}</button>
           </div>
           <p class="text-sm text-gray-500">{{ t('qqbot.growth.limitHelp', { max: maxTasks }) }}</p>
         </fieldset>
@@ -135,8 +112,8 @@
 import { useQQDraft } from './useQQDraft'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { QQCheckinConfig, QQGrowthTask, QQGrowthTaskKind, QQGrowthTaskPeriod, QQLotteryRechargeRule } from '@/api/qqbot'
-import { loadCheckinConfig, saveGrowthSettings, saveLotteryRecharge } from './checkinSettings'
+import type { QQCheckinConfig, QQGrowthTask, QQGrowthTaskKind, QQGrowthTaskPeriod } from '@/api/qqbot'
+import { loadCheckinConfig, saveGrowthSettings } from './checkinSettings'
 import QQBotGrowthRewardFields from './QQBotGrowthRewardFields.vue'
 
 import { normalizeGrowthReward, rewardEnabled, validGrowthReward } from './growthReward'
@@ -148,21 +125,14 @@ const periodicKinds: QQGrowthTaskKind[] = ['usage_amount', 'usage_tokens', 'usag
 const targets: Record<QQGrowthTaskKind, number> = { binding: 1, usage_count: 10, checkin_total: 7, checkin_streak: 7, recharge_total: 10, usage_tokens: 1_000_000, usage_amount: 10, usage_days: 3, model_count: 3, invite_count: 3, usage_amount_days: 7, usage_amount_streak: 7, recharge_days: 7, recharge_streak: 7 }
 const maxTasks = 12
 const newTaskKind = ref<QQGrowthTaskKind>('usage_count')
-const newPeriodicKind = ref<QQGrowthTaskKind>('usage_amount')
+const newPeriodicKind = ref<QQGrowthTaskKind | 'live_lottery_recharge'>('usage_amount')
 const form = ref<QQCheckinConfig | null>(null)
 const persistedTaskIDs = ref(new Set<string>())
 const tasksDraft = useQQDraft(() => form.value?.growth.tasks)
 const periodicDraft = useQQDraft(() => form.value?.growth.periodic_tasks)
-const lotteryRechargeDraft = useQQDraft(() => form.value && { rule: form.value.growth.lottery_recharge ?? null })
-const pausedLotteryRechargeRule = ref<QQLotteryRechargeRule | null>(null)
-const lotteryRechargeEnabled = computed({
-  get: () => Boolean(form.value?.growth.lottery_recharge),
-  set: enabled => {
-    if (!form.value) return
-    if (!enabled) pausedLotteryRechargeRule.value = form.value.growth.lottery_recharge ?? null
-    form.value.growth.lottery_recharge = enabled ? pausedLotteryRechargeRule.value ?? { recharge_step: 10, chances_per_step: 1 } : null
-  }
-})
+const periodicTaskCount = computed(() => form.value?.growth.periodic_tasks.filter(task => !task.live_lottery_recharge).length ?? 0)
+const hasLotteryRechargeTask = computed(() => form.value?.growth.periodic_tasks.some(task => task.live_lottery_recharge) ?? false)
+const canAddPeriodicTask = computed(() => newPeriodicKind.value === 'live_lottery_recharge' ? !hasLotteryRechargeTask.value : periodicTaskCount.value < maxTasks)
 const enabledTasks = computed(() => form.value?.growth.tasks.filter(task => task.enabled && rewardEnabled(task.reward)).length ?? 0)
 const busy = ref(false)
 const error = ref('')
@@ -214,18 +184,39 @@ function targetLimit(kind: QQGrowthTaskKind, period?: QQGrowthTaskPeriod) {
 }
 
 function addTask(section: 'tasks' | 'periodic_tasks') {
-  if (!form.value || busy.value || form.value.growth[section].length >= maxTasks) return
-  const kind = section === 'tasks' ? newTaskKind.value : newPeriodicKind.value
-  form.value.growth[section].push({ id: 'task_' + crypto.randomUUID().replace(/-/g, ''), name: Array.from(t('qqbot.growth.kinds.' + kind)).slice(0, 40).join(''), kind, target: targets[kind], ...(section === 'tasks' || isDailyAmountKind(kind) ? { period: 'once' as const } : {}), ...(isDailyAmountKind(kind) ? { daily_amount: 10 } : {}), chances: 1, reward: normalizeGrowthReward(undefined, 1), enabled: false })
+  if (!form.value || busy.value) return
+  if (section === 'tasks' ? form.value.growth.tasks.length >= maxTasks : !canAddPeriodicTask.value) return
+  const selectedKind = section === 'tasks' ? newTaskKind.value : newPeriodicKind.value
+  const liveLotteryRecharge = selectedKind === 'live_lottery_recharge'
+  const kind = liveLotteryRecharge ? 'recharge_total' : selectedKind
+  const name = t(liveLotteryRecharge ? 'qqbot.growth.lotteryRechargeName' : 'qqbot.growth.kinds.' + kind)
+  form.value.growth[section].push({
+    id: 'task_' + crypto.randomUUID().replace(/-/g, ''),
+    name: Array.from(name).slice(0, 40).join(''),
+    kind,
+    target: targets[kind],
+    ...(section === 'tasks' || isDailyAmountKind(kind) ? { period: 'once' as const } : {}),
+    ...(isDailyAmountKind(kind) ? { daily_amount: 10 } : {}),
+    ...(liveLotteryRecharge ? { live_lottery_recharge: true } : {}),
+    chances: 1,
+    reward: normalizeGrowthReward(undefined, 1),
+    enabled: false
+  })
+  if (liveLotteryRecharge) newPeriodicKind.value = 'usage_amount'
 }
 
 function validTask(task: QQGrowthTask) {
+  if (!Number.isFinite(task.target)) return false
+  const validTargetPrecision = task.live_lottery_recharge
+    ? Math.abs(task.target * 100 - Math.round(task.target * 100)) <= 0.001
+    : isAmountKind(task.kind) ? Number(task.target.toFixed(2)) === task.target : Number.isInteger(task.target)
   return task.name.trim().length > 0 && Array.from(task.name).length <= 40 && !/[\r\n\t]/.test(task.name)
-    && kinds.includes(task.kind) && taskKinds(task.period).includes(task.kind) && (!task.period || periods.includes(task.period)) && Number.isFinite(task.target) && task.target >= (isAmountKind(task.kind) ? 0.01 : 1)
+    && kinds.includes(task.kind) && taskKinds(task.period).includes(task.kind) && (!task.period || periods.includes(task.period)) && task.target >= (isAmountKind(task.kind) ? 0.01 : 1)
     && task.target <= targetLimit(task.kind, task.period)
-    && (isAmountKind(task.kind) ? Number(task.target.toFixed(2)) === task.target : Number.isInteger(task.target))
+    && validTargetPrecision
     && (!isDailyAmountKind(task.kind) || (typeof task.daily_amount === 'number' && Number.isFinite(task.daily_amount) && task.daily_amount >= 0.01 && task.daily_amount <= 1_000_000_000 && Number(task.daily_amount.toFixed(2)) === task.daily_amount))
     && validGrowthReward(task.reward)
+    && (!task.live_lottery_recharge || (task.kind === 'recharge_total' && task.reward.type === 'chances' && task.reward.quantity >= 1))
 }
 
 function updateSavedRevision(section: string, saved: QQCheckinConfig) {
@@ -235,36 +226,12 @@ function updateSavedRevision(section: string, saved: QQCheckinConfig) {
   if (version) form.value._sections = { ...form.value._sections, [section]: version }
 }
 
-async function saveRechargeRule() {
-  if (!form.value || busy.value || !lotteryRechargeDraft.dirty.value) return
-  error.value = ''; notice.value = ''
-  const rule = form.value.growth.lottery_recharge
-  if (rule) {
-    const { recharge_step: amount, chances_per_step: chances } = rule
-    if (!Number.isFinite(amount) || amount < 0.01 || amount > 1_000_000_000 || Number(amount.toFixed(2)) !== amount ||
-        !Number.isInteger(chances) || chances < 1 || chances > 1000) {
-      error.value = t('qqbot.growth.invalidLotteryRecharge')
-      return
-    }
-  }
-  busy.value = true
-  try {
-    const saved = await saveLotteryRecharge(form.value)
-    form.value.growth.lottery_recharge = saved.growth.lottery_recharge ?? null
-    pausedLotteryRechargeRule.value = null
-    updateSavedRevision('lottery_recharge', saved)
-    lotteryRechargeDraft.markSaved()
-    notice.value = t('common.saved')
-  }
-  catch (e) { error.value = (e as Error).message || t('common.error') }
-  finally { busy.value = false }
-}
-
 async function save(section: 'tasks' | 'periodic_tasks') {
   if (!form.value || busy.value) return
   error.value = ''; notice.value = ''
   const tasks = form.value.growth[section]
-  if (tasks.length > maxTasks || !tasks.every(task => validTask(task) && (section === 'tasks' || periodicKinds.includes(task.kind)))) {
+  const count = section === 'tasks' ? tasks.length : periodicTaskCount.value
+  if (count > maxTasks || !tasks.every(task => validTask(task) && (section === 'tasks' || periodicKinds.includes(task.kind)))) {
     error.value = t('qqbot.growth.invalidTask')
     return
   }

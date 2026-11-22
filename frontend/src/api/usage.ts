@@ -370,7 +370,32 @@ export async function getMyErrorDetail(id: number): Promise<UserErrorRequestDeta
   return data
 }
 
+export interface BillingKey {
+  id: number
+  name: string
+  status: string
+  deleted_at: string | null
+}
+
+export async function listBillingKeys(page: number, pageSize: number) {
+  const { data } = await apiClient.get<PaginatedResponse<BillingKey>>('/usage/keys', { params: { page, page_size: pageSize } })
+  return data
+}
+
+export async function getRetention() {
+  const { data } = await apiClient.get<{ request_retention_days: number }>('/usage/retention')
+  return data.request_retention_days
+}
+
+export async function exportCSV(params: UsageQueryParams, signal: AbortSignal) {
+  const { data } = await apiClient.get<Blob>('/usage/export', { params, responseType: 'blob', signal, timeout: 150000 })
+  return data
+}
+
 export const usageAPI = {
+  listBillingKeys,
+  getRetention,
+  exportCSV,
   list,
   query,
   getStats,

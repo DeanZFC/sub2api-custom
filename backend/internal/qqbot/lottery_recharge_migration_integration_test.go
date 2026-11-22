@@ -15,6 +15,7 @@ import (
 func TestLotteryRechargeMigrationPreservesChancesAndProgress(t *testing.T) {
 	ctx := context.Background()
 	db := testDB(t)
+	insightsUsageTable(t, db)
 	s := savedBot(t, db)
 	uid := user(t, db)
 	bind(t, db, uid, "member")
@@ -31,7 +32,9 @@ func TestLotteryRechargeMigrationPreservesChancesAndProgress(t *testing.T) {
 	}`
 	const legacyCheckin = `{
 		"enabled":true,"min_amount":0.1,"max_amount":0.2,
-		"growth":{"tasks":[],"periodic_tasks":[]}
+		"growth":{"tasks":[],"periodic_tasks":[
+			{"id":"lottery_recharge","name":"原循环挑战","kind":"usage_count","target":2,"chances":3,"enabled":false}
+		]}
 	}`
 	_, err = db.Exec(`INSERT INTO settings(key,value) VALUES($1,$2),($3,$4)`,
 		lotteryConfigKey, legacyLottery, checkinConfigKey, legacyCheckin)
@@ -43,11 +46,13 @@ func TestLotteryRechargeMigrationPreservesChancesAndProgress(t *testing.T) {
 		uid, legacyLottery)
 	require.NoError(t, err)
 
-	migration, err := migrations.FS.ReadFile("357_qq_bot_lottery_recharge_growth.sql")
-	require.NoError(t, err)
-	for range 2 {
-		_, err = db.Exec(string(migration))
+	for _, name := range []string{"357_qq_bot_lottery_recharge_growth.sql", "359_qq_bot_lottery_recharge_periodic_task.sql"} {
+		migration, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
+		for range 2 {
+			_, err = db.Exec(string(migration))
+			require.NoError(t, err)
+		}
 	}
 	checkin, err := s.CheckinConfig(ctx)
 	require.NoError(t, err)
@@ -55,9 +60,14 @@ func TestLotteryRechargeMigrationPreservesChancesAndProgress(t *testing.T) {
 	require.Equal(t, 0.1, checkin.MinAmount)
 	require.Equal(t, 0.2, checkin.MaxAmount)
 	require.Empty(t, checkin.Growth.Tasks)
-	require.Empty(t, checkin.Growth.PeriodicTasks)
-	rule := &LotteryRechargeRule{RechargeStep: 50, ChancesPerStep: 1}
-	require.Equal(t, rule, checkin.Growth.LotteryRecharge)
+	require.Len(t, checkin.Growth.PeriodicTasks, 2)
+	require.Contains(t, checkin.Growth.PeriodicTasks, GrowthTask{ID: "lottery_recharge", Name: "原循环挑战", Kind: "usage_count", Target: 2, Chances: 3})
+	task := checkin.Growth.lotteryRechargeTask()
+	require.NotNil(t, task)
+	require.NotEqual(t, "lottery_recharge", task.ID)
+	require.Equal(t, "recharge_total", task.Kind)
+	require.Equal(t, 50.0, task.Target)
+	require.Equal(t, GrowthReward{Type: "chances", Quantity: 1}, task.reward())
 
 	lottery, err := s.LotteryConfig(ctx)
 	require.NoError(t, err)
@@ -81,9 +91,12 @@ func TestLotteryRechargeMigrationPreservesChancesAndProgress(t *testing.T) {
 	preview, err := s.PreviewActivities(ctx, uid)
 	require.NoError(t, err)
 	require.Equal(t, state, preview.Lottery)
-	require.Len(t, preview.Tasks, 1)
-	require.Equal(t, "lottery:recharge", preview.Tasks[0].ID)
-	require.Contains(t, preview.Tasks[0].Progress, "USD 25.00")
+	require.Len(t, preview.Tasks, 2)
+	previewByID := make(map[string]PreviewTask, len(preview.Tasks))
+	for _, item := range preview.Tasks {
+		previewByID[item.ID] = item
+	}
+	require.Contains(t, previewByID["periodic:"+task.ID].Progress, "USD 25.00")
 
 	job := Job{ID: "old-draw", GroupID: "group", MemberID: "member"}
 	reply, err := s.drawLottery(ctx, bot, job)
@@ -93,9 +106,10 @@ func TestLotteryRechargeMigrationPreservesChancesAndProgress(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT config_snapshot::text FROM qq_bot_lottery_draws WHERE request_key='app:old-draw'`).Scan(&snapshot))
 	require.JSONEq(t, legacyLottery, snapshot)
 
-	_, grants, err := s.processGrowthTasks(ctx, bot, job, time.Now(), false)
+	text, grants, err := s.processGrowthTasks(ctx, bot, job, time.Now(), true)
 	require.NoError(t, err)
 	require.Zero(t, grants)
+	require.Contains(t, text, task.Name)
 	stateAfterGrowth, err := s.LotteryState(ctx, uid)
 	require.NoError(t, err)
 	require.Equal(t, state, stateAfterGrowth)
@@ -104,7 +118,7 @@ func TestLotteryRechargeMigrationPreservesChancesAndProgress(t *testing.T) {
 	require.NoError(t, s.SaveLotteryConfig(ctx, lottery))
 	checkin, err = s.CheckinConfig(ctx)
 	require.NoError(t, err)
-	require.Equal(t, rule, checkin.Growth.LotteryRecharge)
+	require.Equal(t, task, checkin.Growth.lotteryRechargeTask())
 
 	// The legacy draw counts towards the guarantee after the upgrade.
 	job.ID = "first-new-draw"
@@ -116,11 +130,13 @@ func TestLotteryRechargeMigrationPreservesChancesAndProgress(t *testing.T) {
 	require.True(t, draws.Items[0].IsGuaranteed)
 	require.Equal(t, "保底奖", draws.Items[0].PrizeName)
 	require.Zero(t, draws.Items[0].Remaining)
-	var storedRule LotteryRechargeRule
+	var snapshotStep float64
+	var snapshotChances int
 	require.NoError(t, db.QueryRow(`SELECT (config_snapshot->>'recharge_step')::numeric,
 		(config_snapshot->>'chances_per_step')::bigint FROM qq_bot_lottery_draws
-		WHERE request_key='app:first-new-draw'`).Scan(&storedRule.RechargeStep, &storedRule.ChancesPerStep))
-	require.Equal(t, *rule, storedRule)
+		WHERE request_key='app:first-new-draw'`).Scan(&snapshotStep, &snapshotChances))
+	require.Equal(t, task.Target, snapshotStep)
+	require.Equal(t, task.reward().Quantity, snapshotChances)
 
 	// Fresh credits and refunds continue to affect availability immediately.
 	_, err = db.Exec(`INSERT INTO payment_orders(user_id,amount) VALUES($1,25)`, uid)
@@ -136,7 +152,7 @@ func TestLotteryRechargeMigrationPreservesChancesAndProgress(t *testing.T) {
 	require.Equal(t, 25.0, state.NextRecharge)
 }
 
-func TestLotteryRechargeMigrationWithoutSavedCheckinAndExplicitDisable(t *testing.T) {
+func TestLotteryRechargeMigrationWithoutSavedCheckinAndTaskRemoval(t *testing.T) {
 	ctx := context.Background()
 	db := testDB(t)
 	s := savedBot(t, db)
@@ -148,13 +164,22 @@ func TestLotteryRechargeMigrationWithoutSavedCheckinAndExplicitDisable(t *testin
 	require.NoError(t, err)
 	_, err = db.Exec(`INSERT INTO settings(key,value) VALUES($1,'{"enabled":false,"title":"等待启用"}')`, lotteryConfigKey)
 	require.NoError(t, err)
-	migration, err := migrations.FS.ReadFile("357_qq_bot_lottery_recharge_growth.sql")
+	previousMigration, err := migrations.FS.ReadFile("357_qq_bot_lottery_recharge_growth.sql")
 	require.NoError(t, err)
-	_, err = db.Exec(string(migration))
+	migration, err := migrations.FS.ReadFile("359_qq_bot_lottery_recharge_periodic_task.sql")
 	require.NoError(t, err)
+	for _, sql := range [][]byte{previousMigration, migration} {
+		_, err = db.Exec(string(sql))
+		require.NoError(t, err)
+	}
 	checkin, err := s.CheckinConfig(ctx)
 	require.NoError(t, err)
-	before.Growth.LotteryRecharge = &LotteryRechargeRule{RechargeStep: 10, ChancesPerStep: 1}
+	require.Len(t, checkin.Growth.PeriodicTasks, 1)
+	task := checkin.Growth.PeriodicTasks[0]
+	require.True(t, task.LiveLotteryRecharge)
+	require.Equal(t, 10.0, task.Target)
+	require.Equal(t, GrowthReward{Type: "chances", Quantity: 1}, task.reward())
+	checkin.Growth.PeriodicTasks = nil
 	require.Equal(t, before, checkin)
 
 	lottery, err := s.LotteryConfig(ctx)
@@ -170,12 +195,12 @@ func TestLotteryRechargeMigrationWithoutSavedCheckinAndExplicitDisable(t *testin
 	require.NoError(t, err)
 	require.Equal(t, int64(3), state.Remaining)
 
-	saveLotteryRechargeRule(t, s, nil)
+	require.NoError(t, s.SaveCheckinConfig(WithCheckinSection(ctx, "periodic_tasks"), checkin))
 	_, err = db.Exec(string(migration))
 	require.NoError(t, err)
 	checkin, err = s.CheckinConfig(ctx)
 	require.NoError(t, err)
-	require.Nil(t, checkin.Growth.LotteryRecharge)
+	require.Empty(t, checkin.Growth.PeriodicTasks)
 	state, err = s.LotteryState(ctx, uid)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), state.BonusChances)
@@ -191,4 +216,21 @@ func TestLotteryRechargeMigrationWithoutSavedCheckinAndExplicitDisable(t *testin
 	require.NoError(t, err)
 	require.Equal(t, int64(1), state.Used)
 	require.Zero(t, state.Remaining)
+}
+
+func TestLotteryRechargeMigrationRespectsPreviouslyDisabledRule(t *testing.T) {
+	db := testDB(t)
+	_, err := db.Exec(`INSERT INTO settings(key,value) VALUES
+		($1,'{"growth":{"lottery_recharge":null,"periodic_tasks":[]}}'),
+		($2,'{"enabled":true,"title":"旧抽奖","recharge_step":50,"chances_per_step":1}')`,
+		checkinConfigKey, lotteryConfigKey)
+	require.NoError(t, err)
+
+	migration, err := migrations.FS.ReadFile("359_qq_bot_lottery_recharge_periodic_task.sql")
+	require.NoError(t, err)
+	_, err = db.Exec(string(migration))
+	require.NoError(t, err)
+	var stored string
+	require.NoError(t, db.QueryRow(`SELECT value FROM settings WHERE key=$1`, checkinConfigKey).Scan(&stored))
+	require.JSONEq(t, `{"growth":{"periodic_tasks":[]}}`, stored)
 }
