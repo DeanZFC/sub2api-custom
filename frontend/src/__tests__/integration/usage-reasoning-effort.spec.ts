@@ -10,7 +10,7 @@ const {
   userGetStats,
   userGetDashboardModels,
   userGetDashboardSnapshotV2,
-  userKeysList,
+  userListBillingKeys,
   userGroupsGetAvailable,
   adminList,
   adminGetStats,
@@ -23,7 +23,7 @@ const {
   userGetStats: vi.fn(),
   userGetDashboardModels: vi.fn(),
   userGetDashboardSnapshotV2: vi.fn(),
-  userKeysList: vi.fn(),
+  userListBillingKeys: vi.fn(),
   userGroupsGetAvailable: vi.fn(),
   adminList: vi.fn(),
   adminGetStats: vi.fn(),
@@ -84,9 +84,8 @@ vi.mock('@/api', () => ({
     getStats: userGetStats,
     getDashboardModels: userGetDashboardModels,
     getDashboardSnapshotV2: userGetDashboardSnapshotV2,
-  },
-  keysAPI: {
-    list: userKeysList,
+    listBillingKeys: userListBillingKeys,
+    getRetention: vi.fn().mockResolvedValue(90),
   },
   userGroupsAPI: {
     getAvailable: userGroupsGetAvailable,
@@ -231,7 +230,7 @@ describe('usage reasoning effort page display', () => {
       trend: [],
       groups: [],
     })
-    userKeysList.mockReset().mockResolvedValue({ items: [{ id: 1, name: 'user-key' }] })
+    userListBillingKeys.mockReset().mockResolvedValue({ items: [{ id: 1, name: 'user-key' }], pages: 1 })
     userGroupsGetAvailable.mockReset().mockResolvedValue([{ id: 1, name: 'default' }])
 
     adminList.mockReset().mockResolvedValue({ items: [adminMappedLog], total: 1, pages: 1 })
