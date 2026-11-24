@@ -70,7 +70,7 @@ func TestLockAndMergeAccountPreservesQualityAndManualSchedulingState(t *testing.
 			if tt.incomingReason != "" {
 				account.Extra["quality_protection_reason"] = tt.incomingReason
 			}
-			extra, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil, nil)
+			extra, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, service.AccountBillingSettingsUpdate{})
 			require.NoError(t, err)
 			require.Equal(t, tt.wantStatus, account.Status)
 			require.Equal(t, tt.wantSchedulable, account.Schedulable)

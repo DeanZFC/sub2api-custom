@@ -184,6 +184,7 @@ func authenticateLoadedAPIKey(c *gin.Context, apiKey *service.APIKey, apiKeyServ
 		return
 	}
 	ctx := context.WithValue(c.Request.Context(), ctxkey.UserID, apiKey.User.ID)
+	ctx = service.WithHeaderOverrideRequestScope(ctx, apiKey.User.ID, apiKey.ID, apiKey.GroupID)
 	c.Request = c.Request.WithContext(ctx)
 	billingInfoRequest := c.Request.URL.Path == "/v1/sub2api/billing"
 	// Async image task polling only reads data that already belongs to the
@@ -192,7 +193,6 @@ func authenticateLoadedAPIKey(c *gin.Context, apiKey *service.APIKey, apiKeyServ
 	skipBilling := c.Request.URL.Path == "/v1/usage" || billingInfoRequest || isAsyncImageTaskRead(c.Request.Method, c.Request.URL.Path) || (c.Request.Method == http.MethodGet && strings.HasPrefix(c.Request.URL.Path, "/api/v1/key-image-batches/"))
 
 	// ── 4. SimpleMode → early return ─────────────────────────────
-
 	if cfg.RunMode == config.RunModeSimple {
 		c.Set(string(ContextKeyAPIKey), apiKey)
 		c.Set(string(ContextKeyUser), AuthSubject{
