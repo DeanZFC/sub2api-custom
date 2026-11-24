@@ -66,7 +66,8 @@ func (h *QQBotHandler) SaveCheckinConfig(c *gin.Context) {
 	if !requireQQBotAdmin(c) {
 		return
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16384)
+	// At 0.01% precision the amount range can contain up to 10,000 bands.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 512<<10)
 	cfg := qqbot.CheckinConfig{RechargeRequirement: qqbot.RechargeRequirement{RechargeWindowDays: qqbot.DefaultRechargeWindowDays}}
 	if c.ShouldBindJSON(&cfg) != nil {
 		response.BadRequest(c, "签到配置格式不正确")

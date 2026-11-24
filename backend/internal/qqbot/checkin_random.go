@@ -2,6 +2,7 @@ package qqbot
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"math"
 	"math/big"
@@ -15,28 +16,66 @@ const (
 // CheckinRewardDistribution belongs to the administrator configuration only.
 // Never include it in user DTOs, command replies, or public activity rules.
 type CheckinRewardDistribution struct {
-	LowerHalfBPS    int `json:"lower_half_bps"`
-	NextQuarterBPS  int `json:"next_quarter_bps"`
-	UpperQuarterBPS int `json:"upper_quarter_bps"`
+	Bands []CheckinRewardBand `json:"bands"`
 }
 
-func (c CheckinConfig) rewardDistribution() CheckinRewardDistribution {
-	if c.RewardDistribution != nil {
-		return *c.RewardDistribution
+type CheckinRewardBand struct {
+	EndBPS         int `json:"end_bps"` // Upper boundary as a fraction of the min-to-max span.
+	ProbabilityBPS int `json:"probability_bps"`
+}
+
+func legacyCheckinDistribution(lower, middle, upper int) *CheckinRewardDistribution {
+	return &CheckinRewardDistribution{Bands: []CheckinRewardBand{{5000, lower}, {7500, middle}, {10000, upper}}}
+}
+
+// Read settings and requests saved with the original fixed boundaries.
+func (d *CheckinRewardDistribution) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		Bands           []CheckinRewardBand `json:"bands"`
+		LowerHalfBPS    int                 `json:"lower_half_bps"`
+		NextQuarterBPS  int                 `json:"next_quarter_bps"`
+		UpperQuarterBPS int                 `json:"upper_quarter_bps"`
 	}
-	return CheckinRewardDistribution{LowerHalfBPS: 7000, NextQuarterBPS: 2000, UpperQuarterBPS: 1000}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	if wire.Bands != nil {
+		// A cached three-field editor may echo bands alongside its edited
+		// legacy weights. Do not acknowledge an edit that would be ignored.
+		if wire.LowerHalfBPS != 0 || wire.NextQuarterBPS != 0 || wire.UpperQuarterBPS != 0 {
+			return errors.New("请刷新签到配置页面后重新设置区间概率")
+		}
+		d.Bands = wire.Bands
+	} else {
+		*d = *legacyCheckinDistribution(wire.LowerHalfBPS, wire.NextQuarterBPS, wire.UpperQuarterBPS)
+	}
+	return nil
 }
 
-func validateCheckinDistribution(d CheckinRewardDistribution) error {
-	total := 0
-	for _, weight := range []int{d.LowerHalfBPS, d.NextQuarterBPS, d.UpperQuarterBPS} {
-		if weight < 0 || weight > checkinProbabilityTotal {
+func (c CheckinConfig) rewardDistribution() *CheckinRewardDistribution {
+	if c.RewardDistribution != nil {
+		return c.RewardDistribution
+	}
+	return legacyCheckinDistribution(7000, 2000, 1000)
+}
+
+func validateCheckinDistribution(d *CheckinRewardDistribution) error {
+	end, total := 0, 0
+	for _, band := range d.Bands {
+		if band.EndBPS <= end || band.EndBPS > checkinProbabilityTotal {
+			return errors.New("签到区间终点必须递增，且不超过 100%")
+		}
+		end = band.EndBPS
+		if band.ProbabilityBPS < 0 || band.ProbabilityBPS > checkinProbabilityTotal {
 			return errors.New("签到各区间概率需在 0% 到 100% 之间，最多两位小数")
 		}
-		total += weight
+		total += band.ProbabilityBPS
+	}
+	if end != checkinProbabilityTotal {
+		return errors.New("签到区间必须完整覆盖金额跨度的 0% 到 100%")
 	}
 	if total != checkinProbabilityTotal {
-		return errors.New("签到三个区间的概率合计必须为 100%")
+		return errors.New("签到各区间的概率合计必须为 100%")
 	}
 	return nil
 }
@@ -46,24 +85,22 @@ type checkinAmountBand struct {
 	weight int
 }
 
-func checkinAmountBands(c CheckinConfig) [3]checkinAmountBand {
+func checkinAmountBands(c CheckinConfig) []checkinAmountBand {
 	lo, hi := checkinAmountBounds(c)
 	span := hi - lo
-	// Boundaries belong to the following band. Integer arithmetic avoids
-	// floating-point gaps and preserves inclusive endpoints at 1e-8 USD.
-	middle, upper := lo+(span+1)/2, lo+(3*span+3)/4
-	d := c.rewardDistribution()
-	bands := [3]checkinAmountBand{
-		{lo, middle - 1, d.LowerHalfBPS},
-		{middle, upper - 1, d.NextQuarterBPS},
-		{upper, hi, d.UpperQuarterBPS},
-	}
-	for i := range bands {
-		// With fewer than three representable amounts, an empty band maps
-		// to its nearest available amount rather than dropping its weight.
-		if bands[i].hi < bands[i].lo {
-			bands[i].hi = bands[i].lo
+	rules := c.rewardDistribution().Bands
+	bands := make([]checkinAmountBand, 0, len(rules))
+	start := lo
+	for _, rule := range rules {
+		// Round up to the first representable amount in the next band.
+		next := lo + (span*int64(rule.EndBPS)+checkinProbabilityTotal-1)/checkinProbabilityTotal
+		end := next - 1
+		if rule.EndBPS == checkinProbabilityTotal {
+			end = hi
 		}
+		// A band narrower than one amount unit can have no distinct value.
+		bands = append(bands, checkinAmountBand{start, max(start, end), rule.ProbabilityBPS})
+		start = next
 	}
 	return bands
 }

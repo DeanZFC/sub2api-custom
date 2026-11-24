@@ -34,7 +34,9 @@ func TestQQCheckinAdminReadReturnsPrivateDistribution(t *testing.T) {
 		Data qqbot.CheckinConfig `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
-	require.Equal(t, &qqbot.CheckinRewardDistribution{LowerHalfBPS: 6525, NextQuarterBPS: 2475, UpperQuarterBPS: 1000}, result.Data.RewardDistribution)
+	require.Equal(t, &qqbot.CheckinRewardDistribution{Bands: []qqbot.CheckinRewardBand{
+		{EndBPS: 5000, ProbabilityBPS: 6525}, {EndBPS: 7500, ProbabilityBPS: 2475}, {EndBPS: 10000, ProbabilityBPS: 1000},
+	}}, result.Data.RewardDistribution)
 	require.Len(t, result.Data.Growth.PeriodicTasks, 1)
 	require.True(t, result.Data.Growth.PeriodicTasks[0].LiveLotteryRecharge)
 	require.Equal(t, qqbot.CheckinSectionVersion(result.Data, "periodic_tasks"), w.Header().Get("X-QQBot-periodic_tasks-Version"))
@@ -71,6 +73,11 @@ func TestQQActivitiesRequireAdminAndValidateBeforeWrites(t *testing.T) {
 			{"PUT", "/checkin", `{"reward_distribution":{"lower_half_bps":-1,"next_quarter_bps":10000,"upper_quarter_bps":1}}`},
 			{"PUT", "/checkin", `{"reward_distribution":{"lower_half_bps":1234.5,"next_quarter_bps":4321,"upper_quarter_bps":4444.5}}`},
 			{"PUT", "/checkin", `{"reward_distribution":{}}`},
+			{"PUT", "/checkin", `{"reward_distribution":{"bands":[]}}`},
+			{"PUT", "/checkin", `{"reward_distribution":{"bands":[{"end_bps":10000,"probability_bps":10000}],"lower_half_bps":10000}}`},
+			{"PUT", "/checkin", `{"reward_distribution":{"bands":[{"end_bps":9999,"probability_bps":10000}]}}`},
+			{"PUT", "/checkin", `{"reward_distribution":{"bands":[{"end_bps":1234.5,"probability_bps":10000},{"end_bps":10000,"probability_bps":0}]}}`},
+			{"PUT", "/checkin", `{"reward_distribution":{"bands":[{"end_bps":5000,"probability_bps":10000},{"end_bps":5000,"probability_bps":0},{"end_bps":10000,"probability_bps":0}]}}`},
 			{"PUT", "/checkin", `{"growth":{"tasks":[{"id":"bad","name":"Invalid task","kind":"usage_count","target":1.5,"chances":1,"enabled":true}]}}`},
 			{"PUT", "/checkin", `{"growth":{"tasks":[{"id":"bad","name":"Invalid task","kind":"recharge_total","target":1.001,"chances":1,"enabled":true}]}}`},
 			{"PUT", "/checkin", `{"min_amount":0.1,"max_amount":0.5,"min_recharge_30d":0.001}`},

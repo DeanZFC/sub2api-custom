@@ -8,16 +8,7 @@
       <label class="flex items-center gap-2"><input v-model="form.enabled" type="checkbox" />{{ t('qqbot.enableCheckin') }}</label>
       <QQBotRewardItems :model-value="form" prefix="checkin" :allowed-types="['balance', 'coupon']" amount-field="min_amount" range amount-test-id="min-amount" max-amount-test-id="max-amount" @remove="resetDistribution">
         <template #balance-extra>
-          <fieldset class="space-y-3 rounded-lg border p-4 dark:border-dark-700" :disabled="busy">
-            <legend class="font-medium">{{ t('qqbot.checkinDistributionTitle') }}</legend>
-            <p class="text-sm text-gray-500">{{ t('qqbot.checkinDistributionHelp') }}</p>
-            <div class="grid gap-4 sm:grid-cols-3">
-              <label class="space-y-1">{{ t('qqbot.checkinLowerHalf') }}<input v-model.number="lowerHalfPercent" data-testid="lower-half-percent" type="number" min="0" max="100" step="0.01" required class="input" /></label>
-              <label class="space-y-1">{{ t('qqbot.checkinNextQuarter') }}<input v-model.number="nextQuarterPercent" data-testid="next-quarter-percent" type="number" min="0" max="100" step="0.01" required class="input" /></label>
-              <label class="space-y-1">{{ t('qqbot.checkinUpperQuarter') }}<input v-model.number="upperQuarterPercent" data-testid="upper-quarter-percent" type="number" min="0" max="100" step="0.01" required class="input" /></label>
-            </div>
-            <p class="text-sm" :class="distributionValid ? 'text-gray-500' : 'text-red-600'" data-testid="probability-total">{{ t('qqbot.checkinDistributionTotal', { total: distributionTotal }) }}</p>
-          </fieldset>
+          <QQBotCheckinDistribution v-if="form.reward_distribution" v-model="form.reward_distribution" :disabled="busy" />
         </template>
       </QQBotRewardItems>
       <div class="space-y-3 rounded-lg border p-4 dark:border-dark-700">
@@ -69,12 +60,13 @@
   </div>
 </template>
 <script setup lang="ts">
+import QQBotCheckinDistribution from './QQBotCheckinDistribution.vue'
 import QQBotRewardItems from './QQBotRewardItems.vue'
 import { useQQDraft } from './useQQDraft'
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { QQCheckinConfig, QQCheckinRewardDistribution } from '@/api/qqbot'
-import { loadCheckinConfig, saveCheckinSettings, validCheckinDistribution } from './checkinSettings'
+import type { QQCheckinConfig } from '@/api/qqbot'
+import { defaultCheckinDistribution, loadCheckinConfig, saveCheckinSettings, validCheckinDistribution } from './checkinSettings'
 import QQBotGrowthRewardFields from './QQBotGrowthRewardFields.vue'
 import { normalizeGrowthReward, validGrowthReward } from './growthReward'
 import { validCouponReward, validRewardAmount, type RewardKind } from './rewardItems'
@@ -87,27 +79,8 @@ const busy = ref(false)
 const error = ref('')
 const notice = ref('')
 function resetDistribution(kind: RewardKind) {
-  if (kind === 'balance' && form.value) form.value.reward_distribution = { lower_half_bps: 7000, next_quarter_bps: 2000, upper_quarter_bps: 1000 }
+  if (kind === 'balance' && form.value) form.value.reward_distribution = defaultCheckinDistribution()
 }
-function probabilityPercent(key: keyof QQCheckinRewardDistribution) {
-  return computed({
-    get: () => (form.value?.reward_distribution?.[key] ?? 0) / 100,
-    set: (value: number | string) => {
-      if (!form.value?.reward_distribution) return
-      const percent = typeof value === 'number' ? value : Number.NaN
-      const bps = Math.round(percent * 100)
-      form.value.reward_distribution[key] = Number.isFinite(percent) && Math.abs(percent * 100 - bps) < 1e-8 ? bps : Number.NaN
-    }
-  })
-}
-const lowerHalfPercent = probabilityPercent('lower_half_bps')
-const nextQuarterPercent = probabilityPercent('next_quarter_bps')
-const upperQuarterPercent = probabilityPercent('upper_quarter_bps')
-const distributionValid = computed(() => validCheckinDistribution(form.value?.reward_distribution))
-const distributionTotal = computed(() => {
-  const total = lowerHalfPercent.value + nextQuarterPercent.value + upperQuarterPercent.value
-  return Number.isFinite(total) ? total.toFixed(2) : '—'
-})
 function addMilestone(days: number) {
   if (!form.value || busy.value || form.value.milestones.length >= maxMilestones) return
   form.value.milestones.push({ id: 'milestone_' + crypto.randomUUID().replace(/-/g, ''), name: t('qqbot.milestones.defaultName', { days }), kind: 'checkin_total', days, reward: normalizeGrowthReward(undefined, 1), enabled: false })
@@ -115,7 +88,7 @@ function addMilestone(days: number) {
 async function save() {
   if (!form.value || busy.value) return
   error.value = ''; notice.value = ''
-  if (!distributionValid.value) { error.value = t('qqbot.invalidCheckinDistribution'); return }
+  if (!validCheckinDistribution(form.value.reward_distribution)) { error.value = t('qqbot.invalidCheckinDistribution'); return }
   if (!validRewardAmount(form.value.min_amount) || !validRewardAmount(form.value.max_amount) || form.value.min_amount > form.value.max_amount) { error.value = t('qqbot.invalidRange'); return }
   if (!validCouponReward(form.value)) { error.value = t('qqbot.rewardEditor.invalidCoupon'); return }
   if (![form.value.min_recharge_total, form.value.min_recharge_30d].every(n => Number.isFinite(n) && n >= 0 && n <= 1_000_000_000 && Number(n.toFixed(2)) === n)) { error.value = t('qqbot.invalidRechargeThreshold'); return }

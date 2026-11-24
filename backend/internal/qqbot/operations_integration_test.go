@@ -188,11 +188,11 @@ func TestActivityPreviewCannotSettleRewards(t *testing.T) {
 	require.NotEmpty(t, result.Tasks)
 	checkin, err := s.CheckinConfig(ctx)
 	require.NoError(t, err)
-	checkin.RewardDistribution = &CheckinRewardDistribution{0, 0, 10000}
+	checkin.RewardDistribution = &CheckinRewardDistribution{Bands: []CheckinRewardBand{{3000, 0}, {10000, 10000}}}
 	require.NoError(t, s.SaveCheckinConfig(ctx, checkin))
 	result, err = s.PreviewActivities(ctx, uid)
 	require.NoError(t, err)
-	require.Equal(t, 2.75, result.CheckinExpected)
+	require.Equal(t, 2.3, result.CheckinExpected)
 	for _, table := range []string{"qq_bot_rewards", "qq_bot_reward_codes", "qq_bot_lottery_chance_grants"} {
 		var n int
 		require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM `+table).Scan(&n))
@@ -207,7 +207,7 @@ func TestCheckinSectionsPreserveConcurrentDrafts(t *testing.T) {
 	first := original
 	first.MinAmount = 0.2
 	first.MaxAmount = 0.3
-	first.RewardDistribution = &CheckinRewardDistribution{1234, 4321, 4445}
+	first.RewardDistribution = &CheckinRewardDistribution{Bands: []CheckinRewardBand{{1234, 0}, {4300, 1200}, {6890, 7900}, {10000, 900}}}
 	require.NoError(t, s.SaveCheckinConfig(WithCheckinSection(WithConfigVersion(ctx, CheckinSectionVersion(original, "checkin")), "checkin"), first))
 	second := original
 	second.Growth.Tasks = []GrowthTask{}

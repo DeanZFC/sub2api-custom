@@ -105,10 +105,7 @@ func loadCheckinConfig(ctx context.Context, db queryRower, legacy float64) (Chec
 	c := CheckinConfig{Enabled: legacy > 0, MinAmount: legacy, MaxAmount: legacy,
 		RechargeRequirement: RechargeRequirement{RechargeWindowDays: DefaultRechargeWindowDays}}
 	_, err := readActivityConfig(ctx, db, checkinConfigKey, &c)
-	if c.RewardDistribution == nil {
-		distribution := c.rewardDistribution()
-		c.RewardDistribution = &distribution
-	}
+	c.RewardDistribution = c.rewardDistribution()
 	c.RechargeWindowDays = c.windowDays()
 	c.StreakDays = c.streakDays()
 	return normalizeCheckinMilestones(c), err

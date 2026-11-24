@@ -31,6 +31,19 @@ func beginGroupSmartWSAttempt(ctx context.Context, c *gin.Context) (context.Cont
 	attempt := &groupSmartWSAttempt{apiKeyID: getAPIKeyIDFromContext(c)}
 	return context.WithValue(ctx, groupSmartWSAttemptKey{}, attempt), attempt
 }
+
+func groupSmartWSDispatched(ctx context.Context) bool {
+	attempt, _ := ctx.Value(groupSmartWSAttemptKey{}).(*groupSmartWSAttempt)
+	return attempt != nil && attempt.sent.Load()
+}
+
+func groupSmartWSFailureUsage(ctx context.Context, usage *OpenAIUsage) *OpenAIUsage {
+	if groupSmartWSDispatched(ctx) && openAIUsageHasTokens(usage) {
+		return usage
+	}
+	return nil
+}
+
 func finishGroupSmartWSAttempt(attempt *groupSmartWSAttempt, err error) error {
 	if err == nil || attempt == nil || !attempt.sent.Load() {
 		return err

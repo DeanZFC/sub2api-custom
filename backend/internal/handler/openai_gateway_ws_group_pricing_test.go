@@ -55,6 +55,24 @@ func newWSGroupPricingAPIKeyRepoStub(rate float64) *wsGroupPricingAPIKeyRepoStub
 	}
 }
 
+// Install the same authentication lookup used by the upgraded connection.
+func installWSFixtureKey(t *testing.T, h *OpenAIGatewayHandler, key *service.APIKey) *service.APIKey {
+	t.Helper()
+	repo := newWSGroupPricingAPIKeyRepoStub(1)
+	if key.Group != nil {
+		repo.group = *key.Group
+	}
+	repo.group.ID = *key.GroupID
+	repo.group.Status, repo.group.Hydrated = service.StatusActive, true
+	repo.apiKey = *key
+	repo.apiKey.Key, repo.apiKey.Status = wsGroupPricingKey, service.StatusActive
+	repo.apiKey.UserID = key.User.ID
+	h.apiKeyService = newWSGroupPricingAPIKeyService(repo)
+	loaded, err := h.apiKeyService.GetByKey(context.Background(), wsGroupPricingKey)
+	require.NoError(t, err)
+	return loaded
+}
+
 func (s *wsGroupPricingAPIKeyRepoStub) GetByKeyForAuth(ctx context.Context, key string) (*service.APIKey, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -143,14 +161,16 @@ func TestOpenAIResponsesWebSocket_GroupRateChangeReachesProfitGateOnNextTurn(t *
 	})
 }
 
-func TestOpenAIResponsesWebSocket_KeyMovedToAnotherGroupKeepsConnectionGroup(t *testing.T) {
+func TestOpenAIResponsesWebSocket_KeyMovedToAnotherGroupRequiresReconnect(t *testing.T) {
 	repo := newWSGroupPricingAPIKeyRepoStub(3.0)
 	apiKeyService := newWSGroupPricingAPIKeyService(repo)
-	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:     wsGroupPricingFirst,
-		secondPayload:    wsGroupPricingSecond,
-		apiKeyService:    apiKeyService,
-		apiKeyCredential: wsGroupPricingKey,
+	runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+		firstPayload:            wsGroupPricingFirst,
+		secondPayload:           wsGroupPricingSecond,
+		apiKeyService:           apiKeyService,
+		apiKeyCredential:        wsGroupPricingKey,
+		secondTurnCloseExpected: true,
+		closeReason:             "connection policy changed",
 		afterFirstUpstreamRequest: func(*service.ChannelService) error {
 			return repo.adminUpdate(apiKeyService, func(apiKey *service.APIKey, group *service.Group) {
 				other := wsGroupPricingGroupID + 1
@@ -160,20 +180,19 @@ func TestOpenAIResponsesWebSocket_KeyMovedToAnotherGroupKeepsConnectionGroup(t *
 			})
 		},
 	})
-
-	require.Len(t, got.logs, 2)
-	require.InDelta(t, 3.0, got.logs[1].RateMultiplier, 1e-12,
-		"a key moved to another group keeps the connection's group: the connection was scheduled from it")
 }
 
-func TestOpenAIResponsesWebSocket_FailedKeyRefreshKeepsConnectionGroup(t *testing.T) {
+func TestOpenAIResponsesWebSocket_FailedKeyRefreshStopsNextTurn(t *testing.T) {
 	repo := newWSGroupPricingAPIKeyRepoStub(3.0)
 	apiKeyService := newWSGroupPricingAPIKeyService(repo)
-	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:     wsGroupPricingFirst,
-		secondPayload:    wsGroupPricingSecond,
-		apiKeyService:    apiKeyService,
-		apiKeyCredential: wsGroupPricingKey,
+	runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+		firstPayload:            wsGroupPricingFirst,
+		secondPayload:           wsGroupPricingSecond,
+		apiKeyService:           apiKeyService,
+		apiKeyCredential:        wsGroupPricingKey,
+		secondTurnCloseExpected: true,
+		closeStatus:             coderws.StatusTryAgainLater,
+		closeReason:             "temporarily unavailable",
 		afterFirstUpstreamRequest: func(*service.ChannelService) error {
 			return repo.adminUpdate(apiKeyService, func(_ *service.APIKey, group *service.Group) {
 				group.RateMultiplier = 0.3
@@ -182,9 +201,7 @@ func TestOpenAIResponsesWebSocket_FailedKeyRefreshKeepsConnectionGroup(t *testin
 		},
 	})
 
-	require.Len(t, got.logs, 2)
-	require.InDelta(t, 3.0, got.logs[1].RateMultiplier, 1e-12, "a failed refresh keeps the connection snapshot")
-	require.GreaterOrEqual(t, repo.lookupCount(), 2, "the second turn must have attempted a refresh")
+	require.GreaterOrEqual(t, repo.lookupCount(), 2)
 }
 
 type wsTurnAPIKeyLookupFunc func(ctx context.Context, key string) (*service.APIKey, error)
@@ -195,86 +212,50 @@ func (f wsTurnAPIKeyLookupFunc) GetByKey(ctx context.Context, key string) (*serv
 
 func TestRefreshOpenAIWSTurnBillingAPIKey(t *testing.T) {
 	groupID := int64(77)
-	conn := &service.APIKey{
-		ID:      5,
-		Key:     "sk-conn",
-		GroupID: &groupID,
-		User:    &service.User{ID: 9},
-		Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, SubscriptionType: service.SubscriptionTypeStandard, RateMultiplier: 3},
-	}
-	latestWith := func(mutate func(k *service.APIKey)) *service.APIKey {
-		gid := groupID
-		k := &service.APIKey{
-			ID:      5,
-			Key:     "sk-conn",
-			GroupID: &gid,
-			User:    &service.User{ID: 9, Balance: 123},
-			Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, SubscriptionType: service.SubscriptionTypeStandard, RateMultiplier: 0.3},
-		}
-		if mutate != nil {
-			mutate(k)
-		}
-		return k
-	}
-
-	t.Run("same group adopts the latest group and nothing else", func(t *testing.T) {
-		got := refreshOpenAIWSTurnBillingAPIKey(context.Background(), wsTurnAPIKeyLookupFunc(func(ctx context.Context, key string) (*service.APIKey, error) {
-			require.Equal(t, "sk-conn", key)
-			return latestWith(nil), nil
-		}), conn)
-		require.NotSame(t, conn, got)
-		require.InDelta(t, 0.3, got.Group.RateMultiplier, 1e-12)
-		require.Same(t, conn.User, got.User, "only the group snapshot is refreshed")
-		require.Equal(t, conn.ID, got.ID)
-		require.InDelta(t, 3.0, conn.Group.RateMultiplier, 1e-12, "the connection snapshot is never mutated")
-	})
-
-	keep := map[string]wsTurnAPIKeyLookupFunc{
-		"lookup error": func(ctx context.Context, key string) (*service.APIKey, error) {
-			return nil, errors.New("boom")
-		},
-		"not found": func(ctx context.Context, key string) (*service.APIKey, error) {
-			return nil, service.ErrAPIKeyNotFound
-		},
-		"nil key": func(ctx context.Context, key string) (*service.APIKey, error) { return nil, nil },
-		"different key id": func(ctx context.Context, key string) (*service.APIKey, error) {
-			return latestWith(func(k *service.APIKey) { k.ID = 6 }), nil
-		},
-		"moved group": func(ctx context.Context, key string) (*service.APIKey, error) {
-			return latestWith(func(k *service.APIKey) { other := int64(78); k.GroupID = &other; k.Group.ID = other }), nil
-		},
-		"no group": func(ctx context.Context, key string) (*service.APIKey, error) {
-			return latestWith(func(k *service.APIKey) { k.Group = nil }), nil
-		},
-		"platform changed": func(ctx context.Context, key string) (*service.APIKey, error) {
-			return latestWith(func(k *service.APIKey) { k.Group.Platform = service.PlatformAnthropic }), nil
-		},
-		"billing type changed": func(ctx context.Context, key string) (*service.APIKey, error) {
-			return latestWith(func(k *service.APIKey) { k.Group.SubscriptionType = service.SubscriptionTypeSubscription }), nil
-		},
-	}
-	for name, lookup := range keep {
-		t.Run(name+" keeps the connection snapshot", func(t *testing.T) {
-			require.Same(t, conn, refreshOpenAIWSTurnBillingAPIKey(context.Background(), lookup, conn))
+	conn := &service.APIKey{ID: 5, UserID: 9, Key: "sk-conn", GroupID: &groupID,
+		User: &service.User{ID: 9}, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, RateMultiplier: 3}}
+	latest := *conn
+	latest.User = &service.User{ID: 9, Balance: 123, Concurrency: 2}
+	group := *conn.Group
+	group.RateMultiplier = 0.3
+	latest.Group = &group
+	got, err := refreshOpenAIWSTurnBillingAPIKey(context.Background(), wsTurnAPIKeyLookupFunc(func(context.Context, string) (*service.APIKey, error) { return &latest, nil }), conn)
+	require.NoError(t, err)
+	require.Same(t, &latest, got, "permissions, user limits and pricing share one fresh snapshot")
+	require.InDelta(t, 3.0, conn.Group.RateMultiplier, 1e-12, "previous turn snapshot remains immutable")
+	for _, change := range []string{"key_id", "user_id", "user", "group", "platform", "subscription", "reasoning", "missing_credential", "lookup_error"} {
+		t.Run(change, func(t *testing.T) {
+			next := latest
+			g := *latest.Group
+			next.Group = &g
+			original := *conn
+			var lookupErr error
+			switch change {
+			case "key_id":
+				next.ID++
+			case "user_id":
+				next.UserID++
+			case "user":
+				next.User = nil
+			case "group":
+				other := groupID + 1
+				next.GroupID = &other
+			case "platform":
+				g.Platform = service.PlatformAnthropic
+			case "subscription":
+				g.SubscriptionType = service.SubscriptionTypeSubscription
+			case "reasoning":
+				g.MaxReasoningEffort = "low"
+			case "missing_credential":
+				original.Key = ""
+			case "lookup_error":
+				lookupErr = errors.New("unavailable")
+			}
+			got, err := refreshOpenAIWSTurnBillingAPIKey(context.Background(), wsTurnAPIKeyLookupFunc(func(context.Context, string) (*service.APIKey, error) { return &next, lookupErr }), &original)
+			require.Error(t, err)
+			require.Nil(t, got, "never fall back to stale authorization")
 		})
 	}
-
-	t.Run("no credential or no group skips the lookup", func(t *testing.T) {
-		called := false
-		lookup := wsTurnAPIKeyLookupFunc(func(ctx context.Context, key string) (*service.APIKey, error) {
-			called = true
-			return latestWith(nil), nil
-		})
-		noKey := *conn
-		noKey.Key = ""
-		require.Same(t, &noKey, refreshOpenAIWSTurnBillingAPIKey(context.Background(), lookup, &noKey))
-		noGroup := *conn
-		noGroup.Group = nil
-		require.Same(t, &noGroup, refreshOpenAIWSTurnBillingAPIKey(context.Background(), lookup, &noGroup))
-		require.Nil(t, refreshOpenAIWSTurnBillingAPIKey(context.Background(), lookup, nil))
-		require.Same(t, conn, refreshOpenAIWSTurnBillingAPIKey(context.Background(), nil, conn))
-		require.False(t, called)
-	})
 }
 
 func TestOpenAIWSTurnBillingAPIKeysKeepPreviousTurnUntilItIsRecorded(t *testing.T) {

@@ -70,13 +70,13 @@ func TestCheckinDistributionPersistsAndLegacySavesPreserveIt(t *testing.T) {
 	ctx := context.Background()
 	db := testDB(t)
 	s := savedBot(t, db)
-	_, err := db.Exec(`INSERT INTO settings(key,value) VALUES($1,$2)`, checkinConfigKey, `{"enabled":true,"min_amount":1,"max_amount":3}`)
+	_, err := db.Exec(`INSERT INTO settings(key,value) VALUES($1,$2)`, checkinConfigKey, `{"enabled":true,"min_amount":1,"max_amount":3,"reward_distribution":{"lower_half_bps":9000,"next_quarter_bps":800,"upper_quarter_bps":200}}`)
 	require.NoError(t, err)
 	original, err := s.CheckinConfig(ctx)
 	require.NoError(t, err)
-	require.Equal(t, &CheckinRewardDistribution{7000, 2000, 1000}, original.RewardDistribution)
+	require.Equal(t, &CheckinRewardDistribution{Bands: []CheckinRewardBand{{5000, 9000}, {7500, 800}, {10000, 200}}}, original.RewardDistribution)
 	custom := original
-	custom.RewardDistribution = &CheckinRewardDistribution{1234, 4321, 4445}
+	custom.RewardDistribution = &CheckinRewardDistribution{Bands: []CheckinRewardBand{{1234, 0}, {4300, 1200}, {6890, 7900}, {10000, 900}}}
 	require.NoError(t, s.SaveCheckinConfig(WithCheckinSection(WithConfigVersion(ctx, CheckinSectionVersion(original, "checkin")), "checkin"), custom))
 	restarted := New(db, testEncryptor{}, true, nil)
 	saved, err := restarted.CheckinConfig(ctx)
@@ -95,7 +95,7 @@ func TestCheckinDistributionPersistsAndLegacySavesPreserveIt(t *testing.T) {
 		require.Equal(t, custom.RewardDistribution, saved.RewardDistribution)
 	}
 	invalid := saved
-	invalid.RewardDistribution = &CheckinRewardDistribution{7000, 2000, 2000}
+	invalid.RewardDistribution = legacyCheckinDistribution(7000, 2000, 2000)
 	require.Error(t, s.SaveCheckinConfig(ctx, invalid))
 	var raw string
 	require.NoError(t, db.QueryRow(`SELECT value FROM settings WHERE key=$1`, checkinConfigKey).Scan(&raw))
@@ -111,14 +111,15 @@ func TestCheckinPayoutUsesConfiguredBandWithoutExposingProbabilities(t *testing.
 	bot, err := s.Config(ctx)
 	require.NoError(t, err)
 	for i, tc := range []struct {
-		distribution CheckinRewardDistribution
+		distribution *CheckinRewardDistribution
 		lo, hi       float64
 	}{
-		{CheckinRewardDistribution{10000, 0, 0}, 1, 1.99999999},
-		{CheckinRewardDistribution{0, 10000, 0}, 2, 2.49999999},
-		{CheckinRewardDistribution{0, 0, 10000}, 2.5, 3},
+		{legacyCheckinDistribution(10000, 0, 0), 1, 1.99999999},
+		{legacyCheckinDistribution(0, 10000, 0), 2, 2.49999999},
+		{legacyCheckinDistribution(0, 0, 10000), 2.5, 3},
+		{&CheckinRewardDistribution{Bands: []CheckinRewardBand{{1250, 0}, {2850, 10000}, {6000, 0}, {10000, 0}}}, 1.25, 1.56999999},
 	} {
-		cfg := CheckinConfig{Enabled: true, MinAmount: 1, MaxAmount: 3, RewardDistribution: &tc.distribution}
+		cfg := CheckinConfig{Enabled: true, MinAmount: 1, MaxAmount: 3, RewardDistribution: tc.distribution}
 		require.NoError(t, s.SaveCheckinConfig(ctx, cfg))
 		uid := user(t, db)
 		member := fmt.Sprintf("band-%d", i)

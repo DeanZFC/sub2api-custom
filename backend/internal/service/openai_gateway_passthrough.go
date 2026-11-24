@@ -1997,6 +1997,7 @@ func (s *OpenAIGatewayService) recordOpenAIStreamUpstreamError(
 	kind string,
 	payload []byte,
 	message string,
+	failedUsage ...*OpenAIUsage,
 ) string {
 	message = sanitizeUpstreamErrorMessage(strings.TrimSpace(message))
 	if message == "" {
@@ -2028,6 +2029,10 @@ func (s *OpenAIGatewayService) recordOpenAIStreamUpstreamError(
 			event.Platform = account.Platform
 			event.AccountID = account.ID
 			event.AccountName = account.Name
+		}
+		if len(failedUsage) > 0 && failedUsage[0] != nil {
+			observed := *failedUsage[0]
+			event.FailedUsage = &observed
 		}
 		appendOpsUpstreamError(c, event)
 	}
@@ -2348,12 +2353,15 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		stopKeepalive()
 		if bareErrorAccountSideEffectsPending {
 			s.handleOpenAIStreamTerminalAccountSideEffects(c, account, bareErrorPayload, failedMessage, resp.Header, mappedModel)
+			if observed := groupSmartWSFailureUsage(ctx, usage); observed != nil {
+				s.recordOpenAIStreamUpstreamError(c, account, true, upstreamRequestID, "stream_failed", bareErrorPayload, failedMessage, observed)
+			}
 			bareErrorAccountSideEffectsPending = false
 		}
 		if clientDisconnected || !writePendingLines() {
 			return
 		}
-		if _, err := fmt.Fprint(w, buildOpenAIResponseFailedSSE(responseID, originalModel, createdAtTracker.Value(), bareErrorPayload, failedMessage)); err != nil {
+		if _, err := fmt.Fprint(w, buildOpenAIResponseFailedSSE(responseID, originalModel, createdAtTracker.Value(), bareErrorPayload, failedMessage, groupSmartWSFailureUsage(ctx, usage))); err != nil {
 			clientDisconnected = true
 			return
 		}
@@ -2476,13 +2484,14 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 						UpstreamOutTok: usage.OutputTokens,
 					})
 				}
-				outputStarted := openAIStreamClientOutputStarted(c, clientOutputStarted)
-				if !outputStarted && !cyberHit {
+				failedUsage := groupSmartWSFailureUsage(ctx, usage)
+				deliverFailure := openAIStreamClientOutputStarted(c, clientOutputStarted) || failedUsage != nil || (sawBareError && groupSmartWSDispatched(ctx))
+				if !deliverFailure && !cyberHit {
 					if compactErr := newOpenAICompactFallbackSignal(c, dataBytes, failedMessage); compactErr != nil {
 						return resultWithUsage(), compactErr
 					}
 				}
-				if outputStarted && !cyberHit {
+				if deliverFailure && !cyberHit {
 					if codexFailureTerminal && eventType == "error" {
 						// Wait for the authoritative response.failed before mutating
 						// account health; EOF synthesis applies the pending effect.
@@ -2494,10 +2503,10 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 					if eventType == "response.failed" {
 						// The stream cannot be replayed after semantic output. Preserve the
 						// terminal event, while making the upstream failure queryable.
-						s.recordOpenAIStreamUpstreamError(c, account, true, upstreamRequestID, "stream_failed", dataBytes, failedMessage)
+						s.recordOpenAIStreamUpstreamError(c, account, true, upstreamRequestID, "stream_failed", dataBytes, failedMessage, failedUsage)
 					}
 				}
-				if !outputStarted {
+				if !deliverFailure {
 					if !cyberHit {
 						if retryFailure := configuredOpenAIStreamRetryFailure(ctx, dataBytes, failedMessage, usage); retryFailure != nil {
 							s.recordOpenAIStreamUpstreamError(c, account, true, upstreamRequestID, "retry", dataBytes, failedMessage)
@@ -2635,6 +2644,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		}
 	}
 	ensureResponseFailedTerminal()
+	if failureDelivered && !clientDisconnected {
+		MarkResponseCommitted(c)
+	}
 	if err := documentScanner.Err(); err != nil {
 		if (sawDone || sawTerminalEvent) && !sawFailedEvent {
 			s.clearOpenAIProxyStreamDisconnect(account)

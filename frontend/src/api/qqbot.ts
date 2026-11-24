@@ -163,10 +163,12 @@ export interface QQRankingConfig {
   rewards_enabled: boolean; effective_day: string
   token_rewards: QQRankingPrize[]; amount_rewards: QQRankingPrize[]
 }
+export interface QQCheckinRewardBand {
+  end_bps: number
+  probability_bps: number
+}
 export interface QQCheckinRewardDistribution {
-  lower_half_bps: number
-  next_quarter_bps: number
-  upper_quarter_bps: number
+  bands: QQCheckinRewardBand[]
 }
 export interface QQCheckinMilestone {
   id: string; name: string; kind: 'checkin_total' | 'checkin_streak'; days: number; repeat?: boolean; reward: QQGrowthReward; enabled: boolean

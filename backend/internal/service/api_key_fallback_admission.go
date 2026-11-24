@@ -9,6 +9,18 @@ type admittedFallbackSubscription struct {
 	subscription *UserSubscription
 }
 
+// ActiveAPIKeyFallbackSubscription returns the actual billing identity bound by account selection.
+func ActiveAPIKeyFallbackSubscription(ctx context.Context, key *APIKey) (*UserSubscription, bool) {
+	if !isAPIKeyFallbackActive(key) {
+		return nil, false
+	}
+	r := fallbackRouting(ctx)
+	if r == nil || !r.billingAdmitted || r.fallbackGroup == nil || r.fallbackGroup.ID != *key.GroupID {
+		return nil, false
+	}
+	return r.subscription, true
+}
+
 // Copy only the admitted billing identity into detached usage work; callbacks
 // and mutable routing/concurrency state never cross that boundary.
 func CopyAPIKeyFallbackSubscription(source, target context.Context) context.Context {

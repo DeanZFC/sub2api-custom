@@ -27,23 +27,28 @@ describe('check-in draft revision protection', () => {
   it('defaults older configurations and saves edited probabilities with the draft revision', async () => {
     const config = await loadCheckinConfig()
     expect(config.milestones).toEqual([])
-    expect(config.reward_distribution).toEqual({ lower_half_bps: 7000, next_quarter_bps: 2000, upper_quarter_bps: 1000 })
-    config.reward_distribution = { lower_half_bps: 1234, next_quarter_bps: 4321, upper_quarter_bps: 4445 }
+    expect(config.reward_distribution).toEqual({ bands: [{ end_bps: 5000, probability_bps: 7000 }, { end_bps: 7500, probability_bps: 2000 }, { end_bps: 10000, probability_bps: 1000 }] })
+    config.reward_distribution = { bands: [{ end_bps: 1200, probability_bps: 1234 }, { end_bps: 6789, probability_bps: 4321 }, { end_bps: 10000, probability_bps: 4445 }] }
     await saveCheckinSettings(config)
     expect(api.saveCheckin).toHaveBeenCalledWith(expect.objectContaining({ reward_distribution: config.reward_distribution, _version: 'fresh-checkin' }))
   })
   it('preserves current probabilities while saving unrelated growth tasks', async () => {
-    const reward_distribution = { lower_half_bps: 0, next_quarter_bps: 0, upper_quarter_bps: 10000 }
+    const reward_distribution = { bands: [{ end_bps: 2500, probability_bps: 0 }, { end_bps: 10000, probability_bps: 10000 }] }
     api.checkinConfig.mockResolvedValue({ ...draft(), reward_distribution })
     await saveGrowthSettings(draft())
     expect(api.saveCheckin).toHaveBeenCalledWith(expect.objectContaining({ reward_distribution }))
   })
   it('validates integer basis points, zero weights and total probability', () => {
-    expect(validCheckinDistribution({ lower_half_bps: 0, next_quarter_bps: 0, upper_quarter_bps: 10000 })).toBe(true)
-    expect(validCheckinDistribution({ lower_half_bps: 1234, next_quarter_bps: 4321, upper_quarter_bps: 4445 })).toBe(true)
-    for (const lower_half_bps of [-1, NaN, Infinity, 7000.1, 10001, 6999]) {
-      expect(validCheckinDistribution({ lower_half_bps, next_quarter_bps: 2000, upper_quarter_bps: 1000 })).toBe(false)
+    expect(validCheckinDistribution({ bands: [{ end_bps: 2500, probability_bps: 0 }, { end_bps: 10000, probability_bps: 10000 }] })).toBe(true)
+    expect(validCheckinDistribution({ bands: [{ end_bps: 1200, probability_bps: 1234 }, { end_bps: 6789, probability_bps: 4321 }, { end_bps: 10000, probability_bps: 4445 }] })).toBe(true)
+    for (const probability_bps of [-1, NaN, Infinity, 7000.1, 10001, 6999]) {
+      expect(validCheckinDistribution({ bands: [{ end_bps: 500, probability_bps }, { end_bps: 10000, probability_bps: 3000 }] })).toBe(false)
     }
+    for (const end_bps of [0, NaN, 1234.5, 10000, 10001]) {
+      expect(validCheckinDistribution({ bands: [{ end_bps, probability_bps: 5000 }, { end_bps: 10000, probability_bps: 5000 }] })).toBe(false)
+    }
+    expect(validCheckinDistribution({ bands: [] })).toBe(false)
+    expect(validCheckinDistribution({ bands: [{ end_bps: 9999, probability_bps: 10000 }] })).toBe(false)
     expect(validCheckinDistribution(undefined)).toBe(false)
   })
   it('never upgrades an unversioned draft to the freshly fetched revision', async () => {

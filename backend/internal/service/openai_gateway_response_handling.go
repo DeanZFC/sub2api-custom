@@ -392,11 +392,14 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		if codexFailureTerminal && sawBareError && !sawResponseFailed && bareErrorAccountSideEffectsPending {
 			s.handleOpenAIStreamTerminalAccountSideEffects(c, account, bareErrorPayload, failedMessage, resp.Header, mappedModel)
+			if observed := groupSmartWSFailureUsage(ctx, usage); observed != nil {
+				s.recordOpenAIStreamUpstreamError(c, account, false, upstreamRequestID, "stream_failed", bareErrorPayload, failedMessage, observed)
+			}
 			bareErrorAccountSideEffectsPending = false
 		}
 		if codexFailureTerminal && sawBareError && !sawResponseFailed && !clientDisconnected {
 			applyAttemptResponseHeaders()
-			if _, err := writePendingString(buildOpenAIResponseFailedSSE(responseID, originalModel, createdAtStamper.Value(), bareErrorPayload, failedMessage)); err != nil {
+			if _, err := writePendingString(buildOpenAIResponseFailedSSE(responseID, originalModel, createdAtStamper.Value(), bareErrorPayload, failedMessage, groupSmartWSFailureUsage(ctx, usage))); err != nil {
 				handlePendingWriteError(err)
 			} else {
 				failureDelivered = true
@@ -416,6 +419,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			)
 		}
 		flushPending("Client disconnected during final flush, returning collected usage")
+		if failureDelivered && !clientDisconnected {
+			MarkResponseCommitted(c)
+		}
 		if !sawTerminalEvent {
 			if openAIStreamClientOutputStarted(c, clientOutputStarted) && !clientDisconnected {
 				s.recordOpenAIProxyStreamDisconnect(account, errors.New("stream ended before terminal event"), upstreamRequestID)
@@ -607,15 +613,18 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 						UpstreamOutTok: usage.OutputTokens,
 					})
 				}
-				outputStarted := openAIStreamClientOutputStarted(c, clientOutputStarted)
-				if !outputStarted && !cyberHit {
+				failedUsage := groupSmartWSFailureUsage(ctx, usage)
+				// A dispatched WS bare error can still be followed by the authoritative
+				// failed terminal, even when the turn used no tokens.
+				deliverFailure := openAIStreamClientOutputStarted(c, clientOutputStarted) || failedUsage != nil || (sawBareError && groupSmartWSDispatched(ctx))
+				if !deliverFailure && !cyberHit {
 					if compactErr := newOpenAICompactFallbackSignal(c, dataBytes, failedMessage); compactErr != nil {
 						sawFailedEvent = true
 						streamEarlyErr = compactErr
 						return
 					}
 				}
-				if outputStarted && !cyberHit {
+				if deliverFailure && !cyberHit {
 					if codexFailureTerminal && eventType == "error" {
 						// OpenAI commonly follows a bare error with response.failed.
 						// Defer account health updates so the pair is applied once.
@@ -628,10 +637,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 						// Once semantic output is committed, failover replay is unsafe. Keep
 						// the terminal event on the existing stream, but retain the upstream
 						// request ID and payload for operations diagnostics.
-						s.recordOpenAIStreamUpstreamError(c, account, false, upstreamRequestID, "stream_failed", dataBytes, failedMessage)
+						s.recordOpenAIStreamUpstreamError(c, account, false, upstreamRequestID, "stream_failed", dataBytes, failedMessage, failedUsage)
 					}
 				}
-				if !outputStarted {
+				if !deliverFailure {
 					if !cyberHit {
 						if retryFailure := configuredOpenAIStreamRetryFailure(ctx, dataBytes, failedMessage, usage); retryFailure != nil {
 							s.recordOpenAIStreamUpstreamError(c, account, false, upstreamRequestID, "retry", dataBytes, failedMessage)
@@ -1016,7 +1025,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 
 		case <-intervalCh:
 			if failureDelivered {
-				return resultWithUsage(), fmt.Errorf("upstream response failed: %s", failedMessage)
+				return finalizeStream()
 			}
 			lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
 			if remaining := streamInterval - time.Since(lastRead); remaining > 0 {
@@ -2076,7 +2085,7 @@ func extractOpenAISSEErrorMessage(payload []byte) string {
 // buildOpenAIResponseFailedSSE synthesizes the response.failed terminal for a
 // stream that ended on a bare error. created_at and sequence_number are always
 // written: strict clients (grok-build, Codex) reject the frame without them.
-func buildOpenAIResponseFailedSSE(responseID, model string, createdAt int64, source []byte, fallbackMessage string) string {
+func buildOpenAIResponseFailedSSE(responseID, model string, createdAt int64, source []byte, fallbackMessage string, failedUsage ...*OpenAIUsage) string {
 	responseID = strings.TrimSpace(responseID)
 	if responseID == "" {
 		responseID = "resp_" + strings.ReplaceAll(uuid.NewString(), "-", "")
@@ -2124,6 +2133,17 @@ func buildOpenAIResponseFailedSSE(responseID, model string, createdAt int64, sou
 		"status":     "failed",
 		"output":     []any{},
 		"error":      errorBody,
+	}
+	if len(failedUsage) > 0 && failedUsage[0] != nil {
+		response["usage"] = failedUsage[0]
+		// Preserve upstream-only fields, such as reasoning tokens, on synthesis.
+		for _, path := range []string{"usage", "response.usage"} {
+			raw := gjson.GetBytes(source, path)
+			if parsed, ok := openAIUsageFromGJSON(raw); ok && openAIUsageHasTokens(&parsed) {
+				response["usage"] = json.RawMessage(raw.Raw)
+				break
+			}
+		}
 	}
 	if model = strings.TrimSpace(model); model != "" {
 		response["model"] = model

@@ -14,7 +14,8 @@ func TestCheckinConfigurableDistribution(t *testing.T) {
 	// Exhaust every probability roll and within-band outcome, without flaky
 	// statistical sampling. Each band size divides n in these ranges.
 	for _, distribution := range []*CheckinRewardDistribution{
-		nil, {1234, 4321, 4445}, {10000, 0, 0}, {0, 10000, 0}, {0, 0, 10000},
+		nil, legacyCheckinDistribution(1234, 4321, 4445), legacyCheckinDistribution(10000, 0, 0),
+		legacyCheckinDistribution(0, 10000, 0), legacyCheckinDistribution(0, 0, 10000),
 	} {
 		for _, n := range []int64{4, 8, 20} {
 			t.Run(fmt.Sprintf("%v/%d", distribution, n), func(t *testing.T) {
@@ -40,7 +41,6 @@ func TestCheckinConfigurableDistribution(t *testing.T) {
 					}
 				}
 				d := c.rewardDistribution()
-				weights := []int{d.LowerHalfBPS, d.NextQuarterBPS, d.UpperQuarterBPS}
 				sizes := []int64{n / 2, n / 4, n / 4}
 				var totalOffset int64
 				for k, count := range counts {
@@ -51,7 +51,7 @@ func TestCheckinConfigurableDistribution(t *testing.T) {
 					if int64(k) >= 3*n/4 {
 						band = 2
 					}
-					require.Equal(t, n*int64(weights[band])/sizes[band], count)
+					require.Equal(t, n*int64(d.Bands[band].ProbabilityBPS)/sizes[band], count)
 					totalOffset += int64(k) * count
 				}
 				mean := (float64(lo) + float64(totalOffset)/float64(n*10000)) / 1e8
@@ -121,6 +121,35 @@ func TestCheckinWeightedEndpointsAndNarrowRanges(t *testing.T) {
 	}
 }
 
+func TestCheckinCustomBandEndpoints(t *testing.T) {
+	c := CheckinConfig{MinAmount: .1, MaxAmount: 1.1, RewardDistribution: &CheckinRewardDistribution{
+		Bands: []CheckinRewardBand{{1234, 1000}, {4000, 0}, {8555, 2345}, {10000, 6655}},
+	}}
+	for _, tc := range []struct {
+		roll        int64
+		first, last float64
+	}{
+		{0, .1, .22339999}, {999, .1, .22339999},
+		{1000, .5, .95549999}, {3344, .5, .95549999},
+		{3345, .9555, 1.1}, {9999, .9555, 1.1},
+	} {
+		for i, want := range []float64{tc.first, tc.last} {
+			calls := 0
+			got, err := randomCheckinAmountWith(c, func(limit int64) (int64, error) {
+				calls++
+				if calls == 1 {
+					return tc.roll, nil
+				}
+				return int64(i) * (limit - 1), nil
+			})
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		}
+	}
+	wantMean := (.1+.22339999)/2*.1 + (.5+.95549999)/2*.2345 + (.9555+1.1)/2*.6655
+	require.InDelta(t, wantMean, checkinExpectedAmount(c), 1e-12)
+}
+
 func TestCheckinWeightedFixedAndInvalidRanges(t *testing.T) {
 	neverDraw := func(int64) (int64, error) {
 		t.Fatal("fixed or invalid configuration must not consume randomness")
@@ -137,9 +166,9 @@ func TestCheckinWeightedFixedAndInvalidRanges(t *testing.T) {
 		{MinAmount: -1}, {MinAmount: 2, MaxAmount: 1}, {MaxAmount: 1001},
 		{MaxAmount: .000000001}, {MaxAmount: math.NaN()}, {MaxAmount: math.Inf(1)},
 		{RewardDistribution: &CheckinRewardDistribution{}},
-		{RewardDistribution: &CheckinRewardDistribution{7000, 2000, 999}},
-		{RewardDistribution: &CheckinRewardDistribution{-1, 10000, 1}},
-		{RewardDistribution: &CheckinRewardDistribution{10001, 0, 0}},
+		{RewardDistribution: legacyCheckinDistribution(7000, 2000, 999)},
+		{RewardDistribution: legacyCheckinDistribution(-1, 10000, 1)},
+		{RewardDistribution: legacyCheckinDistribution(10001, 0, 0)},
 	} {
 		amount, err := randomCheckinAmountWith(c, neverDraw)
 		require.Error(t, err)
@@ -149,7 +178,7 @@ func TestCheckinWeightedFixedAndInvalidRanges(t *testing.T) {
 	require.Error(t, json.Unmarshal([]byte(`{"reward_distribution":{"lower_half_bps":1234.5}}`), &c))
 	c = CheckinConfig{}
 	require.NoError(t, json.Unmarshal([]byte(`{"min_amount":0.1,"max_amount":1}`), &c))
-	require.Equal(t, CheckinRewardDistribution{7000, 2000, 1000}, c.rewardDistribution())
+	require.Equal(t, legacyCheckinDistribution(7000, 2000, 1000), c.rewardDistribution())
 }
 
 func TestCheckinWeightedRandomErrors(t *testing.T) {

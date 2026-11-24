@@ -4,6 +4,7 @@ import { createI18n } from 'vue-i18n'
 import zh from '@/i18n/locales/zh'
 import en from '@/i18n/locales/en'
 import { createMemoryHistory, createRouter } from 'vue-router'
+import { defaultCheckinDistribution } from '@/components/admin/qqbot/checkinSettings'
 import QQBotCheckinSettings from '@/components/admin/qqbot/QQBotCheckinSettings.vue'
 import QQBotGrowthSettings from '@/components/admin/qqbot/QQBotGrowthSettings.vue'
 import QQBotLotterySettings from '@/components/admin/qqbot/QQBotLotterySettings.vue'
@@ -77,7 +78,7 @@ describe('QQ activity pages with real translations', () => {
     expect(w.text()).toContain(translation.global.t('qqbot.minimumRecentRecharge', { days: 7 }))
     await w.get('form').trigger('submit')
     await flushPromises()
-    expect(api.saveCheckin).toHaveBeenCalledWith({ coupon_template_id: 0, coupon_quantity: 0, enabled: true, min_amount: 0.7, max_amount: 0.9, min_recharge_total: 12, min_recharge_30d: 5.25, recharge_window_days: 7, streak_days: 7, streak_chances: 0, streak_reward: rewardConfig(), reward_distribution: { lower_half_bps: 7000, next_quarter_bps: 2000, upper_quarter_bps: 1000 }, milestones: [], growth: growthConfig() })
+    expect(api.saveCheckin).toHaveBeenCalledWith({ coupon_template_id: 0, coupon_quantity: 0, enabled: true, min_amount: 0.7, max_amount: 0.9, min_recharge_total: 12, min_recharge_30d: 5.25, recharge_window_days: 7, streak_days: 7, streak_chances: 0, streak_reward: rewardConfig(), reward_distribution: defaultCheckinDistribution(), milestones: [], growth: growthConfig() })
     expect(w.get('[role="status"]').text()).toBe(translation.global.t('common.saved'))
     w.unmount()
   })
@@ -85,31 +86,47 @@ describe('QQ activity pages with real translations', () => {
     const translation = i18n(locale)
     const w = mount(QQBotCheckinSettings, { global: { plugins: [translation] } })
     await flushPromises()
-    expect((w.get('[data-testid="lower-half-percent"]').element as HTMLInputElement).value).toBe('70')
-    expect((w.get('[data-testid="next-quarter-percent"]').element as HTMLInputElement).value).toBe('20')
-    expect((w.get('[data-testid="upper-quarter-percent"]').element as HTMLInputElement).value).toBe('10')
+    expect((w.get('[data-testid="band-probability-0"]').element as HTMLInputElement).value).toBe('70')
+    expect((w.get('[data-testid="band-probability-1"]').element as HTMLInputElement).value).toBe('20')
+    expect((w.get('[data-testid="band-probability-2"]').element as HTMLInputElement).value).toBe('10')
     expect(w.text()).toContain(translation.global.t('qqbot.checkinDistributionTitle'))
     for (const invalid of ['', '-1', '100.01', '70.001', '69']) {
-      await w.get('[data-testid="lower-half-percent"]').setValue(invalid)
+      await w.get('[data-testid="band-probability-0"]').setValue(invalid)
       await w.get('form').trigger('submit')
       expect(api.saveCheckin).not.toHaveBeenCalled()
       expect(w.get('[role="alert"]').text()).toBe(translation.global.t('qqbot.invalidCheckinDistribution'))
     }
-    await w.get('[data-testid="lower-half-percent"]').setValue('65.25')
-    await w.get('[data-testid="next-quarter-percent"]').setValue('24.75')
+    await w.get('[data-testid="band-probability-0"]').setValue('65.25')
+    await w.get('[data-testid="band-probability-1"]').setValue('24.75')
+    await w.get('[data-testid="split-band-2"]').trigger('click')
+    await w.get('[data-testid="band-end-0"]').setValue('76')
+    await w.get('form').trigger('submit')
+    expect(api.saveCheckin).not.toHaveBeenCalled()
+    await w.get('[data-testid="band-end-0"]').setValue('33.33')
     expect(w.get('[data-testid="probability-total"]').text()).toContain('100.00%')
     await w.get('form').trigger('submit'); await flushPromises()
-    expect(api.saveCheckin).toHaveBeenCalledWith(expect.objectContaining({ reward_distribution: { lower_half_bps: 6525, next_quarter_bps: 2475, upper_quarter_bps: 1000 } }))
+    expect(api.saveCheckin).toHaveBeenCalledWith(expect.objectContaining({ reward_distribution: { bands: [
+      { end_bps: 3333, probability_bps: 6525 }, { end_bps: 7500, probability_bps: 2475 },
+      { end_bps: 8750, probability_bps: 500 }, { end_bps: 10000, probability_bps: 500 }
+    ] } }))
     w.unmount()
     const reloaded = mount(QQBotCheckinSettings, { global: { plugins: [translation] } })
     await flushPromises()
-    expect((reloaded.get('[data-testid="lower-half-percent"]').element as HTMLInputElement).value).toBe('65.25')
-    expect((reloaded.get('[data-testid="next-quarter-percent"]').element as HTMLInputElement).value).toBe('24.75')
-    await reloaded.get('[data-testid="lower-half-percent"]').setValue('0')
-    await reloaded.get('[data-testid="next-quarter-percent"]').setValue('0')
-    await reloaded.get('[data-testid="upper-quarter-percent"]').setValue('100')
+    expect((reloaded.get('[data-testid="band-end-0"]').element as HTMLInputElement).value).toBe('33.33')
+    expect((reloaded.get('[data-testid="band-probability-3"]').element as HTMLInputElement).value).toBe('5')
+    await reloaded.get('[data-testid="remove-band-1"]').trigger('click')
+    expect((reloaded.get('[data-testid="band-probability-1"]').element as HTMLInputElement).value).toBe('29.75')
+    await reloaded.get('[data-testid="remove-band-2"]').trigger('click')
+    await reloaded.get('[data-testid="band-probability-0"]').setValue('0')
+    await reloaded.get('[data-testid="band-probability-1"]').setValue('100')
     await reloaded.get('form').trigger('submit'); await flushPromises()
-    expect(api.saveCheckin).toHaveBeenLastCalledWith(expect.objectContaining({ reward_distribution: { lower_half_bps: 0, next_quarter_bps: 0, upper_quarter_bps: 10000 } }))
+    expect(api.saveCheckin).toHaveBeenLastCalledWith(expect.objectContaining({ reward_distribution: { bands: [
+      { end_bps: 3333, probability_bps: 0 }, { end_bps: 10000, probability_bps: 10000 }
+    ] } }))
+    await reloaded.get('[data-testid="remove-band-0"]').trigger('click')
+    expect(reloaded.get('[data-testid="remove-band-0"]').attributes('disabled')).toBeDefined()
+    await reloaded.get('form').trigger('submit'); await flushPromises()
+    expect(api.saveCheckin).toHaveBeenLastCalledWith(expect.objectContaining({ reward_distribution: { bands: [{ end_bps: 10000, probability_bps: 10000 }] } }))
     reloaded.unmount()
   })
   it.each(['zh', 'en'] as const)('%s validates and saves growth rewards independently', async locale => {
@@ -138,7 +155,7 @@ describe('QQ activity pages with real translations', () => {
     expect(w.get('[role="alert"]').text()).toBe('Save failed')
     expect(w.find('[data-testid="streak-chances"]').exists()).toBe(false)
     await w.get('form').trigger('submit'); await flushPromises()
-    expect(api.saveCheckin).toHaveBeenLastCalledWith({ coupon_template_id: 0, coupon_quantity: 0, enabled: true, min_amount: 0.1, max_amount: 0.5, min_recharge_total: 0, min_recharge_30d: 0, recharge_window_days: 30, streak_days: 7, streak_chances: 0, streak_reward: rewardConfig(), reward_distribution: { lower_half_bps: 7000, next_quarter_bps: 2000, upper_quarter_bps: 1000 }, milestones: [], growth: growthConfig([1, 0, 1000]) })
+    expect(api.saveCheckin).toHaveBeenLastCalledWith({ coupon_template_id: 0, coupon_quantity: 0, enabled: true, min_amount: 0.1, max_amount: 0.5, min_recharge_total: 0, min_recharge_30d: 0, recharge_window_days: 30, streak_days: 7, streak_chances: 0, streak_reward: rewardConfig(), reward_distribution: defaultCheckinDistribution(), milestones: [], growth: growthConfig([1, 0, 1000]) })
     expect(w.find('[role="alert"]').exists()).toBe(false)
     expect(w.get('[role="status"]').text()).toBe(translation.global.t('common.saved'))
     w.unmount()

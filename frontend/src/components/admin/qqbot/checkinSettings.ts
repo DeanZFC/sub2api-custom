@@ -1,6 +1,18 @@
 import { qqbotAPI, type QQCheckinConfig, type QQCheckinRewardDistribution } from '@/api/qqbot'
 import { normalizeGrowthReward } from './growthReward'
 
+export function defaultCheckinDistribution(): QQCheckinRewardDistribution {
+  return { bands: [
+    { end_bps: 5000, probability_bps: 7000 },
+    { end_bps: 7500, probability_bps: 2000 },
+    { end_bps: 10000, probability_bps: 1000 }
+  ] }
+}
+
+function copyDistribution(distribution: QQCheckinRewardDistribution): QQCheckinRewardDistribution {
+  return { bands: distribution.bands.map(band => ({ ...band })) }
+}
+
 export async function loadCheckinConfig(): Promise<QQCheckinConfig> {
   const config = await qqbotAPI.checkinConfig()
   return {
@@ -8,7 +20,7 @@ export async function loadCheckinConfig(): Promise<QQCheckinConfig> {
     coupon_template_id: config.coupon_template_id ?? 0,
     coupon_quantity: config.coupon_quantity ?? 0,
     milestones: (config.milestones ?? []).map(milestone => ({ ...milestone, kind: milestone.kind || 'checkin_total', reward: normalizeGrowthReward(milestone.reward) })),
-    reward_distribution: { ...(config.reward_distribution ?? { lower_half_bps: 7000, next_quarter_bps: 2000, upper_quarter_bps: 1000 }) },
+    reward_distribution: config.reward_distribution ? copyDistribution(config.reward_distribution) : defaultCheckinDistribution(),
     recharge_window_days: config.recharge_window_days || 30,
     streak_days: config.streak_days || 7,
     streak_chances: config.streak_chances ?? 0,
@@ -45,7 +57,7 @@ export function saveCheckinSettings(config: QQCheckinConfig): Promise<QQCheckinC
     coupon_quantity: config.coupon_quantity ?? 0,
     min_amount: config.min_amount,
     max_amount: config.max_amount,
-    ...(config.reward_distribution ? { reward_distribution: { ...config.reward_distribution } } : {}),
+    ...(config.reward_distribution ? { reward_distribution: copyDistribution(config.reward_distribution) } : {}),
     min_recharge_total: config.min_recharge_total,
     min_recharge_30d: config.min_recharge_30d,
     recharge_window_days: config.recharge_window_days,
@@ -58,9 +70,15 @@ export function saveCheckinSettings(config: QQCheckinConfig): Promise<QQCheckinC
 
 export function validCheckinDistribution(distribution: QQCheckinRewardDistribution | undefined): boolean {
   if (!distribution) return false
-  const weights = [distribution.lower_half_bps, distribution.next_quarter_bps, distribution.upper_quarter_bps]
-  return weights.every(weight => Number.isInteger(weight) && weight >= 0 && weight <= 10000)
-    && weights.reduce((sum, weight) => sum + weight, 0) === 10000
+  let start = 0
+  let total = 0
+  for (const { end_bps, probability_bps } of distribution.bands) {
+    if (!Number.isInteger(end_bps) || end_bps <= start || end_bps > 10000) return false
+    if (!Number.isInteger(probability_bps) || probability_bps < 0 || probability_bps > 10000) return false
+    start = end_bps
+    total += probability_bps
+  }
+  return start === 10000 && total === 10000
 }
 
 export function saveGrowthSettings(config: QQCheckinConfig, section: 'tasks' | 'periodic_tasks' = 'tasks'): Promise<QQCheckinConfig> {
