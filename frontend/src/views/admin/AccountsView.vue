@@ -352,7 +352,7 @@
           <template #cell-recent_requests="{ row }">
             <RecentRequestsCell
               :can-configure="authStore.isAdmin"
-              :performance="performanceMetrics[row.id]"
+              :performance="performanceStates[row.id]"
               :performance-unavailable="performanceUnavailable"
               @configure="performanceAccount = row"
               :requests="recentRequestsByAccountId[String(row.id)] ?? []"
@@ -612,7 +612,7 @@ import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountPerformanceDialog from '@/components/account/AccountPerformanceDialog.vue'
-import { type AccountPerformance } from '@/types/accountPerformance'
+import type { AccountPerformanceState } from '@/types/accountPerformance'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
 import RecentRequestsCell from '@/components/account/RecentRequestsCell.vue'
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
@@ -1417,37 +1417,40 @@ const refreshRecentRequests = async () => {
   }
 }
 
-// Performance is one bounded batch per visible page, independent of account ETags.
-const performanceMetrics = ref<Record<number, AccountPerformance>>({})
+// Hourly metrics already refresh with recent requests. Poll only rule state here.
+const performanceStates = ref<Record<number, AccountPerformanceState>>({})
 const performanceUnavailable = ref(false)
 const performanceAccount = ref<Account | null>(null)
 let performanceAbort: AbortController | null = null
 let performanceRequest = 0
 const refreshPerformance = async () => {
   const ids = accounts.value.map(account => account.id)
-  if (!isColumnVisible('recent_requests') || !ids.length) return
   performanceAbort?.abort()
+  if (!isColumnVisible('recent_requests') || !ids.length) return
   const request = ++performanceRequest
   const controller = new AbortController()
   performanceAbort = controller
   try {
-    const next: Record<number, AccountPerformance> = {}
+    const next: Record<number, AccountPerformanceState> = {}
     for (let start = 0; start < ids.length; start += 100) {
-      Object.assign(next, await adminAPI.accounts.getPerformance(ids.slice(start, start + 100), controller.signal))
+      Object.assign(next, await adminAPI.accounts.getPerformanceStates(ids.slice(start, start + 100), controller.signal))
     }
     if (request !== performanceRequest || controller.signal.aborted) return
-    performanceMetrics.value = next
+    performanceStates.value = next
     performanceUnavailable.value = false
   } catch {
     if (request === performanceRequest && !controller.signal.aborted) {
-      performanceMetrics.value = {}
+      performanceStates.value = {}
       performanceUnavailable.value = true
     }
+  } finally {
+    if (performanceAbort === controller) performanceAbort = null
   }
 }
-watch(() => accounts.value.map(account => account.id).join(','), () => { void refreshPerformance() })
-watch(() => isColumnVisible('recent_requests'), visible => { if (visible) void refreshPerformance() })
-useIntervalFn(() => { void refreshPerformance() }, 30_000)
+watch([() => accounts.value.map(account => account.id).join(','), () => isColumnVisible('recent_requests')], refreshPerformance)
+useIntervalFn(() => {
+  if (!document.hidden && !performanceAbort && !performanceAccount.value) void refreshPerformance()
+}, 30_000)
 
 type AccountLoadOptions = {
   refreshTodayStats?: boolean
@@ -1718,6 +1721,7 @@ watch(accounts, (rows) => {
 
 const isAnyModalOpen = computed(() => {
   return (
+    performanceAccount.value !== null ||
     showCreate.value ||
     showEdit.value ||
     showSync.value ||

@@ -61,6 +61,47 @@ func strictContext(g *Group) context.Context {
 }
 func strictNoExtraGate(*Account) (string, error) { return "", nil }
 
+type strictPerformanceRepo struct {
+	*strictAccountRepo
+	routing map[int64]PerformanceRoutingState
+	loads   [][]int64
+	readErr error
+}
+
+func (r *strictPerformanceRepo) PerformanceRoutingStates(_ context.Context, ids []int64) (map[int64]PerformanceRoutingState, error) {
+	r.loads = append(r.loads, ids)
+	return r.routing, r.readErr
+}
+
+func TestStrictFailoverPerformanceRouting(t *testing.T) {
+	g, accounts := strictFixture()
+	due := time.Now().Add(-time.Minute)
+	r := &strictPerformanceRepo{strictAccountRepo: accounts, routing: map[int64]PerformanceRoutingState{
+		1: {Blocked: true}, 2: {Blocked: true}, 3: {TrialDueAt: &due}, 4: {TrialDueAt: &due},
+	}}
+	// A request can lose a trial race at final admission. Its confirmed pause
+	// allows traversal even though it never sent an upstream request to this ID.
+	selected, err := prepareStrictFailover(strictContext(g), g, r, map[int64]struct{}{1: {}}, "gpt-5.1", strictNoExtraGate)
+	require.NoError(t, err)
+	state := strictFailoverStateFrom(selected)
+	require.Equal(t, 2, state.tier)
+	require.Len(t, state.accounts, 1)
+	require.Equal(t, &due, state.accounts[0].PerformanceTrialDueAt)
+	require.Equal(t, [][]int64{{1, 2, 3}}, r.loads)
+
+	r.routing[3] = PerformanceRoutingState{Blocked: true}
+	r.loads = nil
+	selected, err = prepareStrictFailover(strictContext(g), g, r, nil, "gpt-5.1", strictNoExtraGate)
+	require.NoError(t, err)
+	require.Equal(t, 3, strictFailoverStateFrom(selected).tier)
+	require.Equal(t, &due, strictFailoverStateFrom(selected).accounts[0].PerformanceTrialDueAt)
+	require.Equal(t, [][]int64{{1, 2, 3}, {4}}, r.loads)
+
+	r.readErr = errors.New("db unavailable")
+	_, err = prepareStrictFailover(strictContext(g), g, r, nil, "gpt-5.1", strictNoExtraGate)
+	require.ErrorIs(t, err, ErrStrictFailoverUnconfirmed)
+}
+
 func TestStrictFailoverTierState(t *testing.T) {
 	tests := []struct {
 		name      string

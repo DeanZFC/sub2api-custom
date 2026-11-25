@@ -6,12 +6,31 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAccountPerformanceStatusOnlySkipsMetricsQuery(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	trial := time.Now().UTC()
+	rows := sqlmock.NewRows([]string{"id", "config", "revision", "paused", "generation", "paused_at", "reason", "trial_started_at", "trial_requests", "metrics_since"}).
+		AddRow(7, `{"enabled":true,"recovery_samples":4}`, 1, true, 1, trial.Add(-time.Minute), "ttft", trial, 2, trial)
+	mock.ExpectQuery("SELECT a.id,COALESCE").WillReturnRows(rows)
+	repo := &accountPerformanceRepository{db: db}
+	result, err := repo.Read(context.Background(), []int64{7}, trial.Add(time.Minute), false)
+	require.NoError(t, err)
+	status := result[7]
+	require.Equal(t, service.PerformanceTrial, status.Phase)
+	require.EqualValues(t, 12, status.TrialLimit)
+	require.EqualValues(t, 2, status.TrialRequests)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
 
 func TestAccountPerformanceReleaseRequiresExactOwnershipAndDisablesEvaluation(t *testing.T) {
 	for _, n := range []int64{0, 1} {

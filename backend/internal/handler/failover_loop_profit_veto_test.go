@@ -47,7 +47,7 @@ func runProfitVetoLoop(t *testing.T, fs *FailoverState, pool []int64, vetoed map
 			}
 		}
 		if vetoed[picked] {
-			if fs.RecordProfitVeto(picked) == FailoverExhausted {
+			if fs.RecordAdmissionVeto(picked) == FailoverExhausted {
 				res.outcome = "exhausted"
 				return res
 			}
@@ -113,17 +113,17 @@ func TestProfitVetoAttemptsCapped(t *testing.T) {
 	res := runProfitVetoLoop(t, fs, pool, vetoed, 200)
 
 	require.Equal(t, "exhausted", res.outcome)
-	require.Equal(t, maxProfitVetoAttempts, fs.ProfitVetoCount())
-	require.Equal(t, maxProfitVetoAttempts, res.iterations, "达到上限即终止，不应继续遍历候选池")
+	require.Equal(t, maxAdmissionVetoAttempts, fs.AdmissionVetoCount())
+	require.Equal(t, maxAdmissionVetoAttempts, res.iterations, "达到上限即终止，不应继续遍历候选池")
 }
 
-// TestRecordProfitVetoExcludesAccount 钉死 RecordProfitVeto 仍然把账号加入
+// TestRecordAdmissionVetoExcludesAccount 钉死 RecordAdmissionVeto 仍然把账号加入
 // 调度排除列表（选号入参用的就是 FailedAccountIDs）。
-func TestRecordProfitVetoExcludesAccount(t *testing.T) {
+func TestRecordAdmissionVetoExcludesAccount(t *testing.T) {
 	fs := NewFailoverState(10, false)
-	require.Equal(t, FailoverContinue, fs.RecordProfitVeto(42))
+	require.Equal(t, FailoverContinue, fs.RecordAdmissionVeto(42))
 	require.Contains(t, fs.FailedAccountIDs, int64(42))
-	require.Equal(t, 1, fs.ProfitVetoCount())
+	require.Equal(t, 1, fs.AdmissionVetoCount())
 }
 
 // TestHandleSelectionExhaustedUnaffectedWithoutProfitVeto 钉死未启用利润控制的

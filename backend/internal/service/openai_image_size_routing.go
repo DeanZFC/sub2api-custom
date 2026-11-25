@@ -222,7 +222,7 @@ func (s *OpenAIGatewayService) bindOpenAIImageSizeSpilloverAccount(ctx context.C
 	if strings.TrimSpace(sessionHash) == "" || selection == nil || selection.Account == nil || selection.Account.ID <= 0 {
 		return
 	}
-	if selection.ProfitGateActive() || preserveOpenAIGuardianParentBinding(ctx, sessionHash) {
+	if selection.Account.PerformanceTrialDueAt != nil || selection.ProfitGateActive() || preserveOpenAIGuardianParentBinding(ctx, sessionHash) {
 		return
 	}
 	if initialAccountID > 0 {

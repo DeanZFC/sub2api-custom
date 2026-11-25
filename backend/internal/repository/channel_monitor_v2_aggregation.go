@@ -266,6 +266,13 @@ WHEN ` + column + ` <= 300000 THEN 300000 WHEN ` + column + ` <= 600000 THEN 600
 ELSE 2147483647 END`
 }
 
+// Session blocks are audited before account selection. Exclude them before
+// deduplication so they cannot mask another request outcome with the same ID.
+func channelMonitorV2FailureSQL(alias string) string {
+	return fmt.Sprintf(`(%[1]s.error_type IS DISTINCT FROM 'cyber_policy_session_blocked'
+      AND (COALESCE(%[1]s.status_code, 0) >= 400 OR %[1]s.error_type = 'cyber_policy'))`, alias)
+}
+
 // Error dedup lookback: request_id branch is bounded by chunk start minus 90
 // minutes so candidate_ids never forces a full-history scan of ops_error_logs.
 var channelMonitorV2ErrorAggregationSQL = `
@@ -307,7 +314,7 @@ WITH dedup AS (
       )
     )
     AND NOT current_error.is_count_tokens
-    AND (COALESCE(current_error.status_code, 0) >= 400 OR current_error.error_type = 'cyber_policy')
+    AND ` + channelMonitorV2FailureSQL("current_error") + `
   ORDER BY COALESCE(NULLIF(current_error.request_id, ''), 'error:' || current_error.id::text), current_error.created_at DESC, current_error.id DESC
 ), classified AS (
   SELECT *, CASE

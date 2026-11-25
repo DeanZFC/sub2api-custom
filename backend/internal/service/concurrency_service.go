@@ -250,7 +250,6 @@ const (
 type ConcurrencyService struct {
 	cache                ConcurrencyCache
 	accountAdmissionGate AccountAdmissionGate
-	performancePauses    PerformancePauseReader
 
 	accountLoadCacheTTL atomic.Int64
 	accountLoadCacheMu  sync.RWMutex
@@ -385,33 +384,9 @@ type UserLoadInfo struct {
 	LoadRate           int // 0-100+ (percent)
 }
 
-// AcquireAccountSlot attempts to acquire a concurrency slot for an account.
-// If the account is at max concurrency, it waits until a slot is available or timeout.
-// Returns a release function that MUST be called when the request completes.
-func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, proxyIDs ...int64) (result *AcquireResult, resultErr error) {
-	// Recheck the independent live authority even for stale/sticky candidates.
-	if admission, ok := s.performancePauses.(PerformanceAdmission); ok {
-		allowed, cancel, err := admission.AcquirePerformanceTrial(ctx, accountID)
-		if err != nil {
-			return nil, err
-		}
-		if !allowed {
-			return &AcquireResult{Acquired: false}, nil
-		}
-		defer func() {
-			if cancel != nil && (resultErr != nil || result == nil || !result.Acquired) {
-				cancel()
-			}
-		}()
-	} else if s.performancePauses != nil {
-		paused, err := s.performancePauses.PerformancePaused(ctx, []int64{accountID})
-		if err != nil {
-			return nil, err
-		}
-		if paused[accountID] {
-			return &AcquireResult{Acquired: false}, nil
-		}
-	}
+// AcquireAccountSlot reserves capacity while the scheduler still has candidates
+// to check. A trial request is counted only when the gateway admits it for forwarding.
+func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, proxyIDs ...int64) (*AcquireResult, error) {
 	if len(proxyIDs) > 1 {
 		return s.acquireAccountProxyPoolSlot(ctx, accountID, maxConcurrency, proxyIDs)
 	}

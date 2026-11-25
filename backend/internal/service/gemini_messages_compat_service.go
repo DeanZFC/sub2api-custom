@@ -184,7 +184,7 @@ func (s *GeminiMessagesCompatService) SelectAccountForModelWithExclusions(ctx co
 
 	// 5. 设置粘性会话绑定
 	// Set sticky session binding
-	if sessionHash != "" {
+	if sessionHash != "" && selected.PerformanceTrialDueAt == nil {
 		_ = s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), cacheKey, selected.ID, geminiStickySessionTTL)
 	}
 
@@ -372,13 +372,7 @@ func (s *GeminiMessagesCompatService) selectBestGeminiAccount(
 			continue
 		}
 
-		// 选择最佳账号
-		if selected == nil {
-			selected = acc
-			continue
-		}
-
-		if s.isBetterGeminiAccount(acc, selected) {
+		if selected == nil || preferAccountByPriorityAndLastUsed(acc, selected, true) {
 			selected = acc
 		}
 	}
@@ -401,37 +395,6 @@ func (s *GeminiMessagesCompatService) buildPreCheckUsageResultMap(ctx context.Co
 		logger.LegacyPrintf("service.gemini_messages_compat", "[Gemini PreCheckBatch] failed: %v", err)
 	}
 	return result
-}
-
-// isBetterGeminiAccount 判断 candidate 是否比 current 更优。
-// 规则：优先级更高（数值更小）优先；同优先级时，未使用过的优先（OAuth > 非 OAuth），其次是最久未使用的。
-//
-// isBetterGeminiAccount checks if candidate is better than current.
-// Rules: higher priority (lower value) wins; same priority: never used (OAuth > non-OAuth) > least recently used.
-func (s *GeminiMessagesCompatService) isBetterGeminiAccount(candidate, current *Account) bool {
-	// 优先级更高（数值更小）
-	if candidate.Priority < current.Priority {
-		return true
-	}
-	if candidate.Priority > current.Priority {
-		return false
-	}
-
-	// 同优先级，比较最后使用时间
-	switch {
-	case candidate.LastUsedAt == nil && current.LastUsedAt != nil:
-		// candidate 从未使用，优先
-		return true
-	case candidate.LastUsedAt != nil && current.LastUsedAt == nil:
-		// current 从未使用，保持
-		return false
-	case candidate.LastUsedAt == nil && current.LastUsedAt == nil:
-		// 都未使用，优先选择 OAuth 账号（更兼容 Code Assist 流程）
-		return candidate.Type == AccountTypeOAuth && current.Type != AccountTypeOAuth
-	default:
-		// 都使用过，选择最久未使用的
-		return candidate.LastUsedAt.Before(*current.LastUsedAt)
-	}
 }
 
 // isModelSupportedByAccount 根据账户平台检查模型支持
@@ -489,13 +452,20 @@ func (s *GeminiMessagesCompatService) listSchedulableAccountsOnce(ctx context.Co
 		queryPlatforms = []string{platform, PlatformAntigravity}
 	}
 
-	if groupID != nil {
-		return s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, queryPlatforms)
+	var accounts []Account
+	var err error
+	switch {
+	case groupID != nil:
+		accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, queryPlatforms)
+	case s.cfg != nil && s.cfg.RunMode == config.RunModeSimple:
+		accounts, err = s.accountRepo.ListSchedulableByPlatforms(ctx, queryPlatforms)
+	default:
+		accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, queryPlatforms)
 	}
-	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
-		return s.accountRepo.ListSchedulableByPlatforms(ctx, queryPlatforms)
+	if err != nil {
+		return nil, err
 	}
-	return s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, queryPlatforms)
+	return filterPerformanceCandidates(ctx, s.accountRepo, accounts)
 }
 
 func (s *GeminiMessagesCompatService) validateUpstreamBaseURL(raw string) (string, error) {

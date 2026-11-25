@@ -2,11 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import type { OpsAccountRequestStats, OpsRequestDetail } from '@/api/admin/ops'
+import { emptyPerformanceConfig } from '@/types/accountPerformance'
 import RecentRequestsCell from '../RecentRequestsCell.vue'
 
 vi.mock('vue-i18n', async () => ({
   ...await vi.importActual<typeof import('vue-i18n')>('vue-i18n'),
-  useI18n: () => ({ t: (key: string) => key }),
+  useI18n: () => ({ t: (key: string, values?: { used: number; limit: number }) =>
+    key === 'accountPerformance.trialAdmissions' ? `${values?.used}/${values?.limit}` : key }),
 }))
 
 const success: OpsRequestDetail = {
@@ -43,6 +45,16 @@ afterEach(() => {
 })
 
 describe('RecentRequestsCell', () => {
+  it('displays trial admissions alongside the independent hourly metrics', async () => {
+    await wrapper.setProps({ performance: {
+      phase: 'trial', account_id: 7, config: emptyPerformanceConfig(), monitoring_available: true,
+      revision: 1, paused: true, pause_generation: 1, paused_at: null, trial_started_at: null,
+      trial_requests: 2, trial_limit: 9, metrics_since: null, reason: 'ttft',
+    } })
+    expect(wrapper.get('[data-testid="metric-rule-status"]').text()).toContain('2/9')
+    expect(wrapper.get('[data-testid="recent-requests-success-rate"]').text()).toBe('90.0%')
+  })
+
   it('shows hourly aggregate metrics above the timeline while keeping the latest request time', () => {
     expect(wrapper.get('[data-testid="recent-requests-cache-rate"]').text()).toBe('80.0%')
     expect(wrapper.get('[data-testid="recent-requests-first-token"]').text()).toBe('3.06s')

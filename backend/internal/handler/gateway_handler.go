@@ -468,16 +468,16 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 终检与准入后绑定使用选号结果携带的门（见 responses 同名注释）。
 			admissionCtx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
-			latest, vetoed, reason := h.gatewayService.GatewayProfitControlVetoLatest(admissionCtx, account)
+			latest, vetoed, reason := h.gatewayService.AdmitAccountForForward(admissionCtx, account)
 			if vetoed {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
-				reqLog.Debug("gateway.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
-				if fs.RecordProfitVeto(account.ID, c.Request.Context()) == FailoverExhausted {
-					reqLog.Warn("gateway.profit_veto_attempts_exhausted", zap.Int("profit_veto_count", fs.ProfitVetoCount()))
+				reqLog.Debug("gateway.account_admission_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+				if fs.RecordAdmissionVeto(account.ID, c.Request.Context()) == FailoverExhausted {
+					reqLog.Warn("gateway.admission_veto_attempts_exhausted", zap.Int("admission_veto_count", fs.AdmissionVetoCount()))
 					markOpsRoutingCapacityLimited(c)
-					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", profitVetoExhaustedMessage, streamStarted)
+					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", admissionVetoExhaustedMessage, streamStarted)
 					return
 				}
 				continue
@@ -486,7 +486,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			selection.Account = latest
 			// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已
 			// 抢槽的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
-			if selection.ProfitGateActive() || !selection.Acquired {
+			if !selection.PreserveStickyBinding && (selection.ProfitGateActive() || !selection.Acquired) {
 				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
@@ -815,16 +815,16 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 终检与准入后绑定使用选号结果携带的门（见 responses 同名注释）。
 			admissionCtx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
-			latest, vetoed, reason := h.gatewayService.GatewayProfitControlVetoLatest(admissionCtx, account)
+			latest, vetoed, reason := h.gatewayService.AdmitAccountForForward(admissionCtx, account)
 			if vetoed {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
-				reqLog.Debug("gateway.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
-				if fs.RecordProfitVeto(account.ID, c.Request.Context()) == FailoverExhausted {
-					reqLog.Warn("gateway.profit_veto_attempts_exhausted", zap.Int("profit_veto_count", fs.ProfitVetoCount()))
+				reqLog.Debug("gateway.account_admission_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+				if fs.RecordAdmissionVeto(account.ID, c.Request.Context()) == FailoverExhausted {
+					reqLog.Warn("gateway.admission_veto_attempts_exhausted", zap.Int("admission_veto_count", fs.AdmissionVetoCount()))
 					markOpsRoutingCapacityLimited(c)
-					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", profitVetoExhaustedMessage, streamStarted)
+					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", admissionVetoExhaustedMessage, streamStarted)
 					return
 				}
 				// 尝试被否决（从未转发），立即释放该账号的会话注册
@@ -838,7 +838,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			sessionSlotAccounts[account.ID] = account
 			// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已
 			// 抢槽的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
-			if selection.ProfitGateActive() || !selection.Acquired {
+			if !selection.PreserveStickyBinding && (selection.ProfitGateActive() || !selection.Acquired) {
 				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
@@ -1138,7 +1138,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// - 选中账号与粘性账号一致：刷新 TTL
 			// - 粘性账号因负载/RPM 被跳过、选中了其他账号：不覆盖原绑定，
 			//   下次请求粘性账号恢复后仍可命中
-			if sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
+			if !selection.PreserveStickyBinding && sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
 				// Forward has completed; finish the bounded write even if the client disconnects.
 				bindCtx, cancelBind := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 5*time.Second)
 				bindErr := h.gatewayService.BindStickySession(bindCtx, currentAPIKey.GroupID, sessionKey, account.ID)
@@ -2268,7 +2268,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
 
 	// 选择支持该模型的账号
-	account, err := h.gatewayService.SelectAccountForModel(c.Request.Context(), apiKey.GroupID, sessionHash, parsedReq.Model)
+	account, err := h.gatewayService.SelectAccountForTokenCount(c.Request.Context(), apiKey.GroupID, sessionHash, parsedReq.Model)
 	if err != nil {
 		if handleAPIKeyFallbackAdmissionError(c, err, c.Writer.Written()) {
 			return

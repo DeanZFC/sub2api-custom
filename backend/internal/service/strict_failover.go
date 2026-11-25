@@ -252,6 +252,10 @@ func prepareStrictFailover(ctx context.Context, group *Group, repo AccountReposi
 			byID[a.ID] = a
 		}
 	}
+	routing, err := performanceRoutingStates(ctx, repo, ids)
+	if err != nil {
+		return ctx, fmt.Errorf("%w: performance routing: %v", ErrStrictFailoverUnconfirmed, err)
+	}
 	evidence := map[int64]string{}
 	for i := 0; i <= len(group.StrictFailover.Tiers); i++ {
 		var tier []int64
@@ -273,6 +277,10 @@ func prepareStrictFailover(ctx context.Context, group *Group, repo AccountReposi
 				byID[a.ID] = a
 				tier = append(tier, a.ID)
 			}
+			routing, err = performanceRoutingStates(ctx, repo, tier)
+			if err != nil {
+				return ctx, fmt.Errorf("%w: performance routing: %v", ErrStrictFailoverUnconfirmed, err)
+			}
 		}
 		if err := ctx.Err(); err != nil {
 			return ctx, err
@@ -281,12 +289,21 @@ func prepareStrictFailover(ctx context.Context, group *Group, repo AccountReposi
 		uncertain := false
 		for _, id := range tier {
 			a := byID[id]
+			if state, ok := routing[id]; ok && a != nil {
+				copy := *a
+				copy.PerformancePaused = state.Blocked
+				copy.PerformanceTrialDueAt = state.TrialDueAt
+				a = &copy
+			}
 			reason := ""
 			// An exclusion caused by a local failure remains unknown even if its
 			// legacy side effects wrote a cooldown. Only explicit evidence can
 			// exhaust that account for this request.
 			if _, wasExcluded := excluded[id]; wasExcluded {
 				reason = strictFailureReason(ctx, id)
+				if reason == "" && a != nil && a.PerformancePaused {
+					reason = "performance_paused"
+				}
 				// A terminal profit veto is also a deterministic request-local
 				// exclusion. Re-evaluate fresh DB data instead of treating it as
 				// unknown upstream health or persisting a health restriction.
@@ -343,6 +360,8 @@ func strictAccountUnavailableReason(ctx context.Context, a *Account, model strin
 		return "account_inactive"
 	case !a.Schedulable:
 		return "scheduling_disabled"
+	case a.PerformancePaused:
+		return "performance_paused"
 	case a.AutoPauseOnExpired && a.ExpiresAt != nil && !now.Before(*a.ExpiresAt):
 		return "account_expired"
 	case a.OverloadUntil != nil && now.Before(*a.OverloadUntil):

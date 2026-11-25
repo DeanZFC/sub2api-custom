@@ -353,6 +353,23 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 	}
 	job.Status = BatchImageJobStatusUploading
 
+	// The job now owns a pricing snapshot and balance hold for this credential.
+	// Only the first upstream submission consumes a trial request.
+	allowed, admissionErr := admitPerformanceRequest(ctx, s.AccountRepo, account.ID)
+	if admissionErr != nil || !allowed {
+		if releaseErr := s.releaseFailedSubmitHold(ctx, job, requestHash); releaseErr != nil {
+			return nil, releaseErr
+		}
+		reason := "PERFORMANCE_PAUSED"
+		if admissionErr != nil {
+			reason = "PERFORMANCE_STATE_UNAVAILABLE"
+			logger.L().Warn("batch_image.performance_admission_failed", zap.Int64("account_id", account.ID), zap.Error(admissionErr))
+		}
+		_ = s.Repo.RecordBatchImageJobSubmitFailure(ctx, job.BatchID, reason, "account unavailable for submission", true)
+		s.hidePreUpstreamSubmitFailure(ctx, owner, job)
+		return nil, ErrBatchImageNoAccountAvailable
+	}
+
 	hbCtx, hbCancel := context.WithCancel(ctx)
 	hbDone := make(chan struct{})
 	go s.runSubmitHeartbeat(hbCtx, job.BatchID, hbDone)
@@ -1024,14 +1041,16 @@ func (s *BatchImagePublicService) selectProviderAndAccountInGroup(ctx context.Co
 		accounts, strict := strictFailoverAccounts(selectionCtx, groupID)
 		if !strict {
 			accounts, err = s.listCandidateAccounts(selectionCtx, groupID, batchImageProviderPlatform(providerName))
+			if err == nil {
+				accounts, err = filterPerformanceCandidates(selectionCtx, s.AccountRepo, accounts)
+			}
 		}
 		if err != nil {
 			return nil, nil, err
 		}
-		// 与普通账号调度一致：priority 数值越小越优先，同优先级按 ID 排序。
 		sort.SliceStable(accounts, func(i, j int) bool {
-			if accounts[i].Priority != accounts[j].Priority {
-				return accounts[i].Priority < accounts[j].Priority
+			if order := compareSchedulingPriority(&accounts[i], &accounts[j]); order != 0 {
+				return order < 0
 			}
 			return accounts[i].ID < accounts[j].ID
 		})

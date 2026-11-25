@@ -69,7 +69,7 @@ func TestAccountPerformancePostgresSoftDeleteWinsAgainstMutations(t *testing.T) 
 			var count int
 			require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM account_performance_events WHERE account_id=$1`, id).Scan(&count))
 			require.Zero(t, count, "deleted accounts must not receive new monitor audit events")
-			metrics, err := repo.Read(ctx, []int64{id}, time.Now())
+			metrics, err := repo.Read(ctx, []int64{id}, time.Now(), true)
 			require.NoError(t, err)
 			require.Empty(t, metrics, "batch reads must not expose soft-deleted accounts")
 		})

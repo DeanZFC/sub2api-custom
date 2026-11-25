@@ -120,7 +120,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 	}
 	defer inflightDone()
 
-	profitVetoCount := 0
+	admissionVetoCount := 0
 	failedAccountIDs := make(map[int64]struct{})
 	var lastFailoverErr *service.UpstreamFailoverError
 	switchCount := 0
@@ -187,10 +187,10 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		accountReleaseFunc, slotResult := h.acquireResponsesAccountSlot(c, apiKey.GroupID, "", selection, false, &streamStarted, reqLog)
-		if slotResult == openAISlotAcquireProfitVetoed {
-			// 利润终检否决：排除该账号重新选号；否决次数达上限则按无可用账号终止。
-			if !recordOpenAIProfitVeto(failedAccountIDs, account.ID, &profitVetoCount, c.Request.Context()) {
-				h.handleOpenAIProfitVetoExhausted(c, streamStarted, reqLog, profitVetoCount)
+		if slotResult == openAISlotAcquireVetoed {
+			// 转发准入否决：排除该账号重新选号；否决次数达上限则按无可用账号终止。
+			if !recordOpenAIAdmissionVeto(failedAccountIDs, account.ID, &admissionVetoCount, c.Request.Context()) {
+				h.handleOpenAIAdmissionVetoExhausted(c, streamStarted, reqLog, admissionVetoCount)
 				return
 			}
 			continue

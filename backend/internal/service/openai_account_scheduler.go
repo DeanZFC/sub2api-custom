@@ -1378,11 +1378,12 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			return nil, compactBlocked, routeErr
 		}
 		fresh = routed
-		if req.SessionHash != "" && !req.PreserveStickyBinding {
+		preserveBinding := req.PreserveStickyBinding || fresh.PerformanceTrialDueAt != nil
+		if req.SessionHash != "" && !preserveBinding {
 			_ = s.service.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, fresh.ID)
 		}
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
-			PreserveStickyBinding: req.PreserveStickyBinding,
+			PreserveStickyBinding: preserveBinding,
 			Account:               fresh,
 			Acquired:              true,
 			ReleaseFunc:           result.ReleaseFunc,
@@ -1658,6 +1659,30 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 
 // Attempt live admission and current account checks before returning a wait plan.
 func (s *defaultOpenAIAccountScheduler) selectByLoadBalanceCandidates(ctx context.Context, req OpenAIAccountScheduleRequest, filtered []*Account, loadMap map[int64]*AccountLoadInfo, budget *openAISelectionProbeBudget, filterStats openAISelectionFilterStats) (*AccountSelectionResult, int, int, float64, error) {
+	// Strong affinity and request eligibility have already been resolved. Give
+	// the oldest due trial a chance before regular ranking truncates to Top-K.
+	var due []openAIAccountCandidateScore
+	for _, account := range filtered {
+		if account.PerformanceTrialDueAt == nil {
+			continue
+		}
+		if req.RequireCompact && openAICompactSupportTierForRequest(account, req.RequestedModel) == 0 {
+			continue
+		}
+		if load := loadMap[account.ID]; load != nil && account.Concurrency > 0 && load.CurrentConcurrency >= account.TotalConcurrency() {
+			continue
+		}
+		due = append(due, openAIAccountCandidateScore{account: account})
+	}
+	if len(due) > 0 {
+		sort.Slice(due, func(i, j int) bool { return comparePerformanceTrialDue(due[i].account, due[j].account) < 0 })
+		trialRequest := req
+		trialRequest.PreserveStickyBinding = true
+		result, _, err := s.tryAcquireOpenAISelectionOrder(ctx, trialRequest, due)
+		if err != nil || result != nil {
+			return result, len(filtered), 1, 0, err
+		}
+	}
 	if req.SubscriptionPriority {
 		subscriptionAccounts, regularAccounts := partitionOpenAIChatGPTSubscriptionAccounts(filtered)
 		if len(subscriptionAccounts) > 0 {
@@ -1887,7 +1912,7 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 				continue
 			}
 			return attachSelectionProfitGate(ctx, &AccountSelectionResult{
-				PreserveStickyBinding: req.PreserveStickyBinding,
+				PreserveStickyBinding: req.PreserveStickyBinding || fresh.PerformanceTrialDueAt != nil,
 				Account:               fresh,
 				WaitPlan: &AccountWaitPlan{
 					AccountID:      fresh.ID,

@@ -57,19 +57,19 @@ func TestStrictFailoverProfitVetoTraversesWholePool(t *testing.T) {
 	failed := make(map[int64]struct{})
 	count := 0
 	for id := int64(1); id <= 20; id++ {
-		require.Equal(t, FailoverContinue, state.RecordProfitVeto(id, ctx))
-		require.True(t, recordOpenAIProfitVeto(failed, id, &count, ctx))
+		require.Equal(t, FailoverContinue, state.RecordAdmissionVeto(id, ctx))
+		require.True(t, recordOpenAIAdmissionVeto(failed, id, &count, ctx))
 	}
 	require.Len(t, state.FailedAccountIDs, 20)
 	require.Len(t, failed, 20)
-	require.Equal(t, 20, state.ProfitVetoCount())
+	require.Equal(t, 20, state.AdmissionVetoCount())
 	require.Equal(t, FailoverExhausted, state.HandleSelectionExhausted(ctx))
 	// A selector accidentally returning an excluded candidate must stop instead
 	// of turning the relaxed numeric budget into an empty retry loop.
-	require.Equal(t, FailoverExhausted, state.RecordProfitVeto(1, ctx))
-	require.False(t, recordOpenAIProfitVeto(failed, 1, &count, ctx))
+	require.Equal(t, FailoverExhausted, state.RecordAdmissionVeto(1, ctx))
+	require.False(t, recordOpenAIAdmissionVeto(failed, 1, &count, ctx))
 	require.Equal(t, 20, count)
-	require.Equal(t, 20, state.ProfitVetoCount())
+	require.Equal(t, 20, state.AdmissionVetoCount())
 }
 
 func TestStrictFailoverFirstOutputTraversesPeers(t *testing.T) {

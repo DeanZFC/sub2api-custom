@@ -9,9 +9,42 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type wsPerformanceAccountRepo struct {
+	*openAIWSUsageHandlerAccountRepoStub
+	admit func(context.Context, int64) (bool, error)
+}
+
+func (*wsPerformanceAccountRepo) PerformancePaused(context.Context, []int64) (map[int64]bool, error) {
+	return nil, nil
+}
+
+func (r *wsPerformanceAccountRepo) AdmitPerformanceRequest(ctx context.Context, id int64) (bool, error) {
+	return r.admit(ctx, id)
+}
+
+func TestResponsesWebSocketPerformanceAdmissionEachTurn(t *testing.T) {
+	for _, mode := range []string{service.OpenAIWSIngressModeCtxPool, service.OpenAIWSIngressModePassthrough} {
+		t.Run(mode, func(t *testing.T) {
+			var attempts atomic.Int32
+			got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+				firstPayload: wsGroupPricingFirst, secondPayload: wsGroupPricingSecond,
+				ingressMode: mode,
+				admitPerformanceRequest: func(context.Context, int64) (bool, error) {
+					return attempts.Add(1) == 1, nil
+				},
+				secondTurnCloseExpected: true, closeStatus: coderws.StatusTryAgainLater,
+				closeReason: "account is no longer eligible", checkFirstTurnUsage: true,
+			})
+			require.Len(t, got.logs, 1)
+			require.EqualValues(t, 2, attempts.Load())
+		})
+	}
+}
 
 func TestOpenAIWSTurnRevalidatesFallbackGroup(t *testing.T) {
 	repo := newWSGroupPricingAPIKeyRepoStub(1)

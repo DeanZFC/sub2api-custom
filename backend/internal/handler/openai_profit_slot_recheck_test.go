@@ -105,7 +105,7 @@ func TestAcquireResponsesAccountSlotProfitRecheck(t *testing.T) {
 		streamStarted := false
 
 		release, result := h.acquireResponsesAccountSlot(c, &groupID, "", newSelection(profitSlotTestAccount(1, 0.8)), false, &streamStarted, zap.NewNop())
-		require.Equal(t, openAISlotAcquireProfitVetoed, result)
+		require.Equal(t, openAISlotAcquireVetoed, result)
 		require.Nil(t, release)
 		require.Zero(t, w.Body.Len(), "利润终检否决不得写出任何响应")
 		require.Equal(t, int64(1), cache.accountReleases.Load(), "否决后必须立即释放已获取的槽位")

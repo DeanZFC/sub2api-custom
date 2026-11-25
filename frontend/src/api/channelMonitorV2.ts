@@ -282,8 +282,8 @@ export async function getMatrix(filter: MonitorFilter, groupBy: MonitorMatrixGro
 export async function getCardMatrices(filter: MonitorFilter, groupBy: MonitorMatrixGroupBy, admin = false, signal?: AbortSignal) {
   const modelGroupBy = groupBy === 'platform_group' ? 'platform_group_model' : groupBy === 'platform' ? 'platform_model' : null
   const [matrix, modelMatrix] = await Promise.all([
-    getMatrix(filter, groupBy, admin, signal, true),
-    modelGroupBy ? getMatrix(filter, modelGroupBy, admin, signal, true) : Promise.resolve(null),
+    getMatrix(filter, groupBy, admin, signal),
+    modelGroupBy ? getMatrix(filter, modelGroupBy, admin, signal) : Promise.resolve(null),
   ])
   return { matrix, modelMatrix }
 }

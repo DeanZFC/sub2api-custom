@@ -271,8 +271,6 @@
           :health-mode="healthMode"
           :test-results="testResults"
           :test-results-state="testResultsState"
-          :admin="isAdmin"
-          @open-error="selectedErrorId = $event"
         />
         <div
           v-else-if="loading"
@@ -471,20 +469,13 @@
         </div>
       </section>
     </div>
-    <OpsErrorDetailModal
-      v-if="isAdmin && selectedErrorId !== null"
-      :show="true"
-      :error-id="selectedErrorId"
-      error-type="request"
-      @update:show="selectedErrorId = null"
-    />
   </AppLayout>
 </template>
 
 <script setup lang="ts">
 import { formatMonitorCacheRate } from '@/features/channel-monitor-v2/monitorFormat'
 import { useI18n } from 'vue-i18n'
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -543,8 +534,6 @@ const authStore = useAuthStore()
 const appStore = useAppStore()
 const { t, te, locale } = useI18n()
 const isAdmin = computed(() => authStore.isAdmin)
-const OpsErrorDetailModal = defineAsyncComponent(() => import('@/views/admin/ops/components/OpsErrorDetailModal.vue'))
-const selectedErrorId = ref<number | null>(null)
 /** Admins always see RPM/TPM; users honor the hide-throughput system setting. */
 const showThroughput = computed(() => isAdmin.value || !isChannelMonitorThroughputHidden())
 /** Admins always see ranking; users honor the hide-user-ranking system setting. */
@@ -972,7 +961,6 @@ watch(isAdmin, (admin) => {
   if (!admin) {
     errorRows.value = []
     expandedErrors.value = new Set()
-    selectedErrorId.value = null
     if (activeTab.value === 'errors') activeTab.value = 'models'
   }
 })

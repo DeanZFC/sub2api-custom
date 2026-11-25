@@ -1,4 +1,4 @@
-import type { AccountPerformance, PerformanceConfig, PerformanceEvent } from '@/types/accountPerformance'
+import type { AccountPerformance, AccountPerformanceState, PerformanceConfig, PerformanceEvent } from '@/types/accountPerformance'
 /**
  * Admin Accounts API endpoints
  * Handles AI platform account management for administrators
@@ -1435,7 +1435,11 @@ export const accountsAPI = {
   getCodexHarvestFlow,
   updateCodexSkipHarvest,
   streamManualCodexHarvest,
- getPerformance, savePerformance, releasePerformance, getPerformanceEvents,
+  getPerformance,
+  getPerformanceStates,
+  savePerformance,
+  releasePerformance,
+  getPerformanceEvents,
   list,
   listWithEtag,
   getPlatformCounts,
@@ -1512,16 +1516,28 @@ export const accountsAPI = {
 export default accountsAPI
 
 export async function getPerformance(accountIds: number[], signal?: AbortSignal): Promise<Record<number, AccountPerformance>> {
- const {data}=await apiClient.post<Record<number, AccountPerformance>>('/admin/accounts/performance',{account_ids:accountIds},{signal})
- return data
+  const { data } = await apiClient.post<Record<number, AccountPerformance>>(
+    '/admin/accounts/performance', { account_ids: accountIds }, { signal }
+  )
+  return data
 }
-export async function savePerformance(id:number,config:PerformanceConfig,revision:number): Promise<void> {
- await apiClient.put('/admin/accounts/'+id+'/performance',{config,revision})
+
+export async function getPerformanceStates(accountIds: number[], signal?: AbortSignal): Promise<Record<number, AccountPerformanceState>> {
+  const { data } = await apiClient.post<Record<number, AccountPerformanceState>>(
+    '/admin/accounts/performance', { account_ids: accountIds, include_metrics: false }, { signal }
+  )
+  return data
 }
-export async function releasePerformance(id:number,revision:number,pauseGeneration:number): Promise<void> {
- await apiClient.post('/admin/accounts/'+id+'/performance/release',{revision,pause_generation:pauseGeneration})
+
+export async function savePerformance(id: number, config: PerformanceConfig, revision: number): Promise<void> {
+  await apiClient.put(`/admin/accounts/${id}/performance`, { config, revision })
 }
-export async function getPerformanceEvents(id:number): Promise<PerformanceEvent[]> {
- const {data}=await apiClient.get<PerformanceEvent[]>('/admin/accounts/'+id+'/performance/events')
- return data
+
+export async function releasePerformance(id: number, revision: number, pauseGeneration: number): Promise<void> {
+  await apiClient.post(`/admin/accounts/${id}/performance/release`, { revision, pause_generation: pauseGeneration })
+}
+
+export async function getPerformanceEvents(id: number): Promise<PerformanceEvent[]> {
+  const { data } = await apiClient.get<PerformanceEvent[]>(`/admin/accounts/${id}/performance/events`)
+  return data
 }

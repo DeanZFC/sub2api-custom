@@ -20,7 +20,7 @@ describe('channel monitor V2 query serialization', () => {
     for (const [index, grouping] of [groupBy, modelGroupBy].entries()) {
       expect(get).toHaveBeenNthCalledWith(index + 1, '/admin/channel-monitor-v2/matrix', expect.objectContaining({
         signal: controller.signal,
-        params: { range: '24h', platform: ['openai'], group_id: [7], model: ['gpt-test'], group_by: grouping, include_recent_requests: true },
+        params: { range: '24h', platform: ['openai'], group_id: [7], model: ['gpt-test'], group_by: grouping },
       }))
     }
   })
@@ -32,7 +32,7 @@ describe('channel monitor V2 query serialization', () => {
     expect(result.modelMatrix).toBeNull()
   })
 
-  it('opts into recent requests only for the channel-card matrix', async () => {
+  it('includes recent requests when explicitly requested', async () => {
     const get = vi.spyOn(apiClient, 'get').mockResolvedValue({ data: { items: [] } })
     const controller = new AbortController()
     await getMatrix({ range: '90m', platforms: [], groupIds: [7], models: ['gpt-test'] }, 'platform_group', false, controller.signal, true)

@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"github.com/stretchr/testify/require"
 	"math"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestAccountPerformanceBounds(t *testing.T) {
@@ -75,19 +78,38 @@ func TestAccountPerformanceSnapshotRejectsStaleCacheAndFailsClosed(t *testing.T)
 	require.Error(t, err)
 	require.Nil(t, batch)
 }
-func TestAccountPerformanceSlotRejectsPauseBeforeUnlimitedOrCache(t *testing.T) {
+
+func TestAccountPerformanceTrialReentersPoolAfterPausedCacheSnapshot(t *testing.T) {
+	ctx := context.Background()
+	due := time.Now().Add(-time.Second)
+	r := &trialAdmissionStub{trialID: 1, dueAt: due}
+	cached := &Account{ID: 1, Status: StatusActive, Schedulable: true, PerformancePaused: true}
+	s := NewSchedulerSnapshotService(&performanceSnapshotCache{account: cached}, nil, r, nil, nil)
+	got, err := s.GetAccount(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, got.IsSchedulable())
+	require.Equal(t, &due, got.PerformanceTrialDueAt)
+	require.True(t, cached.PerformancePaused)
+	// Ignore fields written by earlier snapshot formats. Only the routing read
+	// for this request can supply a current performance pause or due time.
+	var cachedCopy Account
+	require.NoError(t, json.Unmarshal([]byte(`{"ID":1,"PerformancePaused":true}`), &cachedCopy))
+	require.False(t, cachedCopy.PerformancePaused)
+	wire, err := json.Marshal(got)
+	require.NoError(t, err)
+	require.NotContains(t, string(wire), "PerformanceTrialDueAt")
+	require.NotContains(t, string(wire), "PerformancePaused")
+}
+func TestAccountPerformanceForwardAdmissionFailsClosed(t *testing.T) {
 	repo := &performanceAccountRepoStub{paused: map[int64]bool{1: true}}
-	svc := NewConcurrencyService(nil)
-	svc.performancePauses = repo
-	for _, limit := range []int{0, 5} {
-		r, err := svc.AcquireAccountSlot(context.Background(), 1, limit)
-		require.NoError(t, err)
-		require.False(t, r.Acquired)
-	}
+	gateway := &GatewayService{accountRepo: repo}
+	_, vetoed, reason := gateway.AdmitAccountForForward(context.Background(), &Account{ID: 1})
+	require.True(t, vetoed)
+	require.Equal(t, "performance_paused", reason)
 	repo.err = errors.New("authority unavailable")
-	r, err := svc.AcquireAccountSlot(context.Background(), 1, 0)
-	require.Error(t, err)
-	require.Nil(t, r)
+	_, vetoed, reason = gateway.AdmitAccountForForward(context.Background(), &Account{ID: 1})
+	require.True(t, vetoed)
+	require.Equal(t, "performance_state_unavailable", reason)
 }
 
 type performanceSnapshotCache struct {

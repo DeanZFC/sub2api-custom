@@ -268,22 +268,22 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		// 终检与准入后绑定使用选号结果携带的门（见 responses 同名注释）。
 		admissionCtx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
-		latest, vetoed, reason := h.gatewayService.GatewayProfitControlVetoLatest(admissionCtx, account)
+		latest, vetoed, reason := h.gatewayService.AdmitAccountForForward(admissionCtx, account)
 		if vetoed {
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
 			}
-			reqLog.Debug("gateway.cc.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
-			if fs.RecordProfitVeto(account.ID, c.Request.Context()) == FailoverExhausted {
-				reqLog.Warn("gateway.cc.profit_veto_attempts_exhausted", zap.Int("profit_veto_count", fs.ProfitVetoCount()))
-				h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", profitVetoExhaustedMessage)
+			reqLog.Debug("gateway.cc.account_admission_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+			if fs.RecordAdmissionVeto(account.ID, c.Request.Context()) == FailoverExhausted {
+				reqLog.Warn("gateway.cc.admission_veto_attempts_exhausted", zap.Int("admission_veto_count", fs.AdmissionVetoCount()))
+				h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", admissionVetoExhaustedMessage)
 				return
 			}
 			continue
 		}
 		account = latest
 		selection.Account = latest
-		if selection.ProfitGateActive() {
+		if !selection.PreserveStickyBinding && selection.ProfitGateActive() {
 			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, selectionSessionHash, account.ID); err != nil {
 				reqLog.Warn("gateway.cc.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}

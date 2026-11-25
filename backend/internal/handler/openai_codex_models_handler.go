@@ -100,7 +100,7 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 	var lastUpstreamErr error
 
 	for {
-		account, err := h.gatewayService.SelectAccountForModelWithExclusions(c.Request.Context(), apiKey.GroupID, "", "", failedAccountIDs)
+		account, err := h.gatewayService.SelectAccountForModelCatalog(c.Request.Context(), apiKey.GroupID, failedAccountIDs)
 		if err != nil {
 			if c.Request.Context().Err() != nil {
 				return

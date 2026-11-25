@@ -64,6 +64,8 @@ INSERT INTO ops_error_logs(created_at,group_id,request_id,status_code,error_type
  ('2026-10-20T00:33:00Z',7,'ignored',401,'authentication'),
  ('2026-10-20T00:53:00Z',7,'attempt-only',0,'attempt-only'),
  ('2026-10-20T00:34:00Z',9,'composite-error',503,'composite-error');
+INSERT INTO ops_error_logs(created_at,group_id,request_id,account_id,model,status_code,error_type,error_source)
+ VALUES ('2026-10-20T00:55:00Z',7,'blocked',NULL,'deepseek-v4.1-flash',403,'cyber_policy_session_blocked','gateway_local');
 UPDATE ops_error_logs SET platform='composite' WHERE group_id=9;
 INSERT INTO ops_error_logs(created_at,group_id,request_id,is_count_tokens,error_type) VALUES('2026-10-20T00:54:00Z',7,'token-count',true,'count-token-error');
 UPDATE usage_logs SET input_tokens=0, cache_creation_tokens=0, cache_read_tokens=0 WHERE request_id='seven-20';

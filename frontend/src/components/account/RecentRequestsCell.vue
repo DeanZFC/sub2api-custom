@@ -13,7 +13,16 @@
     >
       <div class="mb-0.5 text-[10px] text-gray-400 dark:text-gray-500">{{ t('admin.accounts.recentRequests.metricsWindow') }}</div>
       <div v-if="performanceUnavailable || performance?.monitoring_available === false" class="text-amber-600">{{ t('accountPerformance.unavailable') }}</div>
-      <div v-else-if="performance?.paused || performance?.config.enabled" class="text-amber-600" data-testid="metric-rule-status">{{ t(performance?.trial_started_at ? 'accountPerformance.trial' : performance?.paused ? 'accountPerformance.paused' : 'accountPerformance.active') }}</div>
+      <div
+        v-else-if="phase && phase !== 'disabled'"
+        :class="phase === 'monitoring' ? 'text-gray-500 dark:text-gray-400' : 'text-amber-700 dark:text-amber-300'"
+        data-testid="metric-rule-status"
+      >
+        {{ t(phase === 'monitoring' ? 'accountPerformance.active' : 'accountPerformance.' + phase) }}
+        <span v-if="phase === 'trial' && performance?.trial_limit" class="whitespace-nowrap">
+          · {{ t('accountPerformance.trialAdmissions', { used: performance.trial_requests, limit: performance.trial_limit }) }}
+        </span>
+      </div>
       <div class="grid grid-cols-4 gap-x-2">
         <div :title="t('admin.accounts.recentRequests.metricSamples', { count: metrics.requestSamples })">
           <div class="text-gray-500 dark:text-gray-400">{{ t('accountPerformance.success_rate') }}</div>
@@ -101,7 +110,7 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch, type CSSProperties } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { OpsAccountRequestStats, OpsRequestDetail } from '@/api/admin/ops'
-import type { AccountPerformance } from '@/types/accountPerformance'
+import { performancePhase, type AccountPerformanceState } from '@/types/accountPerformance'
 import Icon from '@/components/icons/Icon.vue'
 import RecentRequestDetails from './RecentRequestDetails.vue'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
@@ -115,7 +124,7 @@ const props = withDefaults(defineProps<{
   loadError?: boolean
   interactive?: boolean
   canConfigure?: boolean
-  performance?: AccountPerformance
+  performance?: AccountPerformanceState
   performanceUnavailable?: boolean
   statistics?: OpsAccountRequestStats | null
   statisticsLoading?: boolean
@@ -126,6 +135,7 @@ const props = withDefaults(defineProps<{
 })
 
 const emit = defineEmits<{ configure: [] }>()
+const phase = computed(() => props.performance && performancePhase(props.performance))
 
 // Request indicators and the full-hour aggregate have independent sample sets.
 const recentRequests = computed(() => props.requests.slice(0, 10))

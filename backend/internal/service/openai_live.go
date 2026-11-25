@@ -204,7 +204,7 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 	// 防御性装门按文本 D 过滤 Live 账号池且门与计费时刻不同源。
 	ctx = WithOpenAIProfitControlSuppressed(ctx)
 	var lastErr error
-	for attempt := 0; attempt <= 3 || StrictFailoverRequestActive(ctx); attempt++ {
+	for attempt := 0; attempt <= 3 || StrictFailoverRequestActive(ctx); {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -269,6 +269,15 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			return nil, ErrLiveConcurrencyFull
 		}
 
+		latest, vetoed, _ := s.AdmitAccountForForward(ctx, account)
+		if vetoed {
+			s.releaseLiveLease(account.ID, identity.UserID, liveGroupID(identity.GroupID), identity.APIKeyID, leaseID)
+			selection.ReleaseFunc()
+			excluded[account.ID] = struct{}{}
+			continue
+		}
+		account = latest
+		attempt++
 		created, createErr := s.createUpstreamLiveCall(ctx, account, request, attestation)
 		selection.ReleaseFunc()
 		if createErr != nil {

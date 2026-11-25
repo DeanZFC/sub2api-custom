@@ -723,21 +723,21 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		}
 		// 终检与准入后绑定使用选号结果携带的门（见 responses 同名注释）。
 		admissionCtx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
-		latest, vetoed, reason := h.gatewayService.GatewayProfitControlVetoLatest(admissionCtx, account)
+		latest, vetoed, reason := h.gatewayService.AdmitAccountForForward(admissionCtx, account)
 		if vetoed {
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
 			}
-			reqLog.Debug("gemini.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+			reqLog.Debug("gemini.account_admission_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
 			if cachedContentBinding != nil {
 				markOpsRoutingCapacityLimited(c)
 				googleError(c, http.StatusServiceUnavailable, geminiCachedContentUnavailableMessage)
 				return
 			}
-			if fs.RecordProfitVeto(account.ID, c.Request.Context()) == FailoverExhausted {
-				reqLog.Warn("gemini.profit_veto_attempts_exhausted", zap.Int("profit_veto_count", fs.ProfitVetoCount()))
+			if fs.RecordAdmissionVeto(account.ID, c.Request.Context()) == FailoverExhausted {
+				reqLog.Warn("gemini.admission_veto_attempts_exhausted", zap.Int("admission_veto_count", fs.AdmissionVetoCount()))
 				markOpsRoutingCapacityLimited(c)
-				googleError(c, http.StatusServiceUnavailable, profitVetoExhaustedMessage)
+				googleError(c, http.StatusServiceUnavailable, admissionVetoExhaustedMessage)
 				return
 			}
 			continue
@@ -746,7 +746,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		selection.Account = latest
 		// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已抢槽
 		// 的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
-		if selection.ProfitGateActive() || !selection.Acquired {
+		if !selection.PreserveStickyBinding && (selection.ProfitGateActive() || !selection.Acquired) {
 			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, sessionKey, account.ID); err != nil {
 				reqLog.Warn("gemini.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}

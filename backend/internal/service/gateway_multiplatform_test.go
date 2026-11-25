@@ -19,6 +19,30 @@ func testConfig() *config.Config {
 	return &config.Config{RunMode: config.RunModeStandard}
 }
 
+func TestGatewayTokenCountSkipsTrialWithoutClearingStickyBinding(t *testing.T) {
+	accounts := []Account{
+		{ID: 1, Platform: PlatformAnthropic, Priority: 0, Status: StatusActive, Schedulable: true},
+		{ID: 2, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true},
+	}
+	base := &mockAccountRepoForPlatform{accounts: accounts, accountsByID: make(map[int64]*Account)}
+	for i := range accounts {
+		base.accountsByID[accounts[i].ID] = &accounts[i]
+	}
+	repo := &trialAdmissionStub{trialID: 1, dueAt: time.Now().Add(-time.Second)}
+	repo.AccountRepository = base
+	cache := &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{"sticky": 1}}
+	svc := &GatewayService{accountRepo: repo, cache: cache, cfg: testConfig()}
+
+	account, err := svc.SelectAccountForTokenCount(context.Background(), nil, "sticky", "claude-3-5-sonnet-20241022")
+	require.NoError(t, err)
+	require.Equal(t, int64(2), account.ID)
+	require.Equal(t, int64(1), cache.sessionBindings["sticky"], "metadata routing must preserve the existing binding")
+
+	account, err = svc.SelectAccountForModel(context.Background(), nil, "sticky", "claude-3-5-sonnet-20241022")
+	require.NoError(t, err)
+	require.Equal(t, int64(1), account.ID, "the next measured generation may use the trial account")
+}
+
 // mockAccountRepoForPlatform 单平台测试用的 mock
 type mockAccountRepoForPlatform struct {
 	accounts         []Account

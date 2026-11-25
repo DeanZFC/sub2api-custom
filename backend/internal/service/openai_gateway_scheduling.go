@@ -263,6 +263,10 @@ func (s *OpenAIGatewayService) SelectAccountForModelWithExclusions(ctx context.C
 	}, s.loadFallbackGroup)
 }
 
+func (s *OpenAIGatewayService) SelectAccountForModelCatalog(ctx context.Context, groupID *int64, excludedIDs map[int64]struct{}) (*Account, error) {
+	return s.SelectAccountForModelWithExclusions(withoutPerformanceTrials(ctx), groupID, "", "", excludedIDs)
+}
+
 // SelectAccountForTokenCount selects an account for a non-billable token-count
 // request. It applies the normal platform, model, capability, and runtime
 // eligibility checks without acquiring or waiting for a generation slot.
@@ -274,6 +278,7 @@ func (s *OpenAIGatewayService) SelectAccountForTokenCount(
 	requiredCapability OpenAIEndpointCapability,
 	platform string,
 ) (*Account, error) {
+	ctx = withoutPerformanceTrials(ctx)
 	ctx = WithOpenAIProfitControlSuppressed(ctx)
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	return selectAccountWithAPIKeyGroupFallback(ctx, groupID, requestedModel, func(selectionCtx context.Context, selectedGroupID *int64) (*Account, error) {
@@ -971,7 +976,7 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusionsStickyHit(ctx 
 	// 4. 设置粘性会话绑定（利润门下推迟到 handler 终检通过后再绑定，
 	// 终检否决的账号不得成为新的粘性目标；无门保持既有 eager 绑定与 TTL）
 	// Set sticky session binding (deferred until terminal admission under a profit gate)
-	if sessionHash != "" && !gatewayProfitControlGateActive(ctx) && openAIStickyBindingSnapshotFromContext(ctx, groupID, sessionHash) == nil {
+	if sessionHash != "" && selected.PerformanceTrialDueAt == nil && !isUnmeasuredPerformanceRequest(ctx) && !gatewayProfitControlGateActive(ctx) && openAIStickyBindingSnapshotFromContext(ctx, groupID, sessionHash) == nil {
 		_ = s.setStickySessionAccountID(ctx, groupID, sessionHash, selected.ID, openaiStickySessionTTL)
 	}
 
@@ -1005,6 +1010,9 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 
 	account, err := s.getSchedulableAccount(ctx, accountID)
 	if err != nil {
+		return nil
+	}
+	if account != nil && account.PerformancePaused && isUnmeasuredPerformanceRequest(ctx) {
 		return nil
 	}
 	if activeIntelligenceHold(ctx, account, groupID, requestedModel) {
@@ -1129,6 +1137,9 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 	}
 	sort.SliceStable(eligible, func(i, j int) bool {
 		a, b := eligible[i], eligible[j]
+		if due := comparePerformanceTrialDue(a, b); due != 0 {
+			return due < 0
+		}
 		if platform == PlatformOpenAI && a.IsExcelBPSEnabledForModel(requestedModel) != b.IsExcelBPSEnabledForModel(requestedModel) {
 			return a.IsExcelBPSEnabledForModel(requestedModel)
 		}
@@ -1234,7 +1245,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	// not publish that candidate: its write would make the final account conflict
 	// with this selection's original CAS snapshot. Slot release stays with the caller.
 	canBindSticky := func(account *Account) bool {
-		return len(stickyBindingAllowed) == 0 || stickyBindingAllowed[0] == nil || stickyBindingAllowed[0](account)
+		return account.PerformanceTrialDueAt == nil && (len(stickyBindingAllowed) == 0 || stickyBindingAllowed[0] == nil || stickyBindingAllowed[0](account))
 	}
 	if s.concurrencyService == nil || !cfg.LoadBatchEnabled {
 		account, stickyHit, err := s.selectAccountForModelWithExclusionsStickyHit(ctx, groupID, platform, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID, requiredCapability, preferLowUpstreamRate)
@@ -1262,7 +1273,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				return markStickySessionHit(selection, stickyHit), selectErr
 			}
 		}
-		if qualityDenied {
+		if qualityDenied || (account.PerformanceTrialDueAt != nil && !stickyHit) {
 			fallback, fallbackErr := s.tryAcquireAdmissionFallback(ctx, groupID, platform, sessionHash, requestedModel, excludedIDs, account.ID, requireCompact, requiredCapability, preferLowUpstreamRate, stickyHit, canBindSticky)
 			if fallbackErr != nil || fallback != nil {
 				return fallback, fallbackErr
@@ -1498,6 +1509,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				return selectionOrder[i].account.IsExcelBPSEnabledForModel(requestedModel) && !selectionOrder[j].account.IsExcelBPSEnabledForModel(requestedModel)
 			})
 		}
+		sort.SliceStable(selectionOrder, func(i, j int) bool {
+			return comparePerformanceTrialDue(selectionOrder[i].account, selectionOrder[j].account) < 0
+		})
 		for _, item := range selectionOrder {
 			if qualityHeld[item.account.ID] {
 				continue
@@ -1526,7 +1540,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				if sessionHash != "" && !stickySpillover && !gatewayProfitControlGateActive(ctx) && canBindSticky(selection.Account) {
 					_ = s.setStickySessionAccountIDIfUnchanged(ctx, groupID, sessionHash, fresh.ID, openaiStickySessionTTL)
 				}
-				selection.PreserveStickyBinding = stickySpillover
+				selection.PreserveStickyBinding = stickySpillover || selection.PreserveStickyBinding
 				return selection, true, nil
 			}
 		}
@@ -1545,6 +1559,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if requireCompact {
 			ordered = prioritizeOpenAICompactAccounts(ordered)
 		}
+		sort.SliceStable(ordered, func(i, j int) bool { return comparePerformanceTrialDue(ordered[i], ordered[j]) < 0 })
 		for _, acc := range ordered {
 			if qualityHeld[acc.ID] {
 				continue
@@ -1573,7 +1588,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				if sessionHash != "" && !stickySpillover && !gatewayProfitControlGateActive(ctx) && canBindSticky(selection.Account) {
 					_ = s.setStickySessionAccountIDIfUnchanged(ctx, groupID, sessionHash, fresh.ID, openaiStickySessionTTL)
 				}
-				selection.PreserveStickyBinding = stickySpillover
+				selection.PreserveStickyBinding = stickySpillover || selection.PreserveStickyBinding
 				return selection, nil
 			}
 		}
@@ -1603,6 +1618,9 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if requireCompact {
 		candidates = prioritizeOpenAICompactAccounts(candidates)
 	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return comparePerformanceTrialDue(candidates[i], candidates[j]) < 0
+	})
 	for _, acc := range candidates {
 		if qualityHeld[acc.ID] {
 			continue
@@ -1625,7 +1643,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			MaxWaiting:     cfg.FallbackMaxWaiting,
 		})
 		if selection != nil {
-			selection.PreserveStickyBinding = stickySpillover
+			selection.PreserveStickyBinding = stickySpillover || selection.PreserveStickyBinding
 		}
 		return selection, selectErr
 	}
@@ -1671,7 +1689,7 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 	if platform == PlatformGrok {
 		accounts = s.filterGrokFreeQuotaAccountsForOpenAI(ctx, accounts)
 	}
-	return accounts, nil
+	return filterPerformanceCandidates(ctx, s.accountRepo, accounts)
 }
 
 // Retry eligible peers when a live admission check rejects the selected account.
@@ -1707,7 +1725,7 @@ func (s *OpenAIGatewayService) tryAcquireAdmissionFallback(ctx context.Context, 
 				if err != nil {
 					return nil, err
 				}
-				waiting.PreserveStickyBinding = preserveBinding
+				waiting.PreserveStickyBinding = preserveBinding || waiting.PreserveStickyBinding
 			}
 			continue
 		}
@@ -1718,7 +1736,7 @@ func (s *OpenAIGatewayService) tryAcquireAdmissionFallback(ctx context.Context, 
 		if sessionHash != "" && !preserveBinding && !gatewayProfitControlGateActive(ctx) && (len(stickyBindingAllowed) == 0 || stickyBindingAllowed[0] == nil || stickyBindingAllowed[0](account)) {
 			_ = s.setStickySessionAccountIDIfUnchanged(ctx, groupID, sessionHash, account.ID, openaiStickySessionTTL)
 		}
-		selected.PreserveStickyBinding = preserveBinding
+		selected.PreserveStickyBinding = preserveBinding || selected.PreserveStickyBinding
 		return selected, nil
 	}
 	return waiting, nil
@@ -1864,6 +1882,11 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 	if s.isOpenAIProxyStreamQuarantined(ctx, latest) {
 		return nil
 	}
+	if account.PerformanceTrialDueAt != nil && latest.PerformanceTrialDueAt == nil {
+		tagged := *latest
+		tagged.PerformanceTrialDueAt = account.PerformanceTrialDueAt
+		return &tagged
+	}
 	return latest
 }
 
@@ -1885,7 +1908,7 @@ func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accoun
 	if s.schedulerSnapshot != nil {
 		account, err = s.schedulerSnapshot.GetAccount(ctx, accountID)
 	} else {
-		account, err = s.accountRepo.GetByID(ctx, accountID)
+		account, err = getPerformanceRoutingAccount(ctx, s.accountRepo, accountID)
 	}
 	if err != nil || account == nil {
 		return account, err
@@ -1959,10 +1982,11 @@ func (s *OpenAIGatewayService) newSelectionResult(ctx context.Context, account *
 		return nil, err
 	}
 	return attachSelectionProfitGate(ctx, &AccountSelectionResult{
-		Account:     hydrated,
-		Acquired:    acquired,
-		ReleaseFunc: release,
-		WaitPlan:    waitPlan,
+		Account:               hydrated,
+		Acquired:              acquired,
+		ReleaseFunc:           release,
+		WaitPlan:              waitPlan,
+		PreserveStickyBinding: account.PerformanceTrialDueAt != nil || hydrated.PerformanceTrialDueAt != nil,
 	}), nil
 }
 

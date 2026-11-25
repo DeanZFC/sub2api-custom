@@ -3,11 +3,15 @@ import { emptyPerformanceConfig } from '@/types/accountPerformance'
 
 const client=vi.hoisted(()=>({get:vi.fn(),post:vi.fn(),put:vi.fn(),delete:vi.fn()}))
 vi.mock('@/api/client',()=>({apiClient:client}))
-import { getPerformance, savePerformance, releasePerformance } from '@/api/admin/accounts'
+import { getPerformance, getPerformanceStates, savePerformance, releasePerformance } from '@/api/admin/accounts'
 
 beforeEach(()=>{for(const method of Object.values(client))method.mockReset().mockResolvedValue({data:{}})})
 
 describe('account metric rules API',()=>{
+ it('skips the request-log aggregate when the list only needs rule states', async () => {
+   await getPerformanceStates([7])
+   expect(client.post).toHaveBeenCalledWith('/admin/accounts/performance', { account_ids: [7], include_metrics: false }, { signal: undefined })
+ })
  it('keeps local partial-history counts, actual window and measured zero when reading',async()=>{
   const evidence={success_rate:0,success_requests:0,error_requests:2,request_samples:2}
   const response={7:{account_id:7,config:emptyPerformanceConfig(),revision:4,metrics:evidence,window_start:'2026-11-06T00:00:00Z',window_end:'2026-11-06T01:00:00Z'}}

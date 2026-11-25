@@ -2,12 +2,13 @@ package admin
 
 import (
 	"errors"
+	"strconv"
+	"time"
+
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
-	"strconv"
-	"time"
 )
 
 func (h *AccountHandler) performanceAvailable(c *gin.Context) bool {
@@ -43,7 +44,8 @@ func (h *AccountHandler) AccountPerformanceBatch(c *gin.Context) {
 		return
 	}
 	var req struct {
-		IDs []int64 `json:"account_ids"`
+		IDs            []int64 `json:"account_ids"`
+		IncludeMetrics *bool   `json:"include_metrics"`
 	}
 	if c.ShouldBindJSON(&req) != nil || len(req.IDs) == 0 || len(req.IDs) > 100 {
 		response.BadRequest(c, "Expected 1-100 account ids")
@@ -55,7 +57,7 @@ func (h *AccountHandler) AccountPerformanceBatch(c *gin.Context) {
 			return
 		}
 	}
-	data, err := h.performance.Read(c.Request.Context(), req.IDs, time.Now())
+	data, err := h.performance.Read(c.Request.Context(), req.IDs, time.Now(), req.IncludeMetrics == nil || *req.IncludeMetrics)
 	if err != nil {
 		response.Error(c, 503, "Performance metrics unavailable")
 		return

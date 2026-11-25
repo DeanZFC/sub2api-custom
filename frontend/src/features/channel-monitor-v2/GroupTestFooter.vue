@@ -1,5 +1,5 @@
 <template>
-  <div class="mt-3 flex h-20 items-center justify-between gap-2 border-t border-gray-100 pt-3 dark:border-dark-700" data-testid="group-test-footer">
+  <div class="mt-3 flex items-center justify-between gap-2 border-t border-gray-100 pt-3 dark:border-dark-700" data-testid="group-test-footer">
     <div class="min-w-0 text-xs" :title="candyDetail">
       <p class="truncate font-medium text-gray-500 dark:text-gray-400">{{ t('channelMonitorV2.tests.candy') }}</p>
       <p class="mt-1 truncate font-semibold tabular-nums" :class="summary.total && !summary.unknown && summary.passed === summary.total ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-700 dark:text-gray-200'" data-testid="candy-summary">

@@ -1,4 +1,4 @@
-import type { HealthState, MonitorCoverage, MonitorHealth, MonitorMatrixBucket, MonitorMatrixRow, MonitorRecentRequest } from '@/api/channelMonitorV2'
+import type { HealthState, MonitorCoverage, MonitorHealth, MonitorMatrixBucket, MonitorMatrixRow } from '@/api/channelMonitorV2'
 import type { HealthDisplayMode } from './monitorFormat'
 
 export function cardHealth(health: MonitorHealth, mode: HealthDisplayMode): HealthState {
@@ -36,15 +36,4 @@ export function historyBucketsForCard(buckets: MonitorMatrixBucket[], coverage: 
     slots.push({ start: Math.max(start, bucketStart), end: Math.min(end, bucketStart + step), bucket: byStart.get(bucketStart) })
   }
   return slots
-}
-
-export function recentRequestsForCard(requests: MonitorRecentRequest[] = []): Array<MonitorRecentRequest | null> {
-  const recent = [...requests].sort((a, b) => Date.parse(a.occurred_at) - Date.parse(b.occurred_at)).slice(-20)
-  return [...Array<null>(20 - recent.length).fill(null), ...recent]
-}
-
-export function requestHealth(request: MonitorRecentRequest | null): HealthState {
-  if (!request) return 'unknown'
-  if (request.status === 'success' || request.status === 'slow') return 'healthy'
-  return 'critical'
 }

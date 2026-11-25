@@ -483,7 +483,6 @@ func ProvideDeferredService(accountRepo AccountRepository, timingWheel *TimingWh
 // ProvideConcurrencyService creates ConcurrencyService and starts slot cleanup worker.
 func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, cfg *config.Config) *ConcurrencyService {
 	svc := NewConcurrencyService(cache)
-	svc.performancePauses, _ = accountRepo.(PerformancePauseReader)
 	if gate, ok := accountRepo.(AccountAdmissionGate); ok {
 		svc.SetAccountAdmissionGate(gate)
 	}

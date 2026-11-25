@@ -62,6 +62,45 @@ func (s *strictLiveSequenceUpstream) DoWithTLS(request *http.Request, proxyURL s
 	return s.Do(request, proxyURL, accountID, concurrency)
 }
 
+type livePerformanceRepo struct {
+	*strictAccountRepo
+	checked []int64
+}
+
+func (*livePerformanceRepo) PerformancePaused(context.Context, []int64) (map[int64]bool, error) {
+	return nil, nil
+}
+
+func (r *livePerformanceRepo) AdmitPerformanceRequest(_ context.Context, id int64) (bool, error) {
+	r.checked = append(r.checked, id)
+	return false, nil
+}
+
+func TestCreateLiveCallReleasesLeaseOnPerformanceVeto(t *testing.T) {
+	group, accounts := strictFixture()
+	group.StrictFailover.Enabled = false
+	accounts.accounts = nil
+	for id := int64(1); id <= 5; id++ {
+		accounts.accounts = append(accounts.accounts, Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+			Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{group.ID},
+			Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "test-account"}})
+	}
+	repo := &livePerformanceRepo{strictAccountRepo: accounts}
+	cache := &strictLiveTestConcurrencyCache{}
+	upstream := &strictLiveSequenceUpstream{}
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "live-trial-test-secret"}}
+	svc := &OpenAIGatewayService{accountRepo: repo, cfg: cfg, httpUpstream: upstream,
+		cache:              &strictLiveTestStore{liveTestStore: liveTestStore{GatewayCache: &schedulerTestGatewayCache{}}},
+		concurrencyService: NewConcurrencyService(cache), liveAttestation: liveAttestationStub{header: `{"v":1}`},
+		liveAttestationCipher: newLiveAttestationCipher(cfg)}
+	_, err := svc.CreateLiveCall(strictContext(group), &LiveCallRequest{SDP: "v=offer\r\n", Session: json.RawMessage(`{"model":"gpt-live"}`)},
+		LiveCallIdentity{GroupID: &group.ID, APIKeyID: 1, UserID: 1}, 1)
+	require.Error(t, err)
+	require.ElementsMatch(t, []int64{1, 2, 3, 4, 5}, repo.checked, "admission vetoes must not exhaust the four upstream attempts")
+	require.ElementsMatch(t, repo.checked, cache.liveReleases)
+	require.Empty(t, upstream.accountIDs)
+}
+
 func TestCreateLiveCallStrictFailoverTraversesAllPrimaryAccounts(t *testing.T) {
 	for _, strict := range []bool{false, true} {
 		t.Run(map[bool]string{false: "ordinary_budget", true: "strict_tiers"}[strict], func(t *testing.T) {

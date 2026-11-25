@@ -1990,10 +1990,11 @@ func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject
 }
 
 type openAIResponsesWSUsageLogCase struct {
-	configureBilling     func(*config.Config) *service.BillingCacheService
-	subscriptionLookup   openAIWSTurnSubscriptionLookup
-	subscription         *service.UserSubscription
-	checkUserConcurrency func(int)
+	admitPerformanceRequest func(context.Context, int64) (bool, error)
+	configureBilling        func(*config.Config) *service.BillingCacheService
+	subscriptionLookup      openAIWSTurnSubscriptionLookup
+	subscription            *service.UserSubscription
+	checkUserConcurrency    func(int)
 
 	simpleModeRejectAtRead int64
 	compositeResolver      *service.CompositeRouteResolver
@@ -3147,7 +3148,10 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
 	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
 
-	accountRepo := &openAIWSUsageHandlerAccountRepoStub{account: account}
+	var accountRepo service.AccountRepository = &openAIWSUsageHandlerAccountRepoStub{account: account}
+	if tc.admitPerformanceRequest != nil {
+		accountRepo = &wsPerformanceAccountRepo{openAIWSUsageHandlerAccountRepoStub: &openAIWSUsageHandlerAccountRepoStub{account: account}, admit: tc.admitPerformanceRequest}
+	}
 	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, turnCount)}
 
 	if len(tc.channelMapping) > 0 {

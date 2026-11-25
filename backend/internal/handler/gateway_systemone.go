@@ -181,15 +181,15 @@ func (h *GatewayHandler) SystemOne(c *gin.Context) {
 		}
 		// 准入终检：与其他网关入口一致，利润控制否决的账号不得承接本次请求。
 		admissionCtx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
-		latest, vetoed, reason := h.gatewayService.GatewayProfitControlVetoLatest(admissionCtx, account)
+		latest, vetoed, reason := h.gatewayService.AdmitAccountForForward(admissionCtx, account)
 		if vetoed {
 			if accountRelease != nil {
 				accountRelease()
 			}
-			reqLog.Debug("systemone.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
-			if fs.RecordProfitVeto(account.ID, c.Request.Context()) == FailoverExhausted {
-				reqLog.Warn("systemone.profit_veto_attempts_exhausted", zap.Int("profit_veto_count", fs.ProfitVetoCount()))
-				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", profitVetoExhaustedMessage)
+			reqLog.Debug("systemone.account_admission_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+			if fs.RecordAdmissionVeto(account.ID, c.Request.Context()) == FailoverExhausted {
+				reqLog.Warn("systemone.admission_veto_attempts_exhausted", zap.Int("admission_veto_count", fs.AdmissionVetoCount()))
+				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", admissionVetoExhaustedMessage)
 				return
 			}
 			continue

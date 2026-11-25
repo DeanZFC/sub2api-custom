@@ -35,6 +35,9 @@ func shouldClearStickySessionWithContext(ctx context.Context, account *Account, 
 	if account == nil {
 		return false
 	}
+	if account.PerformancePaused && isUnmeasuredPerformanceRequest(ctx) {
+		return false
+	}
 	if !account.IsSchedulable() || account.ActiveTestModelBlocked(activePassRateRoutingModel(ctx, requestedModel)) {
 		return true
 	}

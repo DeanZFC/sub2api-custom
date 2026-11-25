@@ -341,6 +341,12 @@ func TestGatewayProfitControlTerminalRefreshUsesReplacementObject(t *testing.T) 
 	require.True(t, vetoed)
 	require.Equal(t, openAIProfitFilterReasonThreshold, reason)
 	require.InDelta(t, 0.2, *selected.RateMultiplier, 1e-12, "测试必须替换缓存对象，不能原地修改旧指针")
+
+	rules := &trialAdmissionStub{trialID: selected.ID}
+	_, vetoed, reason = admitAccountForForward(ctx, &selected, snapshot, rules)
+	require.True(t, vetoed)
+	require.Equal(t, openAIProfitFilterReasonThreshold, reason)
+	require.Zero(t, rules.admissions, "a price change during selection must not consume a trial slot")
 }
 
 func TestGatewayProfitControlTerminalRefreshFallsBackFromCacheToDatabase(t *testing.T) {

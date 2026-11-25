@@ -193,7 +193,16 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 			failedAccounts[selected.Account.ID] = struct{}{}
 			continue
 		}
-		account = selected.Account
+		admissionCtx := service.ContextWithSelectionProfitGate(c.Request.Context(), selected)
+		latest, vetoed, _ := h.gatewayService.AdmitAccountForForward(admissionCtx, selected.Account)
+		if vetoed {
+			if release != nil {
+				release()
+			}
+			failedAccounts[selected.Account.ID] = struct{}{}
+			continue
+		}
+		account = latest
 		accountReleaseFunc = release
 
 		if isXSearch {
@@ -215,7 +224,7 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 		}
 		account = nil
 	}
-	if err != nil || nativeResp == nil {
+	if err != nil || (account != nil && nativeResp == nil) {
 		msg := "web search failed"
 		if err != nil {
 			msg = err.Error()

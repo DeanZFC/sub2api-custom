@@ -112,12 +112,12 @@ func channelMonitorV2RecentQuery(filter service.ChannelMonitorV2Filter, cfg serv
     WHERE ` + scope("current_error", channelMonitorV2RecentErrorPlatform, errorModel) + `
       AND NOT ` + opsClientRejectionSQL("current_error") + `
       AND NOT current_error.is_count_tokens
-      AND (COALESCE(current_error.status_code, 0) >= 400 OR current_error.error_type = 'cyber_policy')
+      AND ` + channelMonitorV2FailureSQL("current_error") + `
       AND (COALESCE(current_error.request_type,0)=3 OR NULLIF(current_error.request_id, '') IS NULL OR (
         NOT EXISTS (SELECT 1 FROM ops_error_logs newer WHERE newer.request_id = current_error.request_id
           AND COALESCE(newer.api_key_id,0)=COALESCE(current_error.api_key_id,0) AND COALESCE(newer.account_id,0)=COALESCE(current_error.account_id,0)
           AND newer.created_at >= $1 AND newer.created_at < $2 AND NOT newer.is_count_tokens
-          AND (COALESCE(newer.status_code, 0) >= 400 OR newer.error_type = 'cyber_policy')
+          AND ` + channelMonitorV2FailureSQL("newer") + `
           AND (newer.created_at, newer.id) > (current_error.created_at, current_error.id))))
     ORDER BY current_error.created_at DESC, current_error.id DESC LIMIT 20)
     ORDER BY created_at DESC, id DESC, is_error DESC LIMIT 20

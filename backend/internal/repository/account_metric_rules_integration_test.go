@@ -61,7 +61,7 @@ func metricConfig() service.PerformanceConfig {
 }
 func readMetric(t *testing.T, r *accountPerformanceRepository, now time.Time) service.AccountPerformance {
 	t.Helper()
-	m, err := r.Read(context.Background(), []int64{1}, now)
+	m, err := r.Read(context.Background(), []int64{1}, now, true)
 	require.NoError(t, err)
 	return m[1]
 }
@@ -78,20 +78,32 @@ func TestMetricRulesPostgresPauseTrialRecoverAndIndependentOwnership(t *testing.
 	m := readMetric(t, r, base)
 	require.True(t, m.Paused)
 	require.Equal(t, "success_rate", m.Reason)
+	require.Equal(t, service.PerformancePaused, m.Phase)
+	require.WithinDuration(t, base.Add(time.Minute), *m.RecoverAfter, time.Millisecond)
 	paused, err := gate.PerformancePaused(ctx, []int64{1})
 	require.NoError(t, err)
 	require.True(t, paused[1])
 	ids, err := r.EnabledIDs(ctx)
 	require.NoError(t, err)
 	require.Contains(t, ids, int64(1), "paused accounts remain evaluated for recovery")
-	allowed, _, err := gate.AcquirePerformanceTrial(ctx, 1)
+	allowed, err := gate.AdmitPerformanceRequest(ctx, 1)
 	require.NoError(t, err)
 	require.False(t, allowed)
 	require.ErrorIs(t, r.Release(ctx, 1, 0, 1, 42), service.ErrPerformanceConflict)
-	now := time.Now()
+	var now time.Time
+	require.NoError(t, db.QueryRow("SELECT NOW()").Scan(&now))
 	require.NoError(t, r.Evaluate(ctx, 1, now))
 	m = readMetric(t, r, now)
 	require.NotNil(t, m.TrialStartedAt)
+	require.Equal(t, service.PerformanceTrial, m.Phase)
+	require.EqualValues(t, 6, m.TrialLimit)
+	require.WithinDuration(t, now.Add(10*time.Minute), *m.TrialEndsAt, time.Millisecond)
+	routing, err := gate.PerformanceRoutingStates(ctx, []int64{1, 2})
+	require.NoError(t, err)
+	require.NotContains(t, routing, int64(2))
+	require.False(t, routing[1].Blocked)
+	require.NotNil(t, routing[1].TrialDueAt)
+	require.WithinDuration(t, now, *routing[1].TrialDueAt, time.Millisecond)
 	require.Nil(t, m.Metrics.SuccessRate, "old successes/failures are excluded from recovery")
 	// Independent repository instances compete for a single persisted trial slot.
 	var wg sync.WaitGroup
@@ -102,7 +114,7 @@ func TestMetricRulesPostgresPauseTrialRecoverAndIndependentOwnership(t *testing.
 		go func() {
 			defer wg.Done()
 			other := &accountRepository{sql: db}
-			ok, _, err := other.AcquirePerformanceTrial(ctx, 1)
+			ok, err := other.AdmitPerformanceRequest(ctx, 1)
 			results <- ok
 			errs <- err
 		}()
@@ -123,6 +135,10 @@ func TestMetricRulesPostgresPauseTrialRecoverAndIndependentOwnership(t *testing.
 	paused, err = gate.PerformancePaused(ctx, []int64{1})
 	require.NoError(t, err)
 	require.True(t, paused[1], "rate gate excludes trial account until next slot")
+	routing, err = gate.PerformanceRoutingStates(ctx, []int64{1})
+	require.NoError(t, err)
+	require.True(t, routing[1].Blocked)
+	require.Nil(t, routing[1].TrialDueAt)
 	require.NoError(t, r.Evaluate(ctx, 1, now.Add(time.Second)))
 	require.True(t, readMetric(t, r, now.Add(time.Second)).Paused, "no samples cannot recover")
 	_, err = db.Exec(`INSERT INTO usage_logs(created_at,request_id) SELECT $1,'trial-'||n FROM generate_series(1,2)n`, now.Add(time.Millisecond))
@@ -132,6 +148,7 @@ func TestMetricRulesPostgresPauseTrialRecoverAndIndependentOwnership(t *testing.
 	require.False(t, m.Paused)
 	require.Nil(t, m.TrialStartedAt)
 	require.True(t, m.Config.Enabled)
+	require.Equal(t, service.PerformanceMonitoring, m.Phase)
 	require.NoError(t, r.Evaluate(ctx, 1, now.Add(3*time.Second)))
 	require.False(t, readMetric(t, r, now.Add(3*time.Second)).Paused, "old failures do not immediately re-pause a recovered account")
 	var schedulable bool
@@ -144,46 +161,43 @@ func TestMetricRulesPostgresPauseTrialRecoverAndIndependentOwnership(t *testing.
 		actions = append(actions, event.Action)
 	}
 	require.Equal(t, []string{"recover", "trial", "pause", "configure"}, actions)
+	require.Equal(t, "success_rate", events[2].Reason)
 }
-func TestMetricRulesPostgresTimeoutBudgetRefundAndDisable(t *testing.T) {
+func TestMetricRulesPostgresTimeoutBudgetAndDisable(t *testing.T) {
 	db := metricRulesDB(t)
 	ctx := context.Background()
 	r := &accountPerformanceRepository{db: db}
 	gate := &accountRepository{sql: db}
 	require.NoError(t, r.Save(ctx, 1, metricConfig(), 0, 0))
-	now := time.Now()
+	var now time.Time
+	require.NoError(t, db.QueryRow("SELECT NOW()").Scan(&now))
 	_, err := db.Exec(`UPDATE account_performance_monitors SET paused=true,paused_at=$1,pause_generation=1 WHERE account_id=1`, now.Add(-2*time.Minute))
 	require.NoError(t, err)
 	require.NoError(t, r.Evaluate(ctx, 1, now))
-	allowed, cancel, err := gate.AcquirePerformanceTrial(ctx, 1)
+	allowed, err := gate.AdmitPerformanceRequest(ctx, 1)
 	require.NoError(t, err)
 	require.True(t, allowed)
-	require.NotNil(t, cancel)
-	cancel()
-	cancel()
 	m := readMetric(t, r, now.Add(time.Second))
-	require.Zero(t, m.TrialRequests, "failed downstream admission refunds once")
+	require.EqualValues(t, 1, m.TrialRequests)
 	_, err = db.Exec(`UPDATE account_performance_monitors SET next_trial_at=NOW()-INTERVAL '1 second',trial_requests=5 WHERE account_id=1`)
 	require.NoError(t, err)
-	allowed, oldRefund, err := gate.AcquirePerformanceTrial(ctx, 1)
+	allowed, err = gate.AdmitPerformanceRequest(ctx, 1)
 	require.NoError(t, err)
 	require.True(t, allowed)
 	_, err = db.Exec(`UPDATE account_performance_monitors SET next_trial_at=NOW()-INTERVAL '1 second' WHERE account_id=1`)
 	require.NoError(t, err)
-	allowed, _, err = gate.AcquirePerformanceTrial(ctx, 1)
+	allowed, err = gate.AdmitPerformanceRequest(ctx, 1)
 	require.NoError(t, err)
 	require.False(t, allowed, "budget is enforced even after rate interval")
 	require.NoError(t, r.Evaluate(ctx, 1, now.Add(11*time.Minute)))
 	m = readMetric(t, r, now.Add(11*time.Minute))
 	require.True(t, m.Paused)
 	require.Nil(t, m.TrialStartedAt)
-	require.Equal(t, "trial_timeout", m.Reason)
-	require.EqualValues(t, 2, m.PauseGeneration)
-	// A late callback from the previous generation must not consume a new trial.
-	_, err = db.Exec(`UPDATE account_performance_monitors SET trial_started_at=NOW(),trial_requests=2 WHERE account_id=1`)
+	require.Equal(t, "trial_insufficient_samples", m.Reason)
+	events, err := r.Events(ctx, 1)
 	require.NoError(t, err)
-	oldRefund()
-	require.EqualValues(t, 2, readMetric(t, r, time.Now()).TrialRequests)
+	require.Equal(t, m.Reason, events[0].Reason)
+	require.EqualValues(t, 2, m.PauseGeneration)
 	cfg := metricConfig()
 	cfg.Enabled = false
 	require.NoError(t, r.Save(ctx, 1, cfg, m.Revision, 42))
@@ -217,6 +231,46 @@ func TestMetricRulesPostgresMigrationRetiresOnlyOwnedPause(t *testing.T) {
 	var schedulable bool
 	require.NoError(t, db.QueryRow(`SELECT schedulable FROM accounts WHERE id=1`).Scan(&schedulable))
 	require.False(t, schedulable)
+}
+
+func TestMetricRulesPostgresTrialWindowAtLateEvaluation(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		good       int
+		wantAction string
+		wantReason string
+	}{
+		{"good samples before cutoff recover", 2, "recover", ""},
+		{"samples at cutoff cannot complete trial", 1, "pause", "trial_insufficient_samples"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := metricRulesDB(t)
+			r := &accountPerformanceRepository{db: db}
+			ctx := context.Background()
+			require.NoError(t, r.Save(ctx, 1, metricConfig(), 0, 0))
+			trial := time.Now().UTC().Truncate(time.Second).Add(-11 * time.Minute)
+			end := trial.Add(service.PerformanceTrialDuration)
+			_, err := db.Exec(`UPDATE account_performance_monitors SET paused=true,trial_started_at=$1,
+ metrics_since=$1,trial_requests=2,pause_generation=1,reason='previous' WHERE account_id=1`, trial)
+			require.NoError(t, err)
+			_, err = db.Exec(`INSERT INTO usage_logs(created_at,request_id) SELECT $1,'in-window-'||n
+ FROM generate_series(1,$2::int)n`, end.Add(-time.Second), tc.good)
+			require.NoError(t, err)
+			_, err = db.Exec(`INSERT INTO usage_logs(created_at,request_id) VALUES ($1,'at-cutoff')`, end)
+			require.NoError(t, err)
+			_, err = db.Exec(`INSERT INTO ops_error_logs(created_at,request_id) VALUES ($1,'late-error')`, end.Add(time.Second))
+			require.NoError(t, err)
+			now := end.Add(30 * time.Second)
+			m := readMetric(t, r, now)
+			require.EqualValues(t, tc.good, m.Metrics.RequestSamples)
+			require.True(t, end.Equal(m.Metrics.WindowEnd))
+			require.NoError(t, r.Evaluate(ctx, 1, now))
+			events, err := r.Events(ctx, 1)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantAction, events[0].Action)
+			require.Equal(t, tc.wantReason, events[0].Reason)
+		})
+	}
 }
 func TestMetricStatsPostgresFinalOutcomesAndDeduplication(t *testing.T) {
 	db := metricRulesDB(t)

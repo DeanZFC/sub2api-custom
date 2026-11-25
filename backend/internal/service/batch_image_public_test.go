@@ -45,6 +45,57 @@ func TestBatchImagePublicService_SelectAccountPriority(t *testing.T) {
 	}
 }
 
+type batchImagePerformanceAccounts struct {
+	*publicBatchImageAccountRepo
+	states     map[int64]PerformanceRoutingState
+	admissions []int64
+	allow      bool
+}
+
+func (r *batchImagePerformanceAccounts) PerformanceRoutingStates(context.Context, []int64) (map[int64]PerformanceRoutingState, error) {
+	return r.states, nil
+}
+
+func (r *batchImagePerformanceAccounts) AdmitPerformanceRequest(_ context.Context, id int64) (bool, error) {
+	r.admissions = append(r.admissions, id)
+	return r.allow, nil
+}
+
+func TestBatchImagePublicService_PerformanceTrial(t *testing.T) {
+	ctx := context.Background()
+	for _, allow := range []bool{true, false} {
+		svc, jobs, queue, provider, _ := newTestBatchImagePublicService(true)
+		due := time.Now()
+		accounts := &batchImagePerformanceAccounts{
+			publicBatchImageAccountRepo: &publicBatchImageAccountRepo{accounts: []Account{
+				testBatchImageAccount(101, AccountTypeAPIKey), testBatchImageAccount(202, AccountTypeAPIKey),
+			}},
+			states: map[int64]PerformanceRoutingState{202: {TrialDueAt: &due}},
+			allow:  allow,
+		}
+		svc.AccountRepo = accounts
+		got, err := svc.Submit(ctx, testBatchImageOwner(), validBatchImageSubmitRequest(), "trial-submit")
+		require.Equal(t, []int64{202}, accounts.admissions)
+		if allow {
+			require.NoError(t, err)
+			require.EqualValues(t, 202, *jobs.jobs[got.ID].AccountID)
+			_, err = svc.Submit(ctx, testBatchImageOwner(), validBatchImageSubmitRequest(), "trial-submit")
+			require.NoError(t, err)
+			require.Len(t, provider.submits, 1)
+			require.Len(t, accounts.admissions, 1)
+			continue
+		}
+		require.ErrorIs(t, err, ErrBatchImageNoAccountAvailable)
+		require.Empty(t, provider.submits)
+		require.Empty(t, queue.enqueued)
+		require.Len(t, svc.BillingRepo.(*fakeBatchImageBillingRepo).releases, 1)
+		for _, job := range jobs.jobs {
+			require.Equal(t, BatchImageJobStatusFailed, job.Status)
+			require.NotNil(t, job.UserDeletedAt)
+		}
+	}
+}
+
 func TestBatchImagePublicService_Submit(t *testing.T) {
 	ctx := context.Background()
 

@@ -5,10 +5,61 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/stretchr/testify/require"
 )
+
+type gatewayTrialAccountRepo struct {
+	*mockAccountRepoForPlatform
+	due time.Time
+}
+
+func (r *gatewayTrialAccountRepo) PerformanceRoutingStates(context.Context, []int64) (map[int64]PerformanceRoutingState, error) {
+	return map[int64]PerformanceRoutingState{2: {TrialDueAt: &r.due}}, nil
+}
+
+func TestGatewayPerformanceTrialSelection(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		batch, routed bool
+	}{
+		{"load", true, false}, {"legacy", false, false},
+		{"load_model_route", true, true}, {"legacy_model_route", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var routing map[string][]int64
+			const model = "claude-fable-5-1"
+			if tc.routed {
+				routing = map[string][]int64{model: {1, 2}}
+			}
+			f := newLoadAwareRestrictionFixture(t, false, map[string]int64{"bound": 1}, routing)
+			f.svc.cfg.Gateway.Scheduling.LoadBatchEnabled = tc.batch
+			accounts := f.svc.accountRepo.(*mockAccountRepoForPlatform)
+			for i := range accounts.accounts {
+				account := &accounts.accounts[i]
+				account.GroupIDs = []int64{f.groupID}
+				account.AccountGroups = []AccountGroup{{AccountID: account.ID, GroupID: f.groupID}}
+			}
+			f.svc.accountRepo = &gatewayTrialAccountRepo{accounts, time.Now()}
+			for _, session := range []string{"new", "bound"} {
+				selected, err := f.svc.SelectAccountWithLoadAwareness(f.ctx, &f.groupID, session, model, nil, "", 0)
+				require.NoError(t, err)
+				if session == "new" {
+					require.EqualValues(t, 2, selected.Account.ID, "lower priority trial should receive new traffic")
+					require.True(t, selected.PreserveStickyBinding)
+					require.Zero(t, f.cache.sessionBindings[session], "one trial request must not bind the whole session")
+				} else {
+					require.EqualValues(t, 1, selected.Account.ID, "retain the eligible session owner")
+				}
+				if selected.ReleaseFunc != nil {
+					selected.ReleaseFunc()
+				}
+			}
+		})
+	}
+}
 
 // loadAwareRestrictionFixture 构造走负载感知路径（load_batch 开启 + 并发服务存在）的
 // GatewayService：分组 10 绑定 upstream 计费基准的渠道，定价列表只允许 claude-sonnet-4-6。

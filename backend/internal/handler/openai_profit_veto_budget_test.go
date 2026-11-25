@@ -7,7 +7,7 @@ import (
 )
 
 // TestRecordOpenAIProfitVetoBounded 钉死 OpenAI 侧选号循环的利润否决预算：
-// 账号被加入排除集，且第 maxProfitVetoAttempts 次否决返回 false 要求终止。
+// 账号被加入排除集，且第 maxAdmissionVetoAttempts 次否决返回 false 要求终止。
 //
 // 上限是必需的：acquireResponsesAccountSlot 的 WaitPlan 分支先阻塞排队
 // （sticky 45s / fallback 30s）拿到槽位才做利润终检，无上限重选会把单次请求
@@ -16,16 +16,16 @@ func TestRecordOpenAIProfitVetoBounded(t *testing.T) {
 	failed := make(map[int64]struct{})
 	count := 0
 
-	for i := int64(1); i < int64(maxProfitVetoAttempts); i++ {
-		require.True(t, recordOpenAIProfitVeto(failed, i, &count), "第 %d 次否决应允许继续重选", i)
+	for i := int64(1); i < int64(maxAdmissionVetoAttempts); i++ {
+		require.True(t, recordOpenAIAdmissionVeto(failed, i, &count), "第 %d 次否决应允许继续重选", i)
 		require.Contains(t, failed, i, "否决的账号必须进入本请求排除集")
 	}
 
 	require.False(t,
-		recordOpenAIProfitVeto(failed, int64(maxProfitVetoAttempts), &count),
-		"第 %d 次否决应耗尽预算并要求终止", maxProfitVetoAttempts)
-	require.Equal(t, maxProfitVetoAttempts, count)
-	require.Len(t, failed, maxProfitVetoAttempts)
+		recordOpenAIAdmissionVeto(failed, int64(maxAdmissionVetoAttempts), &count),
+		"第 %d 次否决应耗尽预算并要求终止", maxAdmissionVetoAttempts)
+	require.Equal(t, maxAdmissionVetoAttempts, count)
+	require.Len(t, failed, maxAdmissionVetoAttempts)
 }
 
 // TestOpenAIProfitVetoLoopTerminates 模拟「选号 → 抢槽 → 利润终检否决 → 重选」
@@ -42,14 +42,14 @@ func TestOpenAIProfitVetoLoopTerminates(t *testing.T) {
 		if _, excluded := failed[accountID]; excluded {
 			continue
 		}
-		if !recordOpenAIProfitVeto(failed, accountID, &count) {
+		if !recordOpenAIAdmissionVeto(failed, accountID, &count) {
 			terminated = true
 			break
 		}
 	}
 
 	require.True(t, terminated, "整池越线时循环必须由否决预算终止")
-	require.Equal(t, maxProfitVetoAttempts, iterations)
+	require.Equal(t, maxAdmissionVetoAttempts, iterations)
 }
 
 // TestProfitVetoBudgetSharedWithFailoverState 钉死两条路径（FailoverState 与
@@ -60,15 +60,15 @@ func TestProfitVetoBudgetSharedWithFailoverState(t *testing.T) {
 	count := 0
 
 	var fsStoppedAt, openAIStoppedAt int
-	for i := int64(1); i <= int64(maxProfitVetoAttempts)+5; i++ {
-		if fsStoppedAt == 0 && fs.RecordProfitVeto(i) == FailoverExhausted {
-			fsStoppedAt = fs.ProfitVetoCount()
+	for i := int64(1); i <= int64(maxAdmissionVetoAttempts)+5; i++ {
+		if fsStoppedAt == 0 && fs.RecordAdmissionVeto(i) == FailoverExhausted {
+			fsStoppedAt = fs.AdmissionVetoCount()
 		}
-		if openAIStoppedAt == 0 && !recordOpenAIProfitVeto(failed, i, &count) {
+		if openAIStoppedAt == 0 && !recordOpenAIAdmissionVeto(failed, i, &count) {
 			openAIStoppedAt = count
 		}
 	}
 
-	require.Equal(t, maxProfitVetoAttempts, fsStoppedAt)
+	require.Equal(t, maxAdmissionVetoAttempts, fsStoppedAt)
 	require.Equal(t, fsStoppedAt, openAIStoppedAt, "两条路径的利润否决上限必须一致")
 }

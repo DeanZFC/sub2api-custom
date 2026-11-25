@@ -1060,11 +1060,11 @@ func (s *GatewayService) BindStickySession(ctx context.Context, groupID *int64, 
 // behavior unless a profit gate is installed. Profit-controlled requests bind
 // only after the terminal post-slot check, otherwise a rejected candidate could
 // overwrite a healthy pre-existing sticky binding.
-func (s *GatewayService) bindGatewayStickySessionDuringSelection(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
-	if gatewayProfitControlGateActive(ctx) {
+func (s *GatewayService) bindGatewayStickySessionDuringSelection(ctx context.Context, groupID *int64, sessionHash string, account *Account) error {
+	if account.PerformanceTrialDueAt != nil || gatewayProfitControlGateActive(ctx) || isUnmeasuredPerformanceRequest(ctx) {
 		return nil
 	}
-	return s.BindStickySession(ctx, groupID, sessionHash, accountID)
+	return s.BindStickySession(ctx, groupID, sessionHash, account.ID)
 }
 
 // BindStickySessionAfterProfitAdmission records a terminally admitted

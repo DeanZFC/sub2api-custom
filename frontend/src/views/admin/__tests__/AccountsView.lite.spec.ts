@@ -10,7 +10,7 @@ const {
   listAccounts,
   listWithEtag,
   getById,
-  getPerformance,
+  getPerformanceStates,
   getBatchTodayStats,
   getBatchUsage,
   getUpstreamBillingProbeSettings,
@@ -28,7 +28,7 @@ const {
   listAccounts: vi.fn(),
   listWithEtag: vi.fn(),
   getById: vi.fn(),
-  getPerformance: vi.fn(),
+  getPerformanceStates: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getBatchUsage: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn(),
@@ -51,7 +51,7 @@ vi.mock('@/api/admin', () => ({
     accounts: {
       list: listAccounts,
       getById,
-      getPerformance,
+      getPerformanceStates,
       listWithEtag,
       getBatchTodayStats,
       getBatchUsage,
@@ -187,7 +187,7 @@ describe('admin AccountsView lite account list', () => {
     listAccounts.mockReset().mockResolvedValue({ items: [listRow], total: 1, page: 1, page_size: 20, pages: 1 })
     listWithEtag.mockReset().mockResolvedValue({ notModified: true, etag: 'compact-etag', data: null })
     getById.mockReset().mockResolvedValue(fullAccount)
-    getPerformance.mockReset().mockResolvedValue({})
+    getPerformanceStates.mockReset().mockResolvedValue({})
     getBatchTodayStats.mockReset().mockResolvedValue({ stats: {} })
     getBatchUsage.mockReset().mockResolvedValue({ usage: { '42': { five_hour: { utilization: 21 }, seven_day: { utilization: 31 } } }, errors: {} })
     getUpstreamBillingProbeSettings.mockReset().mockResolvedValue({ enabled: true })
@@ -206,16 +206,16 @@ describe('admin AccountsView lite account list', () => {
     vi.restoreAllMocks()
   })
 
-  it('refreshes performance evidence every 30 seconds independently of unchanged list ETags', async () => {
+  it('refreshes lightweight rule states every 30 seconds independently of unchanged list ETags', async () => {
     vi.useFakeTimers()
     const wrapper = mountView()
     await flushPromises()
-    expect(getPerformance).toHaveBeenCalledWith([42], expect.any(AbortSignal))
-    getPerformance.mockClear()
+    expect(getPerformanceStates).toHaveBeenCalledWith([42], expect.any(AbortSignal))
+    getPerformanceStates.mockClear()
     await vi.advanceTimersByTimeAsync(30_000)
     await flushPromises()
-    expect(getPerformance).toHaveBeenCalledTimes(1)
-    expect(getPerformance).toHaveBeenCalledWith([42], expect.any(AbortSignal))
+    expect(getPerformanceStates).toHaveBeenCalledTimes(1)
+    expect(getPerformanceStates).toHaveBeenCalledWith([42], expect.any(AbortSignal))
     wrapper.unmount()
   })
 
