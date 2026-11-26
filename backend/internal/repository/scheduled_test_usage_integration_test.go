@@ -4,21 +4,44 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"net/url"
 	"testing"
 	"time"
 
+	"entgo.io/ent/dialect"
+	entsql "entgo.io/ent/dialect/sql"
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 )
 
 func TestScheduledTestUsageIntegration(t *testing.T) {
 	ctx := context.Background()
 	suffix := time.Now().UnixNano()
-	account := mustCreateAccount(t, integrationEntClient, &service.Account{Name: fmt.Sprintf("quality-usage-%d", suffix), Platform: service.PlatformOpenAI, Status: service.StatusActive})
-	first := mustCreateGroup(t, integrationEntClient, &service.Group{Name: fmt.Sprintf("quality-first-%d", suffix), Platform: service.PlatformOpenAI})
-	second := mustCreateGroup(t, integrationEntClient, &service.Group{Name: fmt.Sprintf("quality-second-%d", suffix), Platform: service.PlatformOpenAI})
-	repo := &qualityOperationsRepository{db: integrationDB}
+	// The recorder commits its own transactions and the monitor updates shared
+	// rollups. Run both against an isolated database within the test container.
+	name := fmt.Sprintf("scheduled_usage_%d", suffix)
+	_, err := integrationDB.ExecContext(ctx, "CREATE DATABASE "+pq.QuoteIdentifier(name))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := integrationDB.ExecContext(ctx, "DROP DATABASE "+pq.QuoteIdentifier(name))
+		require.NoError(t, err)
+	})
+	dsn, err := url.Parse(integrationDatabaseDSN)
+	require.NoError(t, err)
+	dsn.Path = "/" + name
+	db, err := sql.Open("postgres", dsn.String())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	require.NoError(t, ApplyMigrations(ctx, db))
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+	account := mustCreateAccount(t, client, &service.Account{Name: fmt.Sprintf("quality-usage-%d", suffix), Platform: service.PlatformOpenAI, Status: service.StatusActive})
+	first := mustCreateGroup(t, client, &service.Group{Name: fmt.Sprintf("quality-first-%d", suffix), Platform: service.PlatformOpenAI})
+	second := mustCreateGroup(t, client, &service.Group{Name: fmt.Sprintf("quality-second-%d", suffix), Platform: service.PlatformOpenAI})
+	repo := &qualityOperationsRepository{db: db}
 	model := fmt.Sprintf("quality-model-%d", suffix)
 	now := time.Now().UTC().Truncate(time.Second)
 	input, output, cached := int64(100), int64(10), int64(40)
@@ -32,19 +55,19 @@ func TestScheduledTestUsageIntegration(t *testing.T) {
 		require.NoError(t, repo.RecordScheduledTestUsage(ctx, usage))
 	}
 	var count, failures int
-	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM usage_logs WHERE account_id=$1 AND model=$2 AND user_id IS NULL AND api_key_id IS NULL AND actual_cost=0`, account.ID, model).Scan(&count))
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM usage_logs WHERE account_id=$1 AND model=$2 AND user_id IS NULL AND api_key_id IS NULL AND actual_cost=0`, account.ID, model).Scan(&count))
 	require.Equal(t, 2, count)
-	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM ops_error_logs WHERE account_id=$1 AND model=$2`, account.ID, model).Scan(&failures))
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM ops_error_logs WHERE account_id=$1 AND model=$2`, account.ID, model).Scan(&failures))
 	require.Equal(t, 1, failures)
 	var id int64
-	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT id FROM usage_logs WHERE account_id=$1 AND model=$2 ORDER BY id LIMIT 1`, account.ID, model).Scan(&id))
-	log, err := newUsageLogRepositoryWithSQL(integrationEntClient, integrationDB).GetByID(ctx, id)
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT id FROM usage_logs WHERE account_id=$1 AND model=$2 ORDER BY id LIMIT 1`, account.ID, model).Scan(&id))
+	log, err := newUsageLogRepositoryWithSQL(client, db).GetByID(ctx, id)
 	require.NoError(t, err)
 	require.NotNil(t, log.QualityUsage)
 	require.Equal(t, input, *log.QualityUsage.InputTokens)
 	require.Nil(t, log.QualityUsage.CacheCreationTokens)
 
-	monitor := &channelMonitorV2Repository{db: integrationDB}
+	monitor := &channelMonitorV2Repository{db: db}
 	start := now.Add(-time.Minute).Truncate(time.Minute)
 	end := now.Add(2 * time.Minute).Truncate(time.Minute)
 	require.NoError(t, monitor.RecomputeRange(ctx, start, end))

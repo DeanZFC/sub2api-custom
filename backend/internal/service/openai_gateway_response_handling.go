@@ -2614,10 +2614,11 @@ func collectRawResponsesOutputItemsFromSSE(bodyText string) ([]byte, bool) {
 	for ref := range fragments {
 		_, byID := seen[ref.id]
 		_, byIndex := indexes[ref.index]
-		if !byID && !(ref.id == "" && ref.indexed && byIndex) {
-			needsRebuild = true
-			break
+		if byID || (ref.id == "" && ref.indexed && byIndex) {
+			continue
 		}
+		needsRebuild = true
+		break
 	}
 	if needsRebuild {
 		var slots openAICompatOutputSlots

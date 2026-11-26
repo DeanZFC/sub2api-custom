@@ -710,7 +710,7 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 			SELECT
 				COALESCE(NULLIF(TRIM(inbound_endpoint), ''), 'unknown') AS inbound_endpoint,
 				COALESCE(NULLIF(TRIM(upstream_endpoint), ''), 'unknown') AS upstream_endpoint,
-				request_type, stream, openai_ws_mode, image_input_tokens,
+				api_key_id, quality_usage, request_type, stream, openai_ws_mode, image_input_tokens,
 				input_tokens,
 				output_tokens,
 				cache_creation_tokens,
