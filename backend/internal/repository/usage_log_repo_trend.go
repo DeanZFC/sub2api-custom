@@ -35,6 +35,7 @@ func (r *usageLogRepository) GetAPIKeyUsageTrend(ctx context.Context, startTime,
 			SELECT api_key_id
 			FROM usage_logs
 			WHERE created_at >= $1 AND created_at < $2
+			AND api_key_id IS NOT NULL
 			GROUP BY api_key_id
 			ORDER BY SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) DESC
 			LIMIT $3
@@ -94,6 +95,7 @@ func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, e
 			SELECT user_id
 			FROM usage_logs
 			WHERE created_at >= $1 AND created_at < $2
+			AND user_id IS NOT NULL
 			GROUP BY user_id
 			ORDER BY %s DESC, user_id ASC
 			LIMIT $3
@@ -161,6 +163,7 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 			FROM usage_logs u
 			LEFT JOIN users us ON u.user_id = us.id
 			WHERE u.created_at >= $1 AND u.created_at < $2
+			AND u.user_id IS NOT NULL
 			GROUP BY u.user_id, us.email, us.username
 		),
 		ranked AS (
@@ -631,7 +634,7 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 			COALESCE(SUM(COALESCE(ul.account_stats_cost, ul.total_cost) * COALESCE(ul.account_rate_multiplier, 1)), 0) as account_cost
 		FROM usage_logs ul
 		LEFT JOIN users u ON u.id = ul.user_id
-		WHERE ul.created_at >= $1 AND ul.created_at < $2
+		WHERE ul.user_id IS NOT NULL AND ul.created_at >= $1 AND ul.created_at < $2
 	`
 	args := []any{startTime, endTime}
 

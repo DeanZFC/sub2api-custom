@@ -1,31 +1,31 @@
 <template>
-  <div class="channel-card-metrics my-3 min-w-0 flex-1" data-testid="card-metrics">
+  <div class="channel-card-metrics my-5 min-w-0 flex-1" data-testid="card-metrics">
     <div class="metrics-layout">
-      <section class="min-w-0" :class="{ 'rounded-xl bg-gray-50 p-3 dark:bg-dark-900/40': showModels }" :aria-label="t('channelMonitorV2.cards.overall')">
+      <section class="min-w-0" :aria-label="t('channelMonitorV2.cards.overall')">
         <div v-if="showModels" class="mb-2 flex items-center justify-between gap-2 text-xs">
           <button type="button" class="rounded font-semibold text-emerald-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-500 dark:text-emerald-400" :aria-pressed="!selectedModel" @click="$emit('select-model', undefined)">{{ t('channelMonitorV2.cards.overall') }}</button>
           <span class="truncate text-[10px] text-gray-400">{{ t('channelMonitorV2.cards.allModels') }}</span>
         </div>
-        <dl class="overall-grid grid grid-cols-2 gap-x-2 gap-y-2" :class="{ 'rounded-xl bg-gray-50 p-3 dark:bg-dark-900/40': !showModels }">
+        <dl class="overall-grid grid grid-cols-2 gap-2">
           <div class="min-w-0">
             <dt class="truncate text-xs text-gray-500 dark:text-gray-400" :title="t('channelMonitorV2.metrics.cacheHint')">{{ t('channelMonitorV2.metrics.cacheRate') }}</dt>
-            <dd class="font-mono text-lg font-bold tabular-nums text-gray-800 dark:text-gray-100">{{ formatMonitorCacheRate(row.metrics) }}</dd>
+            <dd class="text-slate-900 dark:text-slate-100">{{ formatMonitorCacheRate(row.metrics) }}</dd>
           </div>
           <div class="min-w-0">
             <dt class="truncate text-xs text-gray-500 dark:text-gray-400">{{ t('channelMonitorV2.metrics.successRate') }}</dt>
-            <dd class="font-mono text-lg font-bold tabular-nums" :class="successClass[row.health.error_rate]">{{ formatMonitorSuccessRateFromError(row.metrics.error_rate, row.health.error_rate) }}</dd>
+            <dd :class="successClass[row.health.error_rate]">{{ formatMonitorSuccessRateFromError(row.metrics.error_rate, row.health.error_rate) }}</dd>
           </div>
           <div class="min-w-0">
             <dt class="truncate text-xs text-gray-500 dark:text-gray-400" :title="t('channelMonitorV2.metrics.ttftP50')">{{ t('channelMonitorV2.metrics.ttft') }}</dt>
-            <dd class="font-mono text-lg font-bold tabular-nums text-gray-800 dark:text-gray-100" :title="latencyDetail(row)">{{ formatMonitorMs(row.metrics.ttft.p50_ms) }}</dd>
+            <dd class="text-slate-900 dark:text-slate-100" :title="latencyDetail(row)">{{ formatMonitorMs(row.metrics.ttft.p50_ms) }}</dd>
           </div>
           <div class="min-w-0" data-output-tps>
             <dt class="truncate text-xs text-gray-500 dark:text-gray-400" :title="t('channelMonitorV2.metrics.outputTpsDetail')">{{ t('channelMonitorV2.metrics.outputTps') }}</dt>
-            <dd class="font-mono text-lg font-bold tabular-nums text-gray-800 dark:text-gray-100" :title="formatMonitorOutputTps(row.metrics.output_tps)">{{ compactTps(row.metrics.output_tps) }}</dd>
+            <dd class="text-slate-900 dark:text-slate-100" :title="formatMonitorOutputTps(row.metrics.output_tps)">{{ compactTps(row.metrics.output_tps) }}</dd>
           </div>
         </dl>
       </section>
-      <section v-if="showModels" class="model-metrics min-w-0" :aria-label="t('channelMonitorV2.cards.models')">
+      <section v-if="showModels" class="model-metrics min-w-0 rounded-2xl border border-slate-200/90 bg-white/60 p-1.5 dark:border-dark-700 dark:bg-dark-900/30" :aria-label="t('channelMonitorV2.cards.models')">
         <div class="model-grid items-center px-2 py-1 text-xs">
           <div class="model-name flex flex-wrap items-baseline gap-x-2">
             <h4 class="font-semibold text-gray-700 dark:text-gray-200">{{ t('channelMonitorV2.cards.models') }}</h4>
@@ -94,7 +94,7 @@ const modelsExpanded = ref(false)
 const modelsListId = `channel-models-${useId()}`
 const visibleModels = computed(() => modelsExpanded.value ? props.models : props.models.slice(0, collapsedModelCount))
 watch(() => props.models.length, count => { if (count <= collapsedModelCount) modelsExpanded.value = false })
-const successClass = { healthy: 'text-emerald-600 dark:text-emerald-400', warning: 'text-amber-600 dark:text-amber-400', critical: 'text-rose-500 dark:text-rose-400', unknown: 'text-gray-400' }
+const successClass = { healthy: 'text-emerald-700 dark:text-emerald-400', warning: 'text-amber-700 dark:text-amber-400', critical: 'text-red-600 dark:text-red-400', unknown: 'text-gray-400' }
 function compactTps(value?: number | null) { return value == null || !Number.isFinite(value) || value < 0 ? '—' : formatMonitorRate(value) }
 function latencyDetail(row: MonitorMatrixRow) { const m = row.metrics.ttft; return formatLatencyPrivacy(m.p50_ms, m.p90_ms, m.avg_ms, m.p95_ms) }
 </script>
@@ -102,6 +102,12 @@ function latencyDetail(row: MonitorMatrixRow) { const m = row.metrics.ttft; retu
 <style scoped>
 .channel-card-metrics { container-type: inline-size; }
 .metrics-layout { display: grid; gap: 1rem; }
+.overall-grid > div {
+  @apply rounded-2xl border border-slate-200/90 bg-slate-50/80 px-2.5 py-3 dark:border-dark-700 dark:bg-dark-900/40;
+}
+.overall-grid dd {
+  @apply mt-1.5 font-mono text-lg font-bold leading-tight tabular-nums;
+}
 .model-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -114,7 +120,7 @@ function latencyDetail(row: MonitorMatrixRow) { const m = row.metrics.ttft; retu
 @container (max-width: 18rem) {
   .model-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-@container (min-width: 22rem) {
+@container (min-width: 24rem) {
   .overall-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 @container (min-width: 26rem) {

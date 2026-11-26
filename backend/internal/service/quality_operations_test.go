@@ -18,6 +18,12 @@ type qualityOperationsStub struct {
 	QualityOperationsRepository
 	reserve  func(context.Context, int64, int64, bool, string) (*QualityProbeReservation, error)
 	outcomes []QualityProbeOutcome
+	usage    []ScheduledTestUsage
+}
+
+func (s *qualityOperationsStub) RecordScheduledTestUsage(_ context.Context, u ScheduledTestUsage) error {
+	s.usage = append(s.usage, u)
+	return nil
 }
 
 func (s *qualityOperationsStub) ReserveQualityProbe(ctx context.Context, a, t int64, auto bool, session string) (*QualityProbeReservation, error) {
@@ -205,4 +211,55 @@ func TestQualityOperationsMaintenanceRetainsHourlyCleanupWithoutPassiveService(t
 	repo.err = nil
 	runner.pruneQualityOperations(context.Background(), now.Add(2*time.Hour+time.Minute))
 	require.Equal(t, 4, repo.calls, "failed cleanup retries on the next scheduler sweep")
+}
+
+func TestScheduledTestUsageRecordsCompatibilityRequests(t *testing.T) {
+	account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, GroupIDs: []int64{3, 7}, Credentials: map[string]any{"api_key": "test", "base_url": "https://upstream.example.com"}, Extra: map[string]any{openai_compat.ExtraKeyResponsesSupported: true}}
+	upstream := &modelIdentityHTTPUpstream{responses: []*http.Response{
+		costJSONResponse(400, `{"error":{"message":"Unsupported parameter: max_output_tokens"}}`),
+		{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":100,\"output_tokens\":10,\"input_tokens_details\":{\"cached_tokens\":40}}}}\n\n"))},
+	}}
+	var reservations int64
+	repo := &qualityOperationsStub{reserve: func(_ context.Context, account, _ int64, _ bool, _ string) (*QualityProbeReservation, error) {
+		reservations++
+		return &QualityProbeReservation{ID: reservations, AccountID: account}, nil
+	}}
+	svc := &AccountTestService{accountRepo: &modelIdentityAccountRepo{account: account}, httpUpstream: upstream, cfg: &config.Config{}, qualityOperations: repo}
+	ctx := context.WithValue(context.Background(), scheduledTestPlanContextKey{}, &ScheduledTestPlan{GroupIDs: []int64{7}})
+	result, err := svc.RunTestBackgroundWithPromptAndReasoning(ctx, account.ID, "test-model", "Reply OK", "")
+	require.NoError(t, err)
+	require.Equal(t, "success", result.Status)
+	require.Len(t, repo.usage, 2)
+	require.EqualValues(t, 1, repo.usage[0].ReservationID)
+	require.EqualValues(t, 2, repo.usage[1].ReservationID)
+	require.Equal(t, 400, repo.usage[0].Attempt.HTTPStatus)
+	require.Equal(t, 200, repo.usage[1].Attempt.HTTPStatus)
+	require.Empty(t, repo.usage[1].Attempt.FailureKind)
+	require.Equal(t, []int64{7}, repo.usage[1].GroupIDs)
+	require.EqualValues(t, 60, repo.usage[1].InputTokens)
+}
+
+func TestScheduledTestUsageRecordsStreamFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"failed", "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"expected numeric output\"}}}\n\n"},
+		{"interrupted", "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test", "base_url": "https://upstream.example.com"}, Extra: map[string]any{openai_compat.ExtraKeyResponsesSupported: true}}
+			upstream := &modelIdentityHTTPUpstream{responses: []*http.Response{{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(tc.body))}}}
+			repo := &qualityOperationsStub{reserve: func(_ context.Context, account, _ int64, _ bool, _ string) (*QualityProbeReservation, error) {
+				return &QualityProbeReservation{ID: 1, AccountID: account}, nil
+			}}
+			svc := &AccountTestService{accountRepo: &modelIdentityAccountRepo{account: account}, httpUpstream: upstream, cfg: &config.Config{}, qualityOperations: repo}
+			ctx := context.WithValue(context.Background(), scheduledTestPlanContextKey{}, &ScheduledTestPlan{})
+			result, err := svc.RunTestBackgroundWithPromptAndReasoning(ctx, account.ID, "test-model", "Reply OK", "")
+			require.NoError(t, err)
+			require.Equal(t, "failed", result.Status)
+			require.Len(t, repo.usage, 1)
+			require.NotEmpty(t, repo.usage[0].Attempt.FailureKind)
+		})
+	}
 }

@@ -467,6 +467,9 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.sendErrorAndEnd(c, "Account not found")
 	}
 	bindAccountTestPlatform(c, account)
+	if usage, ok := ctx.Value(accountTestUsageKey{}).(*accountTestUsageCollector); ok {
+		usage.account = account
+	}
 	// Synthetic UI load-test accounts exercise the real SSE parsing and modal
 	// interactions, but intentionally do not send their placeholder credentials
 	// to an upstream provider.
@@ -3772,7 +3775,7 @@ func (s *AccountTestService) RunTestBackgroundWithPromptAndReasoning(ctx context
 		ctx = context.WithValue(ctx, qualityRunKey{}, uuid.NewString())
 	}
 	ctx, modelIdentity := newAccountTestModelIdentity(ctx)
-	usage := &accountTestUsageCollector{}
+	usage := &accountTestUsageCollector{modelIdentity: modelIdentity}
 	ctx = context.WithValue(ctx, accountTestUsageKey{}, usage)
 
 	w := httptest.NewRecorder()
@@ -3809,6 +3812,7 @@ func (s *AccountTestService) RunTestBackgroundWithPromptAndReasoning(ctx context
 	}
 	if usage.deferred != nil {
 		usage.finishQualitySettlements("")
+		usage.recordScheduledTestUsage(ctx, s.qualityOperations, result.ExecutionInfo.Attempts, modelID, reasoningEffort)
 		result.ExecutionInfo.FailureKind = "quality_deferred"
 		result.ExecutionInfo.NextCheckAt = &usage.deferred.Until
 		result.ErrorMessage = usage.deferred.Error()
@@ -3819,6 +3823,7 @@ func (s *AccountTestService) RunTestBackgroundWithPromptAndReasoning(ctx context
 		result.ExecutionInfo.Attempts[n-1].FailureKind = result.ExecutionInfo.FailureKind
 	}
 	usage.finishQualitySettlements(result.ExecutionInfo.FailureKind)
+	usage.recordScheduledTestUsage(ctx, s.qualityOperations, result.ExecutionInfo.Attempts, modelID, reasoningEffort)
 	return result, nil
 }
 

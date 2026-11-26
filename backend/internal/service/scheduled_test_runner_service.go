@@ -650,6 +650,7 @@ func (s *ScheduledTestRunnerService) runAccountWithResult(ctx context.Context, p
 		if s.accountTestSvc == nil {
 			return scheduledTestFailedAttempt(attemptStarted, fmt.Errorf("account test service unavailable"))
 		}
+		executionCtx = context.WithValue(executionCtx, scheduledTestPlanContextKey{}, plan)
 		result, err := s.accountTestSvc.RunTestBackgroundWithPromptAndReasoning(executionCtx, accountID, plan.ModelID, prompt, plan.ReasoningEffort)
 		// Budget settlement is separate from upstream execution. A result that
 		// finished before the deadline remains valid if settlement consumed the

@@ -19,7 +19,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, model, requested_model, upstream_model, upstream_response_model, upstream_model_mismatch, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, image_output_tokens, image_output_cost, image_input_tokens, image_input_cost, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, image_input_size, image_output_size, image_size_source, image_size_breakdown, video_count, video_resolution, video_duration_seconds, service_tier, reasoning_effort, requested_reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, long_context_billing_applied, channel_id, model_mapping_chain, billing_tier, billing_mode, account_stats_cost, service_tier_surcharge_waived, upstream_request_id, session_id, native_compaction_v2, cache_creation_30m_tokens, cache_creation_12h_tokens, created_at, http_status"
+const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, model, requested_model, upstream_model, upstream_response_model, upstream_model_mismatch, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, image_output_tokens, image_output_cost, image_input_tokens, image_input_cost, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, image_input_size, image_output_size, image_size_source, image_size_breakdown, video_count, video_resolution, video_duration_seconds, service_tier, reasoning_effort, requested_reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, long_context_billing_applied, channel_id, model_mapping_chain, billing_tier, billing_mode, account_stats_cost, service_tier_surcharge_waived, upstream_request_id, session_id, native_compaction_v2, cache_creation_30m_tokens, cache_creation_12h_tokens, created_at, http_status, quality_usage"
 
 func (r *usageLogRepository) GetByID(ctx context.Context, id int64) (log *service.UsageLog, err error) {
 	query := "SELECT " + usageLogSelectColumns + " FROM usage_logs WHERE id = $1"
@@ -136,7 +136,7 @@ func usageLogConditions(filters UsageLogFilters) ([]string, []any) {
 		args = append(args, filters.AccountID)
 	}
 	if filters.GroupID > 0 {
-		conditions = append(conditions, fmt.Sprintf("group_id = $%d", len(args)+1))
+		conditions = append(conditions, fmt.Sprintf("(group_id = $%[1]d OR quality_group_set_id IN (SELECT id FROM channel_quality_group_sets WHERE $%[1]d = ANY(group_ids)))", len(args)+1))
 		args = append(args, filters.GroupID)
 	}
 	if requestID := strings.TrimSpace(filters.RequestID); requestID != "" {
@@ -347,8 +347,12 @@ func collectUsageLogIDs(logs []service.UsageLog) usageLogIDs {
 	subscriptionIDs := idSet()
 
 	for i := range logs {
-		userIDs[logs[i].UserID] = struct{}{}
-		apiKeyIDs[logs[i].APIKeyID] = struct{}{}
+		if logs[i].UserID > 0 {
+			userIDs[logs[i].UserID] = struct{}{}
+		}
+		if logs[i].APIKeyID > 0 {
+			apiKeyIDs[logs[i].APIKeyID] = struct{}{}
+		}
 		accountIDs[logs[i].AccountID] = struct{}{}
 		if logs[i].GroupID != nil {
 			groupIDs[*logs[i].GroupID] = struct{}{}
@@ -450,8 +454,8 @@ func (r *usageLogRepository) loadSubscriptions(ctx context.Context, ids []int64)
 func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, error) {
 	var (
 		id                         int64
-		userID                     int64
-		apiKeyID                   int64
+		userID                     sql.NullInt64
+		apiKeyID                   sql.NullInt64
 		accountID                  int64
 		requestID                  sql.NullString
 		model                      string
@@ -515,6 +519,7 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		cacheCreation30m           int
 		cacheCreation12h           int
 		httpStatus                 sql.NullInt64
+		qualityUsage               sql.NullString
 		createdAt                  time.Time
 	)
 
@@ -586,14 +591,15 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		&cacheCreation12h,
 		&createdAt,
 		&httpStatus,
+		&qualityUsage,
 	); err != nil {
 		return nil, err
 	}
 
 	log := &service.UsageLog{
 		ID:                         id,
-		UserID:                     userID,
-		APIKeyID:                   apiKeyID,
+		UserID:                     userID.Int64,
+		APIKeyID:                   apiKeyID.Int64,
 		AccountID:                  accountID,
 		Model:                      model,
 		RequestedModel:             coalesceTrimmedString(requestedModel, model),
@@ -626,6 +632,13 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		LongContextBillingApplied:  longContextBillingApplied,
 		ServiceTierSurchargeWaived: serviceTierSurchargeWaived,
 		CreatedAt:                  createdAt,
+	}
+	if qualityUsage.Valid {
+		var usage service.ScheduledTestTokenUsage
+		if err := json.Unmarshal([]byte(qualityUsage.String), &usage); err != nil {
+			return nil, fmt.Errorf("decode quality usage: %w", err)
+		}
+		log.QualityUsage = &usage
 	}
 	// 先回填 legacy 字段，再基于 legacy + request_type 计算最终请求类型，保证历史数据兼容。
 	log.Stream = stream

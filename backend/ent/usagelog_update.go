@@ -46,6 +46,12 @@ func (_u *UsageLogUpdate) SetNillableUserID(v *int64) *UsageLogUpdate {
 	return _u
 }
 
+// ClearUserID clears the value of the "user_id" field.
+func (_u *UsageLogUpdate) ClearUserID() *UsageLogUpdate {
+	_u.mutation.ClearUserID()
+	return _u
+}
+
 // SetAPIKeyID sets the "api_key_id" field.
 func (_u *UsageLogUpdate) SetAPIKeyID(v int64) *UsageLogUpdate {
 	_u.mutation.SetAPIKeyID(v)
@@ -57,6 +63,12 @@ func (_u *UsageLogUpdate) SetNillableAPIKeyID(v *int64) *UsageLogUpdate {
 	if v != nil {
 		_u.SetAPIKeyID(*v)
 	}
+	return _u
+}
+
+// ClearAPIKeyID clears the value of the "api_key_id" field.
+func (_u *UsageLogUpdate) ClearAPIKeyID() *UsageLogUpdate {
+	_u.mutation.ClearAPIKeyID()
 	return _u
 }
 
@@ -1194,12 +1206,6 @@ func (_u *UsageLogUpdate) check() error {
 			return &ValidationError{Name: "video_resolution", err: fmt.Errorf(`ent: validator failed for field "UsageLog.video_resolution": %w`, err)}
 		}
 	}
-	if _u.mutation.UserCleared() && len(_u.mutation.UserIDs()) > 0 {
-		return errors.New(`ent: clearing a required unique edge "UsageLog.user"`)
-	}
-	if _u.mutation.APIKeyCleared() && len(_u.mutation.APIKeyIDs()) > 0 {
-		return errors.New(`ent: clearing a required unique edge "UsageLog.api_key"`)
-	}
 	if _u.mutation.AccountCleared() && len(_u.mutation.AccountIDs()) > 0 {
 		return errors.New(`ent: clearing a required unique edge "UsageLog.account"`)
 	}
@@ -1670,6 +1676,12 @@ func (_u *UsageLogUpdateOne) SetNillableUserID(v *int64) *UsageLogUpdateOne {
 	return _u
 }
 
+// ClearUserID clears the value of the "user_id" field.
+func (_u *UsageLogUpdateOne) ClearUserID() *UsageLogUpdateOne {
+	_u.mutation.ClearUserID()
+	return _u
+}
+
 // SetAPIKeyID sets the "api_key_id" field.
 func (_u *UsageLogUpdateOne) SetAPIKeyID(v int64) *UsageLogUpdateOne {
 	_u.mutation.SetAPIKeyID(v)
@@ -1681,6 +1693,12 @@ func (_u *UsageLogUpdateOne) SetNillableAPIKeyID(v *int64) *UsageLogUpdateOne {
 	if v != nil {
 		_u.SetAPIKeyID(*v)
 	}
+	return _u
+}
+
+// ClearAPIKeyID clears the value of the "api_key_id" field.
+func (_u *UsageLogUpdateOne) ClearAPIKeyID() *UsageLogUpdateOne {
+	_u.mutation.ClearAPIKeyID()
 	return _u
 }
 
@@ -2830,12 +2848,6 @@ func (_u *UsageLogUpdateOne) check() error {
 		if err := usagelog.VideoResolutionValidator(v); err != nil {
 			return &ValidationError{Name: "video_resolution", err: fmt.Errorf(`ent: validator failed for field "UsageLog.video_resolution": %w`, err)}
 		}
-	}
-	if _u.mutation.UserCleared() && len(_u.mutation.UserIDs()) > 0 {
-		return errors.New(`ent: clearing a required unique edge "UsageLog.user"`)
-	}
-	if _u.mutation.APIKeyCleared() && len(_u.mutation.APIKeyIDs()) > 0 {
-		return errors.New(`ent: clearing a required unique edge "UsageLog.api_key"`)
 	}
 	if _u.mutation.AccountCleared() && len(_u.mutation.AccountIDs()) > 0 {
 		return errors.New(`ent: clearing a required unique edge "UsageLog.account"`)

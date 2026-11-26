@@ -44,6 +44,7 @@ func executeQualityTestHTTP(req *http.Request, account int64, send func(*http.Re
 			return nil, deferred
 		}
 		ctx = context.WithValue(ctx, qualitySettlementKey{}, func(a *ScheduledTestRequestAttempt) {
+			a.reservationID = res.ID
 			outcome := QualityProbeOutcome{At: time.Now().UTC(), Kind: "unknown"}
 			if a.qualityUsageFinal && a.InputTokens != nil && a.OutputTokens != nil {
 				values := []*int64{a.InputTokens, a.OutputTokens}

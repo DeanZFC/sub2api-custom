@@ -68,7 +68,7 @@ export default {
     healthMode: { label: '健康显示', overall: '综合', success: '错误率', ttft: '首 Token', cache: '缓存率' },
     tabs: { aria: '明细维度', models: '模型', errors: '错误原因', users: '用户排行' },
     metrics: {
-      outputTps: '输出 TPS', outputTpsValue: '输出 TPS {value}', outputTpsDetail: '有效流式输出 token ÷ 首字后生成秒数；按生成耗时加权，缺失数据不计入',
+      outputTps: '输出 TPS', outputTpsValue: '输出 TPS {value}', outputTpsDetail: '每条有效请求的输出 Token ÷ 总耗时（含首 Token 等待），取所选时段的中位数（P50）',
       rpm: 'RPM',
       tpm: 'TPM',
       tps: '总吞吐 token/s',

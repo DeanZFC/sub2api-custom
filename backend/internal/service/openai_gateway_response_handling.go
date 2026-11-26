@@ -2531,67 +2531,135 @@ func responsesStreamEventMayContributeToOutput(eventType string) bool {
 	}
 }
 
-// collectRawResponsesOutputItemsFromSSE 按到达顺序收集 SSE 流中
-// response.output_item.done 携带的原始 item。除已产生结果但仍停留在进行中
-// 的图片状态外，item 以 raw JSON 逐字节保留，
-// 避免经窄结构体重建时丢弃 encrypted_content/summary/opaque 等 compact
-// 专属或未来新增字段（#3777 问题 2）。若整条流没有任何 done 事件，退回
-// 收集 output_item.added 中的 compaction 类 item——compaction 结果没有
-// delta 事件，部分上游只在 added 事件中携带完整 item。
+// collectRawResponsesOutputItemsFromSSE retains raw done items, including
+// encrypted content and unmodelled fields. Some upstreams report compaction
+// only in an added event, or send text and tool arguments only as deltas.
+// An intact raw item takes precedence over any reconstruction of that item.
 func collectRawResponsesOutputItemsFromSSE(bodyText string) ([]byte, bool) {
-	var items []json.RawMessage
+	type itemRef struct {
+		id      string
+		index   int64
+		indexed bool
+	}
+	type indexedItem struct {
+		itemRef
+		raw json.RawMessage
+	}
+	refFor := func(data []byte, id string) itemRef {
+		index := gjson.GetBytes(data, "output_index")
+		n, err := strconv.ParseInt(index.Raw, 10, 64)
+		return itemRef{id: id, index: n, indexed: index.Type == gjson.Number && err == nil && n >= 0}
+	}
+	var items, addedCompactions []indexedItem
 	seen := make(map[string]struct{})
-	hasCompactionItem := false
-	appendItem := func(item gjson.Result) {
-		if !item.Exists() || !item.IsObject() {
-			return
-		}
-		key := strings.TrimSpace(item.Get("id").String())
+	indexes := make(map[int64]struct{})
+	fragments := make(map[itemRef]struct{})
+	appendItem := func(item indexedItem) {
+		key := item.id
 		if key == "" {
-			key = item.Raw
+			key = string(item.raw)
 		}
 		if _, dup := seen[key]; dup {
 			return
 		}
 		seen[key] = struct{}{}
-		if isResponsesCompactionItemType(item.Get("type").String()) {
-			hasCompactionItem = true
+		if item.indexed {
+			indexes[item.index] = struct{}{}
 		}
-		items = append(items, json.RawMessage(item.Raw))
+		items = append(items, item)
 	}
+	hasDoneCompaction := false
 	forEachOpenAISSEFrame(bodyText, func(eventType string, data []byte) {
-		data = []byte(openAICompatPayloadWithEventType(string(data), eventType))
-		if normalized, changed := normalizeCompletedImageGenerationStatus(data); changed {
-			data = normalized
-		}
-		if eventType != "response.output_item.done" {
-			return
-		}
-		appendItem(gjson.GetBytes(data, "item"))
-	})
-	// done 事件未携带 compaction item 时再看 added：覆盖"其他 item 有 done、
-	// compaction 只在 added 中"的混合形态；done 已含 compaction 时跳过，
-	// 避免同一 item 在无 id 可去重时被收集两份（Codex 要求恰好一个）。
-	if !hasCompactionItem {
-		forEachOpenAISSEFrame(bodyText, func(eventType string, data []byte) {
-			if eventType != "response.output_item.added" {
-				return
+		switch eventType {
+		case "response.output_item.added", "response.output_item.done":
+			if eventType == "response.output_item.done" {
+				data = []byte(openAICompatPayloadWithEventType(string(data), eventType))
+				if normalized, changed := normalizeCompletedImageGenerationStatus(data); changed {
+					data = normalized
+				}
 			}
 			item := gjson.GetBytes(data, "item")
-			if !isResponsesCompactionItemType(item.Get("type").String()) {
+			if !item.IsObject() {
 				return
 			}
-			appendItem(item)
-		})
+			compaction := isResponsesCompactionItemType(item.Get("type").String())
+			if eventType == "response.output_item.added" && !compaction {
+				return
+			}
+			entry := indexedItem{itemRef: refFor(data, strings.TrimSpace(item.Get("id").String())), raw: json.RawMessage(item.Raw)}
+			if eventType == "response.output_item.added" {
+				addedCompactions = append(addedCompactions, entry)
+				return
+			}
+			hasDoneCompaction = hasDoneCompaction || compaction
+			appendItem(entry)
+		case "response.output_text.delta", "response.refusal.delta", "response.reasoning_summary_text.delta", "response.reasoning_text.delta",
+			"response.function_call_arguments.delta", "response.function_call_arguments.done", "response.custom_tool_call_input.delta", "response.custom_tool_call_input.done":
+			fragments[refFor(data, gjson.GetBytes(data, "item_id").String())] = struct{}{}
+		}
+	})
+	if !hasDoneCompaction {
+		for _, entry := range addedCompactions {
+			appendItem(entry)
+		}
 	}
 	if len(items) == 0 {
 		return nil, false
 	}
-	outputJSON, err := json.Marshal(items)
-	if err != nil {
-		return nil, false
+
+	// A done event for a tool must not hide a different, delta-only message.
+	// Most turns finish every item. Only pay for replaying the compatible
+	// per-item accumulator if a fragment lacks a matching raw ID or index.
+	needsRebuild := false
+	for ref := range fragments {
+		_, byID := seen[ref.id]
+		_, byIndex := indexes[ref.index]
+		if !byID && !(ref.id == "" && ref.indexed && byIndex) {
+			needsRebuild = true
+			break
+		}
 	}
-	return outputJSON, true
+	if needsRebuild {
+		var slots openAICompatOutputSlots
+		forEachOpenAISSEFrame(bodyText, func(eventType string, data []byte) {
+			slots.Observe([]byte(openAICompatPayloadWithEventType(string(data), eventType)))
+		})
+		for _, slot := range slots.slots {
+			if slot.done != nil {
+				continue
+			}
+			// An added event by itself does not finish a tool call.
+			if !slot.text.any() && !slot.refusal.any() && slot.reasoning.Len() == 0 && slot.args.Len() == 0 && slot.argsDone == "" {
+				continue
+			}
+			item, ok := slot.build()
+			if !ok {
+				continue
+			}
+			if item.ID == "" {
+				item.ID = slot.id
+			}
+			if raw, err := json.Marshal(item); err == nil {
+				appendItem(indexedItem{itemRef: itemRef{id: item.ID, index: slot.index, indexed: slot.indexed}, raw: raw})
+			}
+		}
+	}
+
+	// Parallel items can finish out of order. Preserve the old relative order
+	// for equal indexes, then for items without an index.
+	sort.SliceStable(items, func(i, j int) bool {
+		a, b := items[i], items[j]
+		if a.indexed != b.indexed {
+			return a.indexed
+		}
+		return a.indexed && a.index < b.index
+	})
+	ordered := make([]json.RawMessage, len(items))
+	for i, item := range items {
+		ordered[i] = item.raw
+	}
+	outputJSON, err := json.Marshal(ordered)
+	return outputJSON, err == nil
 }
 
 // isResponsesCompactionItemType reports whether the item type is the Codex

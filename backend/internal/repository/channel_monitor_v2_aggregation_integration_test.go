@@ -55,12 +55,13 @@ func TestChannelMonitorV2SegmentedAggregationIntegration(t *testing.T) {
 	}
 	exec(t, `CREATE TABLE groups (id BIGINT,platform TEXT,name TEXT DEFAULT 'GPT-Pro',status TEXT DEFAULT 'active',deleted_at TIMESTAMPTZ,rate_multiplier NUMERIC DEFAULT 1);
 CREATE TABLE accounts (id BIGINT,platform TEXT);
-CREATE TABLE usage_logs (id BIGSERIAL,created_at TIMESTAMPTZ,group_id BIGINT DEFAULT 8,account_id BIGINT DEFAULT 62,user_id BIGINT DEFAULT 7,api_key_id BIGINT DEFAULT 1,
+CREATE TABLE channel_quality_group_sets(id bigserial primary key, group_ids bigint[] unique);
+CREATE TABLE usage_logs (quality_group_set_id bigint, quality_usage jsonb,id BIGSERIAL,http_status smallint,created_at TIMESTAMPTZ,group_id BIGINT DEFAULT 8,account_id BIGINT DEFAULT 62,user_id BIGINT DEFAULT 7,api_key_id BIGINT DEFAULT 1,
  model TEXT DEFAULT 'model-a',requested_model TEXT,request_id TEXT,request_type INT DEFAULT 2,stream BOOLEAN DEFAULT true,openai_ws_mode BOOLEAN DEFAULT false,
  actual_cost NUMERIC DEFAULT 1,input_tokens BIGINT DEFAULT 10,output_tokens BIGINT DEFAULT 10,cache_creation_tokens BIGINT DEFAULT 0,cache_read_tokens BIGINT DEFAULT 90,
  first_token_ms INT DEFAULT 100,duration_ms INT DEFAULT 1100,image_count INT DEFAULT 0,video_count INT DEFAULT 0,image_output_tokens INT DEFAULT 0,
- inbound_endpoint TEXT,upstream_endpoint TEXT,native_compaction_v2 BOOLEAN DEFAULT false);
-CREATE TABLE ops_error_logs (id BIGSERIAL,created_at TIMESTAMPTZ,group_id BIGINT DEFAULT 8,account_id BIGINT DEFAULT 62,user_id BIGINT DEFAULT 7,api_key_id BIGINT DEFAULT 1,
+ billing_mode TEXT,inbound_endpoint TEXT,upstream_endpoint TEXT,native_compaction_v2 BOOLEAN DEFAULT false);
+CREATE TABLE ops_error_logs (quality_group_set_id bigint,id BIGSERIAL,created_at TIMESTAMPTZ,group_id BIGINT DEFAULT 8,account_id BIGINT DEFAULT 62,user_id BIGINT DEFAULT 7,api_key_id BIGINT DEFAULT 1,
  request_id TEXT,client_request_id TEXT,request_type INT DEFAULT 2,is_count_tokens BOOLEAN DEFAULT false,status_code INT DEFAULT 503,error_type TEXT DEFAULT 'upstream_error',
  platform TEXT DEFAULT 'openai',model TEXT DEFAULT 'model-a',requested_model TEXT,error_owner TEXT,error_source TEXT,upstream_status_code INT,
  error_message TEXT,upstream_error_message TEXT,upstream_error_detail TEXT,error_body TEXT,upstream_errors JSONB,error_phase TEXT,is_business_limited BOOLEAN DEFAULT false);
@@ -81,6 +82,65 @@ INSERT INTO groups VALUES (8,'openai'); INSERT INTO accounts VALUES (62,'openai'
 		exec(t, `TRUNCATE usage_logs,ops_error_logs,channel_monitor_v2_metrics_1m,channel_monitor_v2_user_metrics_1m,channel_monitor_v2_latency_histograms_1m,channel_monitor_v2_error_metrics_1m,channel_monitor_v2_metrics_rollup,channel_monitor_v2_user_metrics_rollup,channel_monitor_v2_latency_histograms_rollup,channel_monitor_v2_error_metrics_rollup`)
 		exec(t, `UPDATE channel_monitor_v2_watermarks SET backfill_cursor=NULL,data_through=NULL,usage_coverage_start=NULL,error_coverage_start=NULL`)
 	}
+
+	t.Run("channel cards use the Ops median for each dimension and time bucket", func(t *testing.T) {
+		reset(t)
+		start := now.Add(-time.Hour).Truncate(time.Hour)
+		end := start.Add(15 * time.Minute)
+		exec(t, `INSERT INTO usage_logs(created_at,model,output_tokens,duration_ms,first_token_ms)
+ SELECT $1::timestamptz + d.minute*interval '1 minute', 'astra', d.tokens, d.duration, d.ttft
+ FROM (VALUES (0,245,9048,8977),(1,263,8474,8246),(2,195,7342,7335),
+              (3,278,9595,9554),(4,149,6720,6713),(5,419,10626,10517)) d(minute,tokens,duration,ttft)`, start)
+		ops, err := (&opsRepository{db: db}).queryOutputTPS(ctx, &service.OpsDashboardFilter{StartTime: start, EndTime: end})
+		require.NoError(t, err)
+		require.EqualValues(t, 6, ops.SampleCount)
+		exec(t, `INSERT INTO usage_logs(created_at,model,output_tokens,duration_ms,first_token_ms,group_id)
+ VALUES ($1,'sol',100,1000,NULL,8), ($1,'astra',9000,1000,NULL,9)`, start)
+		require.NoError(t, repo.RecomputeRange(ctx, start, end))
+		// Old rollups must never leak into either the window or bucket percentile.
+		exec(t, `UPDATE channel_monitor_v2_metrics_rollup SET tps_output_tokens=1549,tps_generation_ms=463,tps_samples=6`)
+		cfg := service.ChannelMonitorV2Config{Platforms: []service.ChannelMonitorV2PlatformConfig{{Platform: "openai", Enabled: true}}}
+		filter := service.ChannelMonitorV2Filter{Start: start, End: end, Bucket: 5 * time.Minute, RestrictGroups: true, AllowedGroupIDs: []int64{8}}
+		group, err := repo.GetMatrix(ctx, filter, cfg, service.ChannelMonitorV2GroupByPlatformGroup, true)
+		require.NoError(t, err)
+		require.Len(t, group.Items, 1)
+		require.EqualValues(t, 7, group.Items[0].Metrics.TPSSamples)
+		require.InDelta(t, 278000.0/9595, *group.Items[0].Metrics.OutputTPS, 1e-8)
+
+		filter.Models = []string{"astra"}
+		matrix, err := repo.GetMatrix(ctx, filter, cfg, service.ChannelMonitorV2GroupByPlatformGroupModel, true)
+		require.NoError(t, err)
+		require.Len(t, matrix.Items, 1)
+		row := matrix.Items[0]
+		require.Equal(t, "astra", row.Model)
+		require.EqualValues(t, 6, row.Metrics.TPSSamples)
+		require.Equal(t, ops.P50, row.Metrics.OutputTPS)
+		require.InDelta(t, 28.02561545, *row.Metrics.OutputTPS, 1e-8)
+		require.Len(t, row.Buckets, 2)
+		require.InDelta(t, 245000.0/9048, *row.Buckets[0].Metrics.OutputTPS, 1e-8)
+		require.InDelta(t, 419000.0/10626, *row.Buckets[1].Metrics.OutputTPS, 1e-8)
+
+		snap, err := repo.GetSnapshot(ctx, filter, cfg, true)
+		require.NoError(t, err)
+		require.Equal(t, row.Metrics.OutputTPS, snap.Metrics.OutputTPS)
+		require.Equal(t, row.Buckets[0].Metrics.OutputTPS, snap.Trend[0].Metrics.OutputTPS)
+		models, err := repo.GetModels(ctx, filter, cfg, true)
+		require.NoError(t, err)
+		require.Len(t, models.Items, 1)
+		require.Equal(t, row.Metrics.OutputTPS, models.Items[0].Metrics.OutputTPS)
+
+		exec(t, `CREATE TABLE users(id BIGINT PRIMARY KEY,email TEXT, username TEXT)`)
+		users, err := repo.GetUsers(ctx, filter, cfg, true)
+		require.NoError(t, err)
+		require.Len(t, users.Items, 1)
+		require.Equal(t, row.Metrics.OutputTPS, users.Items[0].Metrics.OutputTPS)
+		exec(t, `DELETE FROM usage_logs`)
+		matrix, err = repo.GetMatrix(ctx, filter, cfg, service.ChannelMonitorV2GroupByPlatformGroupModel, true)
+		require.NoError(t, err)
+		require.Len(t, matrix.Items, 1)
+		require.EqualValues(t, 6, matrix.Items[0].Metrics.SuccessRequests)
+		require.Nil(t, matrix.Items[0].Metrics.OutputTPS)
+	})
 
 	t.Run("local session block does not create a model or affect group health", func(t *testing.T) {
 		reset(t)

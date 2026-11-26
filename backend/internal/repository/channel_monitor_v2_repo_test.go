@@ -68,13 +68,14 @@ func TestChannelMonitorV2MatrixIncludesCorrespondingGroupRateWithoutTraffic(t *t
 			}
 			mock.ExpectQuery("SELECT usage_coverage_start").WillReturnRows(sqlmock.NewRows([]string{"usage", "error", "through", "computed", "backfill"}).AddRow(start, start, filter.End, filter.End, start))
 			// An inactive historical group can still have traffic while it no longer has current group metadata.
-			mock.ExpectQuery("SELECT .*m.platform,m.group_id").WillReturnRows(sqlmock.NewRows([]string{
-				"bucket", "platform", "group_id", "group_name", "model", "success", "errors", "upstream_affected", "upstream_attempts", "input", "cache_eligible_input", "output", "cache_creation", "cache_read", "cache_eligible_creation", "cache_eligible_read", "ttft_sum", "ttft_count", "duration_sum", "duration_count", "tps_output", "tps_generation", "tps_samples",
-			}).AddRow(start, "openai", 9, "Historical", "gpt-5", 1, 0, 0, 1, 10, 10, 5, 0, 0, 0, 0, 100, 1, 200, 1, 5, 100, 1))
-			mock.ExpectQuery("SELECT .*h.platform,h.group_id").WillReturnRows(sqlmock.NewRows([]string{"bucket", "platform", "group_id", "model", "user_id", "metric", "upper_bound", "count"}))
+			mock.ExpectQuery("SELECT .*m.platform,(m|visible).group_id").WillReturnRows(sqlmock.NewRows([]string{
+				"bucket", "platform", "group_id", "group_name", "model", "success", "errors", "upstream_affected", "upstream_attempts", "input", "cache_eligible_input", "output", "cache_creation", "cache_read", "cache_eligible_creation", "cache_eligible_read", "ttft_sum", "ttft_count", "duration_sum", "duration_count",
+			}).AddRow(start, "openai", 9, "Historical", "gpt-5", 1, 0, 0, 1, 10, 10, 5, 0, 0, 0, 0, 100, 1, 200, 1))
+			mock.ExpectQuery("SELECT .*h.platform,(h|visible).group_id").WillReturnRows(sqlmock.NewRows([]string{"bucket", "platform", "group_id", "model", "user_id", "metric", "upper_bound", "count"}))
 			mock.ExpectQuery("SELECT id, COALESCE.*rate_multiplier FROM groups").WithArgs(pq.Array([]int64{7, 8, 9})).WillReturnRows(sqlmock.NewRows([]string{"id", "name", "platform", "rate_multiplier"}).
 				AddRow(7, "Discount", "openai", .5).
 				AddRow(8, "Free", "openai", 0))
+			mock.ExpectQuery("percentile_cont").WillReturnRows(sqlmock.NewRows([]string{"platform", "group_id", "model", "user_id", "bucket", "p50", "samples"}))
 
 			repo := &channelMonitorV2Repository{db: db}
 			matrix, err := repo.GetMatrix(context.Background(), filter, cfg, groupBy, false)
@@ -120,9 +121,9 @@ func TestChannelMonitorV2ModelDimensionsAreObservedAndFilterable(t *testing.T) {
 		{Platform: "grok", Enabled: true},
 	}}
 	mock.ExpectQuery("SELECT usage_coverage_start").WillReturnRows(sqlmock.NewRows([]string{"usage", "error", "through", "computed", "backfill"}).AddRow(start, start, filter.End, filter.End, start))
-	mock.ExpectQuery("SELECT m.platform").WillReturnRows(sqlmock.NewRows([]string{"platform", "group_name", "group_platform", "group_id", "model", "count"}).
-		AddRow("openai", "A", "openai", 7, "called-model", 2).
-		AddRow("grok", "B", "grok", 8, "called-model", 3))
+	mock.ExpectQuery("SELECT m.platform").WillReturnRows(sqlmock.NewRows([]string{"platform", "group_name", "group_platform", "group_id", "model", "count", "platform_count"}).
+		AddRow("openai", "A", "openai", 7, "called-model", 2, 2).
+		AddRow("grok", "B", "grok", 8, "called-model", 3, 3))
 	repo := &channelMonitorV2Repository{db: db}
 	dimensions, err := repo.GetDimensions(context.Background(), filter, cfg)
 	require.NoError(t, err)
@@ -169,21 +170,6 @@ func TestChannelMonitorV2MetricIncludesSuccessRate(t *testing.T) {
 
 	adminMetric := acc.metric(1, true)
 	require.NotNil(t, adminMetric.UpstreamAffectedRequests)
-}
-
-func TestChannelMonitorV2OutputTPSUsesGenerationSumsAndMissingStaysUnknown(t *testing.T) {
-	acc := newMetricAccumulator()
-	require.Nil(t, acc.metric(1, true).OutputTPS)
-	// Legacy aggregates may contain output totals without eligible timings.
-	acc.addFact(channelMonitorV2Fact{Output: 10000, DurationSum: 500, DurationCount: 1})
-	require.Nil(t, acc.metric(1, true).OutputTPS)
-	acc.addFact(channelMonitorV2Fact{TPSOutputTokens: 100, TPSGenerationMS: 1000, TPSSamples: 1})
-	acc.addFact(channelMonitorV2Fact{TPSOutputTokens: 100, TPSGenerationMS: 10000, TPSSamples: 1})
-	for _, minutes := range []float64{1, 60, 1440} {
-		metric := acc.metric(minutes, true)
-		require.EqualValues(t, 2, metric.TPSSamples)
-		require.InDelta(t, 200.0/11, *metric.OutputTPS, .00001)
-	}
 }
 
 func TestChannelMonitorV2WhereUsesConfiguredScopeAndEmptyFilterMeansAllConfigured(t *testing.T) {

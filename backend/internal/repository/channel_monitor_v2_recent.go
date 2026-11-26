@@ -60,14 +60,14 @@ func channelMonitorV2RecentQuery(filter service.ChannelMonitorV2Filter, cfg serv
 		conditions := []string{
 			alias + ".created_at >= $1", alias + ".created_at < $2",
 			platform + " = ANY($3)", platform + " = d.platform",
-			"(d.group_id IS NULL OR " + alias + ".group_id = d.group_id)",
+			"(d.group_id IS NULL OR " + alias + ".group_id = d.group_id OR " + alias + ".quality_group_set_id IN (SELECT id FROM channel_quality_group_sets WHERE d.group_id = ANY(group_ids)))",
 			"(d.model IS NULL OR (" + model + ") = d.model)",
 		}
 		if empty {
 			conditions = append(conditions, "FALSE")
 		}
 		if groupParam != "" {
-			conditions = append(conditions, alias+".group_id = ANY("+groupParam+")")
+			conditions = append(conditions, channelMonitorV2GroupMatch(alias+".group_id", alias+".quality_group_set_id", groupParam))
 		}
 		if modelParam != "" {
 			conditions = append(conditions, "("+model+") = ANY("+modelParam+")")
@@ -83,14 +83,15 @@ func channelMonitorV2RecentQuery(filter service.ChannelMonitorV2Filter, cfg serv
     (SELECT ul.created_at, ul.id, ` + usageModel + ` AS model, FALSE AS is_error, ul.first_token_ms::bigint, ul.duration_ms::bigint,
       CASE WHEN ` + channelMonitorV2CacheEligibleUL + ` THEN ul.cache_read_tokens::double precision /
         NULLIF(ul.input_tokens::bigint + ul.cache_creation_tokens::bigint + ul.cache_read_tokens::bigint, 0) END AS cache_rate,
-      CASE WHEN ` + outputTPSEligibleSQL("ul") + ` THEN ul.output_tokens::double precision*1000/(ul.duration_ms::bigint-ul.first_token_ms::bigint) END AS output_tps,
+      CASE WHEN ` + channelMonitorV2OutputTPSEligibleSQL + ` THEN ` + usageOutputTPSSQL + ` END AS output_tps,
       ''::text AS error_type, ''::text AS error_owner, ''::text AS error_source, 0 AS status_code, 0 AS upstream_status_code, ''::text AS message, ''::text AS error_summary
     FROM usage_logs ul
     LEFT JOIN groups g ON g.id = ul.group_id
     LEFT JOIN accounts a ON a.id = ul.account_id
+    ` + channelMonitorV2UsageFailureJoinSQL + `
     WHERE ` + scope("ul", channelMonitorV2PlatformSQL, usageModel) + `
-      AND COALESCE(ul.request_type, 0) NOT IN (4, 6) AND (` + usageLogSuccessFilterUL + ` OR ul.output_tokens>0)
-      AND ` + channelMonitorV2NoFinalFailureSQL("ul") + `
+      AND COALESCE(ul.request_type, 0) NOT IN (4, 6) AND (` + channelMonitorV2UsageSuccessSQL + ` OR (ul.api_key_id IS NOT NULL AND ul.output_tokens>0))
+      AND e.request_id IS NULL
       AND (COALESCE(ul.request_type,0)=3 OR COALESCE(ul.openai_ws_mode,false) OR NULLIF(ul.request_id, '') IS NULL OR NOT EXISTS (
         SELECT 1 FROM usage_logs newer WHERE newer.request_id = ul.request_id
           AND COALESCE(newer.api_key_id,0)=COALESCE(ul.api_key_id,0) AND COALESCE(newer.account_id,0)=COALESCE(ul.account_id,0)

@@ -45,7 +45,7 @@ func TestChannelMonitorV2RecentRequestsClassifiesWithoutExposingPrivateFields(t 
 	defer db.Close()
 	now := time.Now().UTC()
 	rows := sqlmock.NewRows([]string{"idx", "id", "created_at", "model", "is_error", "ttft", "duration", "cache_rate", "output_tps", "type", "owner", "source", "status", "upstream_status", "message", "error_summary"}).
-		AddRow(0, 1, now, "gpt-test", false, 1000, 3500, 0.8, 40.0, "", "", "", 0, 0, "", "").
+		AddRow(0, 1, now, "gpt-test", false, 1000, 3500, 0.8, 100.0/3.5, "", "", "", 0, 0, "", "").
 		AddRow(0, 2, now.Add(time.Second), "gpt-test", false, 15000, 0, 0.0, nil, "", "", "", 0, 0, "", "").
 		AddRow(0, 3, now.Add(2*time.Second), "gpt-test", true, nil, 5000, nil, nil, "upstream", "provider", "", 503, 503, "private message body", "private summary").
 		AddRow(1, 4, now, "grok-test", true, -1, -1, nil, nil, "authentication", "client", "", 401, 0, "private API key text", "private summary")
@@ -63,7 +63,7 @@ func TestChannelMonitorV2RecentRequestsClassifiesWithoutExposingPrivateFields(t 
 	require.Nil(t, items[0].RecentRequests[2].TTFTMs)
 	require.EqualValues(t, 3500, *items[0].RecentRequests[0].DurationMs)
 	require.Equal(t, 0.8, *items[0].RecentRequests[0].CacheRate)
-	require.Equal(t, 40.0, *items[0].RecentRequests[0].OutputTPS)
+	require.Equal(t, 100.0/3.5, *items[0].RecentRequests[0].OutputTPS)
 	require.Nil(t, items[0].RecentRequests[1].OutputTPS)
 	require.Nil(t, items[0].RecentRequests[2].OutputTPS)
 	require.EqualValues(t, 0, *items[0].RecentRequests[1].DurationMs)

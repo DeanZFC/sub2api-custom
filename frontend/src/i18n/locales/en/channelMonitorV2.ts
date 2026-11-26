@@ -68,7 +68,7 @@ export default {
     healthMode: { label: 'Health display', overall: 'Overall', success: 'Error rate', ttft: 'First token', cache: 'Cache rate' },
     tabs: { aria: 'Detail dimension', models: 'Models', errors: 'Error reasons', users: 'User ranking' },
     metrics: {
-      outputTps: 'Output TPS', outputTpsValue: 'Output TPS {value}', outputTpsDetail: 'Streaming output tokens ÷ generation seconds after the first token; duration-weighted, missing evidence excluded',
+      outputTps: 'Output TPS', outputTpsValue: 'Output TPS {value}', outputTpsDetail: 'Median (P50) of output tokens per second across eligible requests in the selected period, including first-token wait',
       rpm: 'RPM',
       tpm: 'TPM',
       tps: 'Throughput token/s',

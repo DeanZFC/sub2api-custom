@@ -92,7 +92,7 @@ type ChannelMonitorV2Filter struct {
 }
 
 type ChannelMonitorV2Metric struct {
-	// OutputTPS measures generated output tokens per second after the first token.
+	// OutputTPS is the median per-request output tokens / total request seconds.
 	// It is independent of fleet throughput (TPM) and is nil without valid samples.
 	OutputTPS            *float64 `json:"output_tps"`
 	TPSSamples           int64    `json:"tps_samples"`

@@ -27,7 +27,8 @@
         @sort="(key, order) => $emit('sort', key, order)"
       >
         <template #cell-user="{ row }">
-          <div class="text-sm">
+          <span v-if="row.inbound_endpoint === '/internal/channel-quality' && !row.user_id" class="badge badge-primary">{{ t('admin.tests.experience.scheduled') }}</span>
+          <div v-else class="text-sm">
             <button
               v-if="row.user?.email"
               class="font-medium text-primary-600 underline decoration-dashed underline-offset-2 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
@@ -160,11 +161,11 @@
               <div class="flex items-center gap-2">
                 <div class="inline-flex items-center gap-1">
                   <Icon name="arrowDown" size="sm" class="h-3.5 w-3.5 text-emerald-500" />
-                  <span class="font-medium text-gray-900 dark:text-white">{{ row.input_tokens?.toLocaleString() || 0 }}</span>
+                  <span class="font-medium text-gray-900 dark:text-white">{{ formatQualityToken(row, 'input_tokens') }}</span>
                 </div>
                 <div class="inline-flex items-center gap-1">
                   <Icon name="arrowUp" size="sm" class="h-3.5 w-3.5 text-violet-500" />
-                  <span class="font-medium text-gray-900 dark:text-white">{{ row.output_tokens?.toLocaleString() || 0 }}</span>
+                  <span class="font-medium text-gray-900 dark:text-white">{{ formatQualityToken(row, 'output_tokens') }}</span>
                 </div>
               </div>
               <div class="flex items-center gap-2">
@@ -430,7 +431,7 @@
           </div>
           <div class="flex items-center justify-between gap-6 border-t border-gray-700 pt-1.5">
             <span class="text-gray-400">{{ t('usage.totalTokens') }}</span>
-            <span class="font-semibold text-blue-400">{{ ((tokenTooltipData?.input_tokens || 0) + (tokenTooltipData?.output_tokens || 0) + (tokenTooltipData?.cache_creation_tokens || 0) + (tokenTooltipData?.cache_read_tokens || 0)).toLocaleString() }}</span>
+            <span class="font-semibold text-blue-400">{{ tokenTooltipData?.quality_usage && (tokenTooltipData.quality_usage.input_tokens == null || tokenTooltipData.quality_usage.output_tokens == null) ? '—' : ((tokenTooltipData?.input_tokens || 0) + (tokenTooltipData?.output_tokens || 0) + (tokenTooltipData?.cache_creation_tokens || 0) + (tokenTooltipData?.cache_read_tokens || 0)).toLocaleString() }}</span>
           </div>
         </div>
       </div>
@@ -750,7 +751,11 @@ const tooltipData = computed(() => tooltipVisible.value ? activeTooltip.value!.r
 const tokenTooltipVisible = computed(() => activeTooltip.value?.kind === 'token')
 const tokenTooltipData = computed(() => tokenTooltipVisible.value ? activeTooltip.value!.row : null)
 
+const formatQualityToken = (row: AdminUsageLog, field: 'input_tokens' | 'output_tokens'): string =>
+  row.quality_usage && row.quality_usage[field] == null ? '—' : (row[field] ?? 0).toLocaleString()
+
 const cacheHitRate = (row: AdminUsageLog): number | null =>
+  row.quality_usage && (row.quality_usage.input_tokens == null || row.quality_usage.cache_read_tokens == null) ? null :
   isCacheEligibleRequest(row) ? calculateCacheHitRate(textInputTokens(row), row.cache_read_tokens, row.cache_creation_tokens) : null
 
 const formatRowCacheHitRate = (

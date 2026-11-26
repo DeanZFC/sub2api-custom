@@ -425,6 +425,25 @@ describe('admin UsageTable tooltip', () => {
     expect(wrapper.get('[data-testid="token-cache-hit-rate-tooltip"]').text()).toContain('80.00%')
   })
 
+  it('distinguishes missing quality usage from measured zero and supports older rows', () => {
+    const rows = [
+      { ...baseImageRow, request_id: 'missing', image_count: 0, billing_mode: 'token', quality_usage: { input_tokens: null, output_tokens: null, cache_read_tokens: null } },
+      { ...baseImageRow, request_id: 'zero', image_count: 0, billing_mode: 'token', quality_usage: { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0 } },
+      { ...baseImageRow, request_id: 'legacy', image_count: 0, billing_mode: 'token', input_tokens: undefined, output_tokens: undefined },
+    ]
+    const wrapper = mount(UsageTable, {
+      props: { data: rows, loading: false, columns: [] },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+
+    const tokenValues = (id: string) => wrapper.get(`[data-request-id="${id}"] .space-y-1 > div:first-child`).text()
+    expect(tokenValues('missing')).toBe('——')
+    expect(tokenValues('zero')).toBe('00')
+    expect(tokenValues('legacy')).toBe('00')
+    expect(wrapper.get('[data-request-id="missing"] [data-testid="cache-hit-rate-cell"]').text()).toBe('-')
+    wrapper.unmount()
+  })
+
   it.each(['token', 'image', 'per_request'])('keeps eight decimal places in %s cost details', async (billingMode) => {
     const row = {
       ...baseImageRow,

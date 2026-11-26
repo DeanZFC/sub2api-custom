@@ -96,12 +96,13 @@ func TestChannelMonitorV2StreamingCacheRateIntegration(t *testing.T) {
 	exec(string(rawTPS))
 	exec(`CREATE TABLE groups (id BIGINT,platform TEXT);
 CREATE TABLE accounts (id BIGINT,platform TEXT);
-CREATE TABLE usage_logs (id BIGSERIAL,created_at TIMESTAMPTZ,group_id BIGINT DEFAULT 8,account_id BIGINT DEFAULT 62,user_id BIGINT DEFAULT 7,api_key_id BIGINT DEFAULT 1,
+CREATE TABLE channel_quality_group_sets(id bigserial primary key, group_ids bigint[] unique);
+CREATE TABLE usage_logs (quality_group_set_id bigint, quality_usage jsonb,id BIGSERIAL,http_status smallint,created_at TIMESTAMPTZ,group_id BIGINT DEFAULT 8,account_id BIGINT DEFAULT 62,user_id BIGINT DEFAULT 7,api_key_id BIGINT DEFAULT 1,
  model TEXT DEFAULT 'model-a', requested_model TEXT,request_id TEXT,request_type INT, stream BOOLEAN,openai_ws_mode BOOLEAN DEFAULT false,
  actual_cost NUMERIC DEFAULT 1,input_tokens BIGINT,output_tokens BIGINT DEFAULT 10,cache_creation_tokens BIGINT DEFAULT 0,cache_read_tokens BIGINT,
  first_token_ms INT,duration_ms INT,image_count INT DEFAULT 0,video_count INT DEFAULT 0,image_output_tokens INT DEFAULT 0,
- inbound_endpoint TEXT,upstream_endpoint TEXT,native_compaction_v2 BOOLEAN DEFAULT false);
-CREATE TABLE ops_error_logs(id BIGSERIAL,created_at TIMESTAMPTZ,account_id BIGINT DEFAULT 62,api_key_id BIGINT DEFAULT 1,
+ billing_mode TEXT,inbound_endpoint TEXT,upstream_endpoint TEXT,native_compaction_v2 BOOLEAN DEFAULT false);
+CREATE TABLE ops_error_logs(quality_group_set_id bigint,id BIGSERIAL,created_at TIMESTAMPTZ,account_id BIGINT DEFAULT 62,api_key_id BIGINT DEFAULT 1,
  request_id TEXT,client_request_id TEXT,request_type INT DEFAULT 2,is_count_tokens BOOLEAN DEFAULT false,status_code INT DEFAULT 503,error_type TEXT DEFAULT 'upstream_error');
 INSERT INTO groups VALUES (8,'openai'); INSERT INTO accounts VALUES (62,'openai');`)
 	start := time.Now().UTC().Truncate(time.Hour)
@@ -146,7 +147,10 @@ INSERT INTO groups VALUES (8,'openai'); INSERT INTO accounts VALUES (62,'openai'
 		require.Equal(t, "healthy", health.Overall, table)
 	}
 
-	t.Run("output TPS weights valid generation time across facts and rollups", func(t *testing.T) {
+	repo := &channelMonitorV2Repository{db: db}
+	cfg := service.ChannelMonitorV2Config{Platforms: []service.ChannelMonitorV2PlatformConfig{{Platform: "openai", Enabled: true}}}
+	filter := service.ChannelMonitorV2Filter{Start: start, End: end, Bucket: time.Minute}
+	t.Run("output TPS uses the median of individual total-duration rates", func(t *testing.T) {
 		exec(`TRUNCATE usage_logs,channel_monitor_v2_metrics_1m,channel_monitor_v2_user_metrics_1m,channel_monitor_v2_metrics_rollup,channel_monitor_v2_user_metrics_rollup`)
 		exec(`INSERT INTO usage_logs(created_at,request_id,request_type,stream,openai_ws_mode,input_tokens,output_tokens,first_token_ms,duration_ms) VALUES
  ($1,'slow',2,true,false,100,100,1000,11000),
@@ -171,42 +175,16 @@ INSERT INTO groups VALUES (8,'openai'); INSERT INTO accounts VALUES (62,'openai'
  UPDATE usage_logs SET actual_cost=0 WHERE request_id IN('failed','free-success')`)
 		exec(`INSERT INTO ops_error_logs(created_at,request_id,request_type,status_code) VALUES
  ($1,'failed',2,503),($1,'paid-partial',2,503),($1,'fast',2,0),($1,'ws',3,503)`, start)
-		for _, query := range []string{channelMonitorV2UsageMetricsSQL, channelMonitorV2UserMetricsSQL} {
-			exec(fmt.Sprintf(query, channelMonitorV2PlatformSQL, channelMonitorV2ModelSQL), start, end)
-		}
-		for _, query := range []string{channelMonitorV2MetricsRollupSQL, channelMonitorV2UserMetricsRollupSQL} {
-			exec(query, "1 hour", 3600, start, end)
-		}
-		for _, table := range []string{"channel_monitor_v2_metrics_1m", "channel_monitor_v2_user_metrics_1m", "channel_monitor_v2_metrics_rollup", "channel_monitor_v2_user_metrics_rollup"} {
-			var f channelMonitorV2Fact
-			require.NoError(t, db.QueryRowContext(ctx, `SELECT SUM(tps_output_tokens),SUM(tps_generation_ms),SUM(tps_samples) FROM `+table).Scan(&f.TPSOutputTokens, &f.TPSGenerationMS, &f.TPSSamples))
-			require.EqualValues(t, 260, f.TPSOutputTokens, table)
-			require.EqualValues(t, 12100, f.TPSGenerationMS, table)
-			require.EqualValues(t, 4, f.TPSSamples, table)
-			acc := newMetricAccumulator()
-			acc.addFact(f)
-			metric := acc.metric(60, true)
-			require.NotNil(t, metric.OutputTPS, table)
-			require.InDelta(t, 260.0/12.1, *metric.OutputTPS, .00001, table)
-			require.EqualValues(t, 4, metric.TPSSamples, table)
-		}
-		// Exercise the actual monitoring reader, including its column scan and
-		// time-bucket merge, for both minute facts and coarser historical data.
-		exec(`ALTER TABLE groups ADD COLUMN name TEXT DEFAULT 'Test group'`)
-		repo := &channelMonitorV2Repository{db: db}
-		cfg := service.ChannelMonitorV2Config{Platforms: []service.ChannelMonitorV2PlatformConfig{{Platform: "openai", Enabled: true}}}
-		for _, bucket := range []time.Duration{time.Minute, time.Hour} {
-			facts, err := repo.loadFacts(ctx, service.ChannelMonitorV2Filter{Start: start, End: end, Bucket: bucket}, cfg, true)
-			require.NoError(t, err)
-			acc := newMetricAccumulator()
-			for _, f := range facts {
-				acc.addFact(f)
-			}
-			metric := acc.metric(60, true)
-			require.NotNil(t, metric.OutputTPS)
-			require.InDelta(t, 260.0/12.1, *metric.OutputTPS, .00001)
-			require.EqualValues(t, 4, metric.TPSSamples)
-		}
+		rates, err := repo.loadOutputTPS(ctx, filter, cfg, "", true)
+		require.NoError(t, err)
+		total := rates[channelMonitorV2RateKey{}]
+		// Eligible rates: 100/11, 20, 25, 100 and four times 999.9.
+		// TTFT is irrelevant, including missing, negative or equal to duration.
+		require.EqualValues(t, 8, total.samples)
+		require.InDelta(t, (100+999.9)/2, *total.p50, .00001)
+		fast := rates[channelMonitorV2RateKey{bucket: start.Add(time.Minute).Format(time.RFC3339Nano)}]
+		require.EqualValues(t, 1, fast.samples)
+		require.Equal(t, 25.0, *fast.p50)
 	})
 	t.Run("terminal error correlation preserves API key account and websocket boundaries", func(t *testing.T) {
 		exec(`TRUNCATE usage_logs,ops_error_logs,channel_monitor_v2_metrics_1m,channel_monitor_v2_user_metrics_1m`)
@@ -220,15 +198,10 @@ INSERT INTO groups VALUES (8,'openai'); INSERT INTO accounts VALUES (62,'openai'
 		exec(`INSERT INTO ops_error_logs(created_at,request_id,client_request_id,api_key_id,account_id,request_type) VALUES
  ($1,'other-key',NULL,2,62,2),($1,'other-account',NULL,1,63,2),($1,'connection',NULL,1,62,3),
  ($1,'local-failure',NULL,1,62,2),($1,'mapped-client','client-failure',1,62,2),($1,'bare-failure',NULL,1,62,2)`, start)
-		for _, query := range []string{channelMonitorV2UsageMetricsSQL, channelMonitorV2UserMetricsSQL} {
-			exec(fmt.Sprintf(query, channelMonitorV2PlatformSQL, channelMonitorV2ModelSQL), start, end)
-		}
-		for _, table := range []string{"channel_monitor_v2_metrics_1m", "channel_monitor_v2_user_metrics_1m"} {
-			var output, duration, samples int64
-			require.NoError(t, db.QueryRowContext(ctx, `SELECT SUM(tps_output_tokens),SUM(tps_generation_ms),SUM(tps_samples) FROM `+table).Scan(&output, &duration, &samples))
-			require.EqualValues(t, 300, output)
-			require.EqualValues(t, 3000, duration)
-			require.EqualValues(t, 3, samples)
-		}
+		rates, err := repo.loadOutputTPS(ctx, filter, cfg, "", false)
+		require.NoError(t, err)
+		total := rates[channelMonitorV2RateKey{}]
+		require.EqualValues(t, 3, total.samples)
+		require.InDelta(t, 100.0/1.5, *total.p50, .00001)
 	})
 }

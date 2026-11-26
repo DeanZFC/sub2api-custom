@@ -121,6 +121,7 @@ func (j *scheduledTestReviewJudge) Judge(ctx context.Context, accountID int64, m
 	ctx = context.WithValue(ctx, accountTestVisionContextKey{}, accountTestVisionInput{Images: images, Instructions: scheduledTestVisualInstructions})
 	// Each independent assessment reserves and settles its own normal quality
 	// probe. It cannot inherit the measured account's run/session identity.
+	ctx = context.WithValue(ctx, scheduledTestPlanContextKey{}, (*ScheduledTestPlan)(nil))
 	ctx = context.WithValue(ctx, qualityRunKey{}, uuid.NewString())
 	ctx = context.WithValue(ctx, scheduledTestAutomaticRunKey{}, true)
 	ctx = withAccountTestMaxOutputTokens(ctx, 2048)

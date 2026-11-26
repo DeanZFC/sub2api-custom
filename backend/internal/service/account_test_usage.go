@@ -23,6 +23,8 @@ type accountTestUsageCollector struct {
 	attempts           []*ScheduledTestRequestAttempt
 	deferred           *QualityDeferredError
 	qualitySettlements []qualityProbeSettlement
+	account            *Account
+	modelIdentity      *accountTestModelIdentity
 }
 
 func (s *AccountTestService) doAccountTestHTTP(req *http.Request, proxy string, id int64, concurrency int) (*http.Response, error) {
@@ -40,6 +42,9 @@ func observeAccountTestResponse(ctx context.Context, started time.Time, resp *ht
 		return resp, err
 	}
 	attempt := &ScheduledTestRequestAttempt{StartedAt: started}
+	if collector.modelIdentity != nil {
+		attempt.UpstreamModel, _, _ = collector.modelIdentity.snapshot()
+	}
 	settle, _ := ctx.Value(qualitySettlementKey{}).(func(*ScheduledTestRequestAttempt))
 	if err != nil {
 		var netErr net.Error
@@ -66,8 +71,12 @@ func observeAccountTestResponse(ctx context.Context, started time.Time, resp *ht
 			resp.Body = &accountTestUsageBody{ReadCloser: resp.Body, attempt: attempt, settle: settle}
 		}
 	}
-	if (resp == nil || resp.Body == nil) && settle != nil {
-		settle(attempt)
+	if resp == nil || resp.Body == nil {
+		elapsed := float64(time.Since(started)) / float64(time.Millisecond)
+		attempt.DurationMS = &elapsed
+		if settle != nil {
+			settle(attempt)
+		}
 	}
 	collector.mu.Lock()
 	collector.attempts = append(collector.attempts, attempt)

@@ -149,6 +149,7 @@ type UsageLog struct {
 	GroupID        *int64
 	SubscriptionID *int64
 
+	QualityUsage        *ScheduledTestTokenUsage
 	InputTokens         int
 	OutputTokens        int
 	CacheCreationTokens int

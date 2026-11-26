@@ -365,6 +365,42 @@ func TestHandleSSEToJSON_PathBasedCompactRawOutputItemDoneRepairsJSON(t *testing
 }
 
 // raw done item 是协议上的最终完整形态，优先于 delta 重建且不得重复计入。
+func TestNonStreamingResponsesPreserveTextDeltasAlongsideCompletedToolCall(t *testing.T) {
+	upstream := strings.Join([]string{
+		`data: {"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"lookup","arguments":"{}","status":"completed"}}`,
+		`data: {"type":"response.output_text.delta","output_index":0,"item_id":"msg_1","content_index":0,"delta":"first "}`,
+		`data: {"type":"response.output_text.delta","output_index":0,"item_id":"msg_1","content_index":0,"delta":"reply"}`,
+		`data: {"type":"response.completed","response":{"id":"resp_1","object":"response","model":"gpt-5.5","status":"completed","output":[],"usage":{"input_tokens":12,"output_tokens":7}}}`,
+	}, "\n\n")
+
+	for _, mode := range []string{"normal", "passthrough"} {
+		t.Run(mode, func(t *testing.T) {
+			svc := newCompactBridgeTestService()
+			c, rec := newNonStreamingFailoverContext(t)
+			account := &Account{ID: 1, Type: AccountTypeOAuth}
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader(upstream)),
+			}
+			var err error
+			if mode == "passthrough" {
+				_, err = svc.handleNonStreamingResponsePassthrough(c.Request.Context(), resp, c, account, "gpt-5.5", "gpt-5.5")
+			} else {
+				_, err = svc.handleNonStreamingResponse(c.Request.Context(), resp, c, account, "gpt-5.5", "gpt-5.5")
+			}
+			require.NoError(t, err)
+			result := gjson.Parse(rec.Body.String())
+			require.Equal(t, int64(12), result.Get("usage.input_tokens").Int())
+			require.Equal(t, int64(7), result.Get("usage.output_tokens").Int())
+			require.JSONEq(t, `["msg_1","fc_1"]`, result.Get("output.#.id").Raw)
+			require.Equal(t, "first reply", result.Get("output.0.content.0.text").String())
+			require.Equal(t, "call_1", result.Get("output.1.call_id").String())
+			require.Equal(t, "{}", result.Get("output.1.arguments").String())
+		})
+	}
+}
+
 func TestReconstructResponseOutputFromSSE_PrefersRawDoneItems(t *testing.T) {
 	bodyText := strings.Join([]string{
 		`data: {"type":"response.output_text.delta","delta":"hel"}`,
@@ -379,6 +415,42 @@ func TestReconstructResponseOutputFromSSE_PrefersRawDoneItems(t *testing.T) {
 	require.Len(t, items, 1, "raw done item 与 delta 重建不得重复")
 	require.Equal(t, "msg_1", items[0].Get("id").String())
 	require.Equal(t, "hello", items[0].Get("content.0.text").String())
+}
+
+// Distinct items can finish in reverse order, share an index, or omit it.
+// Sorting must retain each item and all fields outside the gateway schema.
+func TestReconstructResponseOutputFromSSE_OrdersRawItemsWithoutCollapsingThem(t *testing.T) {
+	sse := strings.Join([]string{
+		`data: {"type":"response.output_item.done","item":{"id":"tail1","type":"future_item","opaque":{"n":9007199254740993}}}`,
+		`data: {"type":"response.output_item.done","output_index":2,"item":{"id":"fc_b","type":"function_call"}}`,
+		`data: {"type":"response.output_item.done","output_index":1,"item":{"id":"fc_a","type":"function_call"}}`,
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs","type":"reasoning","encrypted_content":"sealed"}}`,
+		`data: {"type":"response.output_item.done","output_index":2,"item":{"id":"same_slot","type":"message"}}`,
+		`data: {"type":"response.output_item.done","item":{"id":"tail2","type":"message"}}`,
+		`data: {"type":"response.output_item.done","output_index":1,"item":{"id":"fc_a","type":"function_call"}}`,
+	}, "\n\n")
+	output, ok := reconstructResponseOutputFromSSE(sse)
+	require.True(t, ok)
+	require.JSONEq(t, `["rs","fc_a","fc_b","same_slot","tail1","tail2"]`, gjson.GetBytes(output, "#.id").Raw)
+	require.Equal(t, "sealed", gjson.GetBytes(output, "0.encrypted_content").String())
+	require.Equal(t, "9007199254740993", gjson.GetBytes(output, "4.opaque.n").Raw)
+}
+
+func TestReconstructResponseOutputFromSSE_MixedToolFragmentsAndOpaqueItems(t *testing.T) {
+	sse := strings.Join([]string{
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"tool","type":"function_call","call_id":"c","name":"search"}}`,
+		`data: {"type":"response.output_item.added","output_index":1,"item":{"id":"pending","type":"function_call","call_id":"unused","name":"unstarted"}}`,
+		`data: {"type":"response.output_item.done","output_index":2,"item":{"id":"raw","type":"reasoning","encrypted_content":"sealed","future":{"n":9007199254740993}}}`,
+		"event: response.function_call_arguments.done\n" + `data: {"output_index":0,"item_id":"tool","arguments":"{}"}`,
+	}, "\n\n")
+	output, ok := reconstructResponseOutputFromSSE(sse)
+	require.True(t, ok)
+	require.JSONEq(t, `["tool","raw"]`, gjson.GetBytes(output, "#.id").Raw)
+	require.Equal(t, "c", gjson.GetBytes(output, "0.call_id").String())
+	require.Equal(t, "search", gjson.GetBytes(output, "0.name").String())
+	require.Equal(t, "{}", gjson.GetBytes(output, "0.arguments").String())
+	require.Equal(t, "sealed", gjson.GetBytes(output, "1.encrypted_content").String())
+	require.Equal(t, "9007199254740993", gjson.GetBytes(output, "1.future.n").Raw)
 }
 
 // 无任何 done 事件时，退回收集 output_item.added 中的 compaction 类 item。
@@ -409,8 +481,10 @@ func TestReconstructResponseOutputFromSSE_MixedDoneAndCompactionAdded(t *testing
 	require.True(t, ok)
 	items := gjson.ParseBytes(outputJSON).Array()
 	require.Len(t, items, 2)
-	require.Equal(t, "msg_1", items[0].Get("id").String())
-	require.Equal(t, "cmp_mixed", items[1].Get("id").String())
+	// The added-only item has output_index 0, ahead of the completed message.
+	require.Equal(t, "cmp_mixed", items[0].Get("id").String())
+	require.Equal(t, "mixed", items[0].Get("encrypted_content").String())
+	require.Equal(t, "msg_1", items[1].Get("id").String())
 
 	// done 已含 compaction：added 中的同一 item（无 id 可去重的最坏情况用
 	// 不同 raw 表达）不得再收集，Codex 要求恰好一个 compaction item。

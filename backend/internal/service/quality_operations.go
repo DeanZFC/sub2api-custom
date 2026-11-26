@@ -87,6 +87,7 @@ type QualityDeferredError struct {
 func (e *QualityDeferredError) Error() string { return "检测跳过：" + e.Reason }
 
 type QualityOperationsRepository interface {
+	RecordScheduledTestUsage(context.Context, ScheduledTestUsage) error
 	OperationsSnapshot(context.Context) (*QualityOperationsSnapshot, error)
 	SaveOperationsConfig(context.Context, *QualityOperationsConfig) error
 	ReserveQualityProbe(context.Context, int64, int64, bool, string) (*QualityProbeReservation, error)

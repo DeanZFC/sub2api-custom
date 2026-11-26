@@ -33,9 +33,25 @@ func (_c *UsageLogCreate) SetUserID(v int64) *UsageLogCreate {
 	return _c
 }
 
+// SetNillableUserID sets the "user_id" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableUserID(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetUserID(*v)
+	}
+	return _c
+}
+
 // SetAPIKeyID sets the "api_key_id" field.
 func (_c *UsageLogCreate) SetAPIKeyID(v int64) *UsageLogCreate {
 	_c.mutation.SetAPIKeyID(v)
+	return _c
+}
+
+// SetNillableAPIKeyID sets the "api_key_id" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableAPIKeyID(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetAPIKeyID(*v)
+	}
 	return _c
 }
 
@@ -863,12 +879,6 @@ func (_c *UsageLogCreate) defaults() {
 
 // check runs all checks and user-defined validators on the builder.
 func (_c *UsageLogCreate) check() error {
-	if _, ok := _c.mutation.UserID(); !ok {
-		return &ValidationError{Name: "user_id", err: errors.New(`ent: missing required field "UsageLog.user_id"`)}
-	}
-	if _, ok := _c.mutation.APIKeyID(); !ok {
-		return &ValidationError{Name: "api_key_id", err: errors.New(`ent: missing required field "UsageLog.api_key_id"`)}
-	}
 	if _, ok := _c.mutation.AccountID(); !ok {
 		return &ValidationError{Name: "account_id", err: errors.New(`ent: missing required field "UsageLog.account_id"`)}
 	}
@@ -1021,12 +1031,6 @@ func (_c *UsageLogCreate) check() error {
 	}
 	if _, ok := _c.mutation.CreatedAt(); !ok {
 		return &ValidationError{Name: "created_at", err: errors.New(`ent: missing required field "UsageLog.created_at"`)}
-	}
-	if len(_c.mutation.UserIDs()) == 0 {
-		return &ValidationError{Name: "user", err: errors.New(`ent: missing required edge "UsageLog.user"`)}
-	}
-	if len(_c.mutation.APIKeyIDs()) == 0 {
-		return &ValidationError{Name: "api_key", err: errors.New(`ent: missing required edge "UsageLog.api_key"`)}
 	}
 	if len(_c.mutation.AccountIDs()) == 0 {
 		return &ValidationError{Name: "account", err: errors.New(`ent: missing required edge "UsageLog.account"`)}
@@ -1395,6 +1399,12 @@ func (u *UsageLogUpsert) UpdateUserID() *UsageLogUpsert {
 	return u
 }
 
+// ClearUserID clears the value of the "user_id" field.
+func (u *UsageLogUpsert) ClearUserID() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldUserID)
+	return u
+}
+
 // SetAPIKeyID sets the "api_key_id" field.
 func (u *UsageLogUpsert) SetAPIKeyID(v int64) *UsageLogUpsert {
 	u.Set(usagelog.FieldAPIKeyID, v)
@@ -1404,6 +1414,12 @@ func (u *UsageLogUpsert) SetAPIKeyID(v int64) *UsageLogUpsert {
 // UpdateAPIKeyID sets the "api_key_id" field to the value that was provided on create.
 func (u *UsageLogUpsert) UpdateAPIKeyID() *UsageLogUpsert {
 	u.SetExcluded(usagelog.FieldAPIKeyID)
+	return u
+}
+
+// ClearAPIKeyID clears the value of the "api_key_id" field.
+func (u *UsageLogUpsert) ClearAPIKeyID() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldAPIKeyID)
 	return u
 }
 
@@ -2327,6 +2343,13 @@ func (u *UsageLogUpsertOne) UpdateUserID() *UsageLogUpsertOne {
 	})
 }
 
+// ClearUserID clears the value of the "user_id" field.
+func (u *UsageLogUpsertOne) ClearUserID() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearUserID()
+	})
+}
+
 // SetAPIKeyID sets the "api_key_id" field.
 func (u *UsageLogUpsertOne) SetAPIKeyID(v int64) *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
@@ -2338,6 +2361,13 @@ func (u *UsageLogUpsertOne) SetAPIKeyID(v int64) *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) UpdateAPIKeyID() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateAPIKeyID()
+	})
+}
+
+// ClearAPIKeyID clears the value of the "api_key_id" field.
+func (u *UsageLogUpsertOne) ClearAPIKeyID() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearAPIKeyID()
 	})
 }
 
@@ -3570,6 +3600,13 @@ func (u *UsageLogUpsertBulk) UpdateUserID() *UsageLogUpsertBulk {
 	})
 }
 
+// ClearUserID clears the value of the "user_id" field.
+func (u *UsageLogUpsertBulk) ClearUserID() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearUserID()
+	})
+}
+
 // SetAPIKeyID sets the "api_key_id" field.
 func (u *UsageLogUpsertBulk) SetAPIKeyID(v int64) *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
@@ -3581,6 +3618,13 @@ func (u *UsageLogUpsertBulk) SetAPIKeyID(v int64) *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) UpdateAPIKeyID() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateAPIKeyID()
+	})
+}
+
+// ClearAPIKeyID clears the value of the "api_key_id" field.
+func (u *UsageLogUpsertBulk) ClearAPIKeyID() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearAPIKeyID()
 	})
 }
 

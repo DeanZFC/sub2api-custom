@@ -6,37 +6,35 @@
     </div>
     <div v-if="sections.length" class="space-y-5">
       <section v-for="section in sections" :key="section.key" class="space-y-3" data-testid="channel-section">
-        <h3 class="flex min-w-0 items-center gap-2 px-1 text-base font-bold text-gray-900 dark:text-white" data-testid="channel-section-title">
-          <ProviderIcon :provider="section.platform" :size="24" />
+        <h3 class="flex min-w-0 items-center gap-2.5 px-1 text-lg font-bold text-slate-900 dark:text-white" data-testid="channel-section-title">
+          <span class="provider-tile"><ProviderIcon :provider="section.platform" :size="21" /></span>
           <span class="truncate" :title="section.title">{{ section.title }}</span>
-          <span class="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500 dark:bg-dark-700 dark:text-gray-400">{{ section.rows.length }}</span>
+          <span class="shrink-0 rounded-full border border-slate-200 bg-white/80 px-2.5 py-0.5 text-xs text-slate-500 dark:border-dark-700 dark:bg-dark-800 dark:text-slate-300">{{ section.rows.length }}</span>
         </h3>
         <div class="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-2 2xl:grid-cols-3">
           <article
             v-for="row in section.rows"
             :key="JSON.stringify([row.platform, row.group_id, row.model])"
-            class="card flex min-w-0 flex-col !rounded-2xl !border-0 !p-4 shadow-sm ring-1 ring-gray-900/5 dark:!bg-dark-800 dark:ring-dark-700"
+            class="flex min-w-0 flex-col rounded-3xl border border-white/90 bg-white/90 p-4 shadow-glass dark:border-dark-700 dark:bg-dark-800/95 sm:p-5"
             data-testid="channel-health-card"
           >
             <header class="flex items-start gap-2.5">
-              <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
-                <ProviderIcon :provider="row.platform" :size="25" />
+              <span class="provider-tile">
+                <ProviderIcon :provider="row.platform" :size="21" />
               </span>
               <div class="min-w-0 flex-1">
-                <div class="flex min-w-0 items-center gap-2">
-                  <h3 class="min-w-0 truncate text-base font-bold leading-5 text-gray-900 dark:text-white" :title="cardTitle(row)">{{ cardTitle(row) }}</h3>
+                <h3 class="truncate text-base font-bold leading-5 text-slate-900 dark:text-white" :title="cardTitle(row)">{{ cardTitle(row) }}</h3>
+                <div class="mt-1.5 flex flex-wrap gap-1.5 text-[11px]">
+                  <span class="rounded-md bg-emerald-100 px-1.5 py-0.5 font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">{{ platformDisplayName(row.platform) }}</span>
                   <span
                     v-if="row.group_id && row.group_rate_multiplier != null"
-                    class="shrink-0 rounded-md bg-blue-50 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                    class="rounded-md bg-teal-50 px-1.5 py-0.5 font-medium tabular-nums text-teal-700 dark:bg-teal-900/30 dark:text-teal-300"
                     data-testid="group-rate-multiplier"
                   >{{ t('channelMonitorV2.cards.groupRateMultiplier', { rate: row.group_rate_multiplier }) }}</span>
-                </div>
-                <div class="mt-1 flex flex-wrap gap-x-1.5 gap-y-1 text-[11px]">
-                  <span class="rounded-md bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">{{ platformDisplayName(row.platform) }}</span>
                   <span class="rounded-md bg-gray-100 px-1.5 py-0.5 text-gray-500 dark:bg-dark-700 dark:text-gray-400">{{ t('channelMonitorV2.cards.passive') }}</span>
                 </div>
               </div>
-              <span class="shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold" :class="badgeClass[cardHealth(row.health, healthMode)]">
+              <span class="shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold" :class="badgeClass[cardHealth(row.health, healthMode)]">
                 {{ healthLabel(cardHealth(row.health, healthMode)) }}
               </span>
             </header>
@@ -163,8 +161,16 @@ const sections = computed(() => {
     || compareMonitorModels(a.model || '', b.model || ''))
 })
 const states: HealthState[] = ['healthy', 'warning', 'critical', 'unknown']
-const badgeClass = { healthy: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300', warning: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300', critical: 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300', unknown: 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-gray-400' }
-const dotClass = { healthy: 'bg-emerald-400', warning: 'bg-amber-400', critical: 'bg-rose-400', unknown: 'bg-gray-300 dark:bg-dark-600' }
+const badgeClass = {
+  healthy: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300',
+  warning: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
+  critical: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
+  unknown: 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-gray-400',
+}
+const dotClass = {
+  healthy: 'bg-emerald-500', warning: 'bg-amber-400',
+  critical: 'bg-red-500', unknown: 'bg-gray-300 dark:bg-dark-600',
+}
 function healthLabel(state: HealthState) { return t(`channelMonitorV2.cards.health.${state}`) }
 function cardTitle(row: MonitorMatrixRow) { return row.group_name || (row.group_id ? `#${row.group_id}` : platformDisplayName(row.platform)) }
 function timeLabel(time: number | string) { return new Intl.DateTimeFormat(locale.value || undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(time)) }
@@ -195,3 +201,9 @@ function historySlots(row: MonitorMatrixRow) {
   })
 }
 </script>
+
+<style scoped>
+.provider-tile {
+  @apply inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-emerald-100 text-slate-900 dark:border-emerald-800/60 dark:from-emerald-950 dark:to-emerald-900 dark:text-emerald-200;
+}
+</style>

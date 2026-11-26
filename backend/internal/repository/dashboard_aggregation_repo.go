@@ -332,7 +332,7 @@ func (r *dashboardAggregationRepository) insertHourlyActiveUsers(ctx context.Con
 			date_trunc('hour', created_at AT TIME ZONE $3) AT TIME ZONE $3 AS bucket_start,
 			user_id
 		FROM usage_logs
-		WHERE created_at >= $1 AND created_at < $2
+		WHERE user_id IS NOT NULL AND created_at >= $1 AND created_at < $2
 		ON CONFLICT DO NOTHING
 	`
 	_, err := r.sql.ExecContext(ctx, query, start, end, tzName)
