@@ -249,7 +249,7 @@ gateway:
   # OpenAI/Codex upstream response header timeout (seconds, 0=disabled)
   # OpenAI/Codex 等待上游响应头超时时间（秒，0=禁用本地响应头超时）
   openai_response_header_timeout: 0
-  # Opt out of the fixed 10-minute account cooldown for persistent OpenAI transport failures (DNS/proxy/network).
+  # Opt out of OpenAI gateway transport cooldowns (30 seconds for network reachability, 10 minutes for rejected proxy credentials).
   # Env: GATEWAY_DISABLE_OPENAI_TRANSPORT_ERROR_COOLDOWN=true; default false retains protection.
   # Errors/Ops and bounded request failover remain; HTTP 401/403/429, quota/model limits,
   # stream timeouts and token-refresh cooldowns are unchanged. Existing cooldowns and admin pauses are not cleared.
@@ -537,6 +537,11 @@ gateway:
   # API Key 活跃请求统计独立 TTL；0 继承上项，显式值至少 30 秒。
   # 共享 Redis 的所有实例须保持一致；变更前先排空在途请求，见合并说明。
   api_key_slot_ttl_seconds: 0
+  # On Antigravity Gemini Chat Completions and Responses streams, let the upstream decide
+  # whether to return thought summaries. Long silent thinking periods may hit the stream timeout.
+  # 让上游决定是否返回思考摘要。长时间没有数据的思考阶段可能触发流超时。
+  # Env: GATEWAY_ANTIGRAVITY_GEMINI_OMIT_INCLUDE_THOUGHTS
+  antigravity_gemini_omit_include_thoughts: false
   # Stream data interval timeout (seconds), 0=disable
   # 流数据间隔超时（秒），0=禁用
   stream_data_interval_timeout: 180

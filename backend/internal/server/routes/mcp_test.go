@@ -235,7 +235,7 @@ func TestMCPReadOnlyBillingSyncResumes(t *testing.T) {
 	fixture := &mcpBillingFixture{}
 	cfg := &config.Config{}
 	cfg.JWT.Secret = "route-test"
-	h.Usage = handler.NewUsageHandler(nil, nil, nil, nil, fixture, cfg)
+	h.Usage = handler.NewUsageHandler(nil, nil, nil, nil, nil, fixture, cfg)
 	principal := &service.MCPPrincipal{GrantID: "sync", UserID: 7, Role: service.RoleUser, Scope: service.MCPScopeUser, ReadOnly: true}
 	endpoint := newMCPRouteTestEndpoint(h, principal, nil, middleware.AuditLogMiddleware(mcpRouteNext))
 	args := map[string]any{"query": map[string]any{"page_size": 10}}
