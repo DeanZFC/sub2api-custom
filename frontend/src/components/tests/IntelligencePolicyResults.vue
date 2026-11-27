@@ -1,113 +1,87 @@
 <template>
-  <section class="card space-y-4 p-4">
-    <header class="flex flex-wrap items-baseline justify-between gap-2">
-      <h3 class="font-semibold">{{ tr('resultsTitle') }}</h3>
-      <span v-if="plan.enabled && plan.next_run_at" class="text-xs text-gray-500"
-        >{{ tr('nextRun') }} · {{ time(plan.next_run_at) }}</span
-      >
-    </header>
+  <section class="space-y-5">
     <p v-if="error" role="alert" class="text-sm text-red-600">
       {{ error }} <button class="underline" type="button" @click="load()">{{ t('common.retry') }}</button>
     </p>
-    <p v-if="retryNotice" role="status" class="text-xs text-gray-500">{{ retryNotice }}</p>
+    <p v-if="retryNotice" role="status" class="text-sm text-gray-600 dark:text-gray-300">{{ retryNotice }}</p>
     <p v-if="retryError" role="alert" class="text-sm text-red-600">{{ retryError }}</p>
-    <p v-if="loading && !data" role="status">{{ t('common.loading') }}</p>
+    <p v-if="loading && !data" role="status" class="py-8 text-center text-sm">{{ t('common.loading') }}</p>
     <template v-if="data">
-      <div class="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-        <span>{{ tr('isolated') }} {{ blocked.length }}</span
-        ><span>{{ tr('suspects') }} {{ suspects.length }}</span>
+      <div class="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg bg-gray-50 px-4 py-3 text-sm dark:bg-dark-800">
+        <span class="flex items-center gap-2"><i class="h-2 w-2 rounded-full bg-rose-500" />{{ tr('isolated') }} <b class="tabular-nums">{{ blocked.length }}</b></span>
+        <span class="flex items-center gap-2"><i class="h-2 w-2 rounded-full bg-amber-500" />{{ tr('suspects') }} <b class="tabular-nums">{{ suspects.length }}</b></span>
+        <span v-if="plan.enabled && plan.next_run_at" class="text-xs text-gray-500 dark:text-gray-400 sm:ml-auto">{{ tr('nextRun') }} · {{ time(plan.next_run_at) }}</span>
       </div>
-      <ul v-if="data.states.length" class="max-h-60 divide-y overflow-y-auto text-sm dark:divide-dark-700">
-        <li
-          v-for="s in data.states"
-          :key="s.account_id + '-' + s.model"
-          class="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-2"
-        >
-          <strong>{{ s.account_name || '#' + s.account_id }}</strong
-          ><span>{{ s.model }}</span>
-          <span>{{ s.blocked ? tr('isolated') : tr('states.suspect') }}</span>
-          <span v-if="s.blocked">{{
-            tr('recovering', { pass: s.passes, total: plan.protection?.intelligence?.recovery_passes })
-          }}</span>
-          <button
-            v-if="s.blocked"
-            type="button"
-            class="text-xs text-primary-600 underline dark:text-primary-300"
-            @click="openRelease(s)"
-          >
-            {{ tr('releaseHold') }}
-          </button>
-          <span v-if="s.next_check" class="text-xs text-gray-500">{{ tr('nextCheck') }} · {{ time(s.next_check) }}</span>
+      <ul v-if="data.states.length" class="max-h-72 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200 dark:divide-dark-700 dark:border-dark-700">
+        <li v-for="s in data.states" :key="s.account_id + '-' + s.model" class="result-grid px-4 py-3">
+          <div>
+            <p class="identity">{{ s.account_name }} <span class="metadata">#{{ s.account_id }}</span></p>
+            <p class="model">{{ s.model }}</p>
+          </div>
+          <div class="space-y-1.5">
+            <span :class="['badge', s.blocked ? 'badge-danger' : 'badge-warning']">{{ tr(s.blocked ? 'isolated' : 'states.suspect') }}</span>
+            <template v-if="s.blocked">
+              <p class="metadata">{{ tr('holdEvidence') }}<span v-if="s.hold_round"> · {{ time(s.hold_round.finished_at) }}</span></p>
+              <IntelligenceCheckDetails :checks="s.hold_round?.checks" :artwork-veto="s.hold_round?.artwork_veto" :review-reason="s.hold_round?.review_reason" />
+            </template>
+          </div>
+          <div class="space-y-1 text-xs">
+            <p v-if="s.blocked">{{ tr('recovering', { pass: s.passes, total: plan.protection?.intelligence?.recovery_passes }) }}</p>
+            <p v-if="s.next_check" class="metadata">{{ tr('nextCheck') }} · {{ time(s.next_check) }}</p>
+            <button v-if="s.blocked" type="button" class="result-action" @click="openRelease(s)">{{ tr('releaseHold') }}</button>
+          </div>
         </li>
       </ul>
-      <h4 class="text-sm font-medium">{{ tr('recentResults') }}</h4>
-      <p v-if="!data.results.length" class="text-sm text-gray-500">{{ tr('emptyResults') }}</p>
-      <div v-else class="max-h-96 overflow-auto">
-        <table class="w-full text-left text-xs">
-          <thead>
-            <tr class="text-gray-500">
-              <th>{{ tr('account') }}</th>
-              <th>{{ tr('modelScope') }}</th>
-              <th>{{ tr('completed') }}</th>
-              <th>{{ tr('verdict') }}</th>
-              <th>{{ tr('artwork') }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="r in data.results" :key="r.result_id" class="border-t dark:border-dark-700">
-              <td>{{ r.account_name || '#' + r.account_id }}</td>
-              <td>{{ r.model }}</td>
-              <td>{{ time(r.finished_at) }}</td>
-              <td>
-                <details v-if="r.evidence || r.review_reason">
-                  <summary class="cursor-pointer">{{ verdict(r.verdict) }}</summary>
-                  <div class="mt-2 min-w-40 space-y-1">
-                    <p v-if="r.evidence">
-                      <strong>{{ tr('autoVerdict') }}</strong> · {{ verdict(r.evidence.auto_verdict) }}
-                    </p>
-                    <dl v-if="r.evidence?.checks?.length">
-                      <div v-for="c in r.evidence.checks" :key="c.key" class="py-0.5">
-                        <dt class="font-medium">
-                          {{ tr('checks.' + (c.key === 'http_429' ? 'rate_limit' : c.key)) }} ·
-                          {{ tr('checkStates.' + c.status) }}
-                        </dt>
-                        <dd v-if="c.detail" class="break-words text-gray-500">{{ c.detail }}</dd>
-                      </div>
-                    </dl>
-                    <p v-if="r.reviewed">{{ tr('review') }} · {{ artStatus(r) }}</p>
-                    <p v-if="r.review_reason" class="whitespace-pre-wrap break-words">
-                      {{ tr('reviewNote') }} · {{ r.review_reason }}
-                    </p>
-                  </div>
-                </details>
-                <span v-else>{{ verdict(r.verdict) }}</span>
-              </td>
-              <td>
-                <button
-                  v-if="r.artwork === 'default'"
-                  type="button"
-                  class="text-left text-primary-600 underline dark:text-primary-300"
-                  @click="open(r)"
-                >
-                  {{ artStatus(r) }} · {{ tr('review') }}
-                </button>
-                <button
-                  v-else-if="plan.enabled && r.artwork === 'missing' && r.retryable_artwork !== false"
-                  type="button"
-                  class="text-primary-600 underline dark:text-primary-300"
-                  :disabled="!!retryId"
-                  @click="retry(r.result_id)"
-                >
-                  {{ tr('retryArtwork') }}
-                </button>
-                <span v-else>{{ artStatus(r) }}</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+
+      <section>
+        <header class="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h4 class="text-sm font-semibold">{{ tr('recentResults') }}</h4>
+          <label v-if="data.results.length" class="flex cursor-pointer items-center gap-2 text-xs">
+            <input v-model="issuesOnly" type="checkbox" class="rounded border-gray-300 text-primary-600" />{{ tr('needsAttention') }}
+          </label>
+        </header>
+        <p v-if="!filteredResults.length" class="rounded-lg bg-gray-50 py-6 text-center text-sm text-gray-500 dark:bg-dark-800 dark:text-gray-400">{{ tr(data.results.length ? 'noIssues' : 'emptyResults') }}</p>
+        <div v-else class="overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700">
+          <div aria-hidden="true" class="result-grid result-head bg-gray-50 px-4 py-2 text-xs font-medium text-gray-500 dark:bg-dark-800 dark:text-gray-400 md:grid">
+            <span>{{ tr('account') }} / {{ tr('modelScope') }}</span><span>{{ tr('verdict') }}</span><span>{{ tr('artwork') }}</span>
+          </div>
+          <ol class="divide-y divide-gray-100 dark:divide-dark-700">
+            <li v-for="r in visibleResults" :key="r.result_id" :data-result-id="r.result_id" class="result-grid border-gray-100 px-4 py-3.5 dark:border-dark-700">
+              <div>
+                <p class="identity">{{ r.account_name }} <span class="metadata">#{{ r.account_id }}</span></p>
+                <p class="model">{{ r.model }}</p>
+                <p class="metadata mt-1">{{ time(r.finished_at) }}</p>
+              </div>
+              <div class="space-y-1.5">
+                <span :class="['badge', verdictClass[r.verdict]]">{{ verdict(r.verdict) }}</span>
+                <IntelligenceCheckDetails
+                  :checks="r.evidence?.checks"
+                  :http-status="r.evidence?.candy_http_status"
+                  :artwork-veto="r.reviewed === 'fail'"
+                  :artwork-missing="r.artwork === 'missing'"
+                  :review-reason="r.review_reason"
+                />
+                <p v-if="r.error_message" class="break-words text-xs">{{ r.error_message }}</p>
+                <p v-if="r.reviewed && r.evidence" class="metadata">{{ tr('autoVerdict') }} · {{ verdict(r.evidence.auto_verdict) }}</p>
+              </div>
+              <div class="space-y-1 text-xs">
+                <p class="metadata"><span class="md:hidden">{{ tr('artwork') }} · </span>{{ artStatus(r) }}</p>
+                <p v-if="r.review_reason && r.reviewed === 'pass'" class="whitespace-pre-wrap break-words">{{ tr('reviewNote') }} · {{ r.review_reason }}</p>
+                <button v-if="r.artwork === 'default'" type="button" class="result-action" @click="open(r)">{{ tr('review') }}</button>
+                <button v-else-if="plan.enabled && r.artwork === 'missing' && r.retryable_artwork !== false" type="button" class="result-action" :disabled="!!retryId" @click="retry(r.result_id)">{{ tr('retryArtwork') }}</button>
+              </div>
+            </li>
+          </ol>
+        </div>
+        <nav v-if="pageCount > 1" class="mt-3 flex items-center justify-end gap-3 text-xs">
+          <span class="metadata">{{ tr('resultRange', { from: offset + 1, to: offset + visibleResults.length, total: filteredResults.length }) }}</span>
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="page === 1" @click="page--">{{ tr('prev') }}</button>
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="page === pageCount" @click="page++">{{ tr('next') }}</button>
+        </nav>
+      </section>
     </template>
     <BaseDialog
+      :z-index="60"
       :show="!!releaseTarget"
       :title="tr('releaseHold')"
       width="narrow"
@@ -118,7 +92,7 @@
       <p v-if="releaseTarget" class="text-sm">
         {{
           tr('releaseConfirm', {
-            account: releaseTarget.account_name || '#' + releaseTarget.account_id,
+            account: [releaseTarget.account_name, '#' + releaseTarget.account_id].filter(Boolean).join(' '),
             model: releaseTarget.model,
           })
         }}
@@ -132,6 +106,7 @@
       </template>
     </BaseDialog>
     <BaseDialog
+      :z-index="60"
       :show="!!selected"
       :title="tr('review')"
       width="wide"
@@ -140,7 +115,7 @@
       @close="close"
     >
       <div v-if="selected" class="space-y-3 text-sm">
-        <strong>{{ selected.account_name }} · {{ selected.model }}</strong>
+        <strong>{{ selected.account_name }} #{{ selected.account_id }} · {{ selected.model }}</strong>
         <p>{{ time(selected.finished_at) }} · {{ artStatus(selected) }}</p>
         <p class="text-xs text-gray-500">{{ tr('reviewRule') }}</p>
         <p v-if="selected.review_reason" class="whitespace-pre-wrap break-words text-xs">
@@ -171,6 +146,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import IntelligenceCheckDetails from './IntelligenceCheckDetails.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import TestResultOutput from '@/components/tests/TestResultOutput.vue'
 import {
@@ -195,6 +171,20 @@ const error = ref(''),
   loading = ref(false)
 const blocked = computed(() => data.value?.states.filter((s) => s.blocked) || [])
 const suspects = computed(() => data.value?.states.filter((s) => !s.blocked && s.verdict === 'suspect') || [])
+const issuesOnly = ref(false)
+const page = ref(1)
+const pageSize = 10
+const filteredResults = computed(() => {
+  const rows = data.value?.results || []
+  if (!issuesOnly.value) return rows
+  return rows.filter(r => r.verdict !== 'pass' || r.error_message || r.evidence?.checks?.some(c => c.status !== 'pass'))
+})
+const pageCount = computed(() => Math.ceil(filteredResults.value.length / pageSize))
+const offset = computed(() => (page.value - 1) * pageSize)
+const visibleResults = computed(() => filteredResults.value.slice(offset.value, offset.value + pageSize))
+watch(issuesOnly, () => { page.value = 1 })
+watch(pageCount, count => { page.value = Math.min(page.value, Math.max(count, 1)) })
+const verdictClass = { pass: 'badge-success', confirmed: 'badge-danger', suspect: 'badge-warning', unknown: 'badge-gray' }
 const verdict = (v: IntelligenceObservation['verdict']) => tr('states.' + (v === 'confirmed' ? 'degraded' : v))
 const artStatus = (r: IntelligenceObservation) =>
   tr('art.' + (r.reviewed === 'pass' ? 'approved' : r.reviewed === 'fail' ? 'veto' : r.artwork))
@@ -347,8 +337,22 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-th,
-td {
-  @apply px-2 py-2 align-top;
+.result-grid {
+  @apply grid grid-cols-1 items-start gap-x-5 gap-y-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_minmax(0,.8fr)];
+}
+.result-head {
+  @apply hidden md:grid;
+}
+.identity {
+  @apply break-words text-sm font-semibold text-gray-900 dark:text-gray-100;
+}
+.model {
+  @apply mt-0.5 break-all font-mono text-xs text-gray-700 dark:text-gray-300;
+}
+.metadata {
+  @apply text-xs font-normal text-gray-500 dark:text-gray-400;
+}
+.result-action {
+  @apply rounded text-left text-xs font-medium text-primary-700 hover:underline disabled:opacity-50 dark:text-primary-300;
 }
 </style>

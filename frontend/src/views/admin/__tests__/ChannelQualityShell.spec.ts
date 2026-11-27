@@ -8,8 +8,10 @@ import QualityOperationsPanel from '@/components/tests/QualityOperationsPanel.vu
 
 const api = vi.hoisted(() => ({
   plans: vi.fn(), groups: vi.fn(), accounts: vi.fn(), listTypes: vi.fn(),
+  getVisibility: vi.fn(), setVisibility: vi.fn(),
   refreshIntelligence: vi.fn(), refreshOperations: vi.fn(),
 }))
+vi.mock('@/api/admin/intelligence', () => ({ getIntelligenceVisibility: api.getVisibility, setIntelligenceVisibility: api.setVisibility }))
 vi.mock('@/api/admin', () => ({
   adminAPI: { tests: { listPlans: api.plans, listTypes: api.listTypes }, groups: { getAll: api.groups }, accounts: { list: api.accounts } },
 }))
@@ -34,6 +36,8 @@ async function render(url: string) {
 
 beforeEach(() => {
   vi.resetAllMocks()
+  api.getVisibility.mockResolvedValue(false)
+  api.setVisibility.mockImplementation(async enabled => enabled)
   api.plans.mockResolvedValue([{ id: 5, protection: { intelligence: {} } }])
   api.groups.mockResolvedValue([{ id: 7, name: 'Plus' }])
   api.accounts.mockImplementation(async (page: number) => page === 1
@@ -42,6 +46,25 @@ beforeEach(() => {
 })
 
 describe('intelligence management navigation', () => {
+  it('loads the saved publication switch and only changes it after a successful save', async () => {
+    const { wrapper } = await render('/admin/tests')
+    const toggle = wrapper.get('[role=switch]')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(api.setVisibility).toHaveBeenCalledWith(true)
+    expect(toggle.attributes('aria-checked')).toBe('true')
+    api.setVisibility.mockRejectedValueOnce(new Error('Save failed'))
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role=alert]').text()).toContain('Save failed')
+    expect(toggle.attributes('aria-checked')).toBe('true')
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(api.setVisibility).toHaveBeenLastCalledWith(false)
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    wrapper.unmount()
+  })
   it('loads the catalog independently of retired tabs and keeps direct result links', async () => {
     const { wrapper, router } = await render('/admin/tests?tab=plans&plan_id=5')
     expect(wrapper.findAll('[role="tab"]').map(tab => tab.attributes('data-quality-section'))).toEqual(['intelligence', 'operations'])

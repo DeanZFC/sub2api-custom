@@ -2,8 +2,15 @@
 export default {
   channelMonitorV2: {
     intelligence: {
+      publicVisibility: 'Show the last 20 intelligence checks on Channel Status',
       editPolicy: 'Edit policy · {name}',
-      backToPolicies: 'Back to policies',
+      policyResults: 'Test results · {name}',
+      holdEvidence: 'Latest isolation evidence',
+      checksUnavailable: 'Check details are unavailable for this round',
+      passedChecks: 'Passed checks ({count})',
+      needsAttention: 'Issues and inconclusive only',
+      noIssues: 'All recent results passed',
+      resultRange: '{from}–{to} of {total} results',
       emptyPolicies: 'No intelligence monitoring policies yet',
       viewPolicyResults: 'View results',
       policyName: 'Policy name (optional)',
@@ -66,7 +73,10 @@ export default {
       reject: "Reject artwork",
       reviewRule: "All automated checks for this round passed when the artwork was generated. Rejecting the artwork marks this result as confirmed degradation.",
       monitor: 'Intelligence monitoring', title: 'Intelligence · Last 20 group checks', summary: '20-round summary', round: 'Group check', group: 'Group', account: 'Account', artwork: 'Pelican artwork', viewArtwork: 'View artwork', review: 'Artwork review', verdict: 'Final verdict', completed: 'Last checked',
-      legend: { pass: 'All passed', suspect: 'Needs review', partial: 'Fewer than half degraded', degraded: 'At least half degraded', unknown: 'Incomplete' },
+      legend: { pass: 'All models met the threshold', partial: 'Some models met the threshold', degraded: 'No models met the threshold', unknown: 'Undetermined' },
+      modelThreshold: 'A model meets the threshold when at least one account passes in this round.',
+      modelNormalRate: '{pass}/{total} accounts with a conclusive result passed',
+      noDecidedAccounts: 'No accounts with a conclusive result',
       states: { pass: 'Passed', suspect: 'Suspected', degraded: 'Degraded', unknown: 'Undetermined' },
       checks: { fingerprint: 'Behavioral fingerprint', codex_state: 'Codex state probe', candy: 'Candy question', rate_limit: 'HTTP 429 over three rounds' },
       checkStates: { pass: 'Passed', fail: 'Failed', unknown: 'Undetermined' },

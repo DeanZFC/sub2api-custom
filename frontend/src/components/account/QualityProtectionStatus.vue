@@ -37,33 +37,52 @@
       @focusout="scheduleClose"
     >
       <div class="flex shrink-0 items-center justify-between border-b border-white/10 px-4 py-3">
-        <span class="text-sm font-semibold text-amber-300">{{ t('admin.accounts.qualityDetails.title') }}</span>
+        <div class="min-w-0">
+          <h3 class="text-sm font-semibold text-white">{{ t('admin.accounts.qualityDetails.title') }}</h3>
+          <p class="break-words text-gray-300">{{ account.name }} <span class="text-gray-400">#{{ account.id }}</span></p>
+        </div>
         <button type="button" class="rounded p-1 text-gray-400 hover:bg-white/10 hover:text-white" :aria-label="t('common.close')" @click.stop="close">
           <Icon name="x" size="sm" />
         </button>
       </div>
       <div class="min-h-0 space-y-3 overflow-y-auto overscroll-contain break-words p-4">
-        <p v-if="reason" class="text-amber-200">{{ reason }}</p>
-        <section v-if="modelStatuses.length" class="space-y-2" data-quality-model-details>
-          <h4 class="font-semibold text-white">{{ t('admin.accounts.qualityDetails.modelsTitle') }}</h4>
-          <p class="text-[11px] text-gray-400">{{ t('admin.accounts.qualityDetails.modelsHint') }}</p>
+        <section v-for="hold in intelligenceHolds" :key="hold.plan_id + '-' + hold.model_id" class="dark space-y-2 rounded-lg border border-white/10 p-3" data-intelligence-hold>
+          <p class="text-gray-400">{{ hold.plan_name || '#' + hold.plan_id }}</p>
+          <h4 class="flex flex-wrap items-center justify-between gap-2">
+            <strong class="break-all font-mono text-sm text-white" data-hold-model>{{ hold.model_id }}</strong>
+            <span class="rounded-full bg-rose-400/15 px-2 py-0.5 text-rose-300">{{ modelStatusText('blocked') }}</span>
+          </h4>
+          <div class="space-y-1.5 border-t border-white/10 pt-2">
+            <p class="font-medium text-gray-300">{{ tr('holdEvidence') }}<span v-if="hold.intelligence.hold_round" class="font-normal text-gray-400"> · {{ formatDateTime(hold.intelligence.hold_round.finished_at) }}</span></p>
+            <IntelligenceCheckDetails :checks="hold.intelligence.hold_round?.checks" :artwork-veto="hold.intelligence.hold_round?.artwork_veto" :review-reason="hold.intelligence.hold_round?.review_reason" />
+          </div>
+          <div class="flex flex-wrap gap-x-3 text-[11px] text-gray-400">
+            <span v-if="hold.intelligence.recovery_passes">{{ tr('recovering', { pass: hold.intelligence.passes, total: hold.intelligence.recovery_passes }) }}</span>
+            <span v-if="hold.intelligence.next_check">{{ tr('nextCheck') }} · {{ formatDateTime(hold.intelligence.next_check) }}</span>
+          </div>
+        </section>
+        <component :is="intelligenceHolds.length ? 'details' : 'section'" v-if="reason || modelStatuses.length" class="space-y-2" data-quality-model-details>
+          <summary v-if="intelligenceHolds.length" class="cursor-pointer font-medium text-gray-300">{{ t('admin.accounts.qualityDetails.modelsTitle') }}</summary>
+          <p v-if="reason" class="text-amber-200">{{ reason }}</p>
+          <h4 v-if="modelStatuses.length && !intelligenceHolds.length" class="font-semibold text-white">{{ t('admin.accounts.qualityDetails.modelsTitle') }}</h4>
+          <p v-if="modelStatuses.length" class="text-[11px] text-gray-400">{{ t('admin.accounts.qualityDetails.modelsHint') }}</p>
           <div v-for="model in modelStatuses" :key="model.model" class="rounded border border-white/10 p-2">
             <div class="flex items-start justify-between gap-3"><span class="break-all font-mono">{{ model.model }}</span><span class="shrink-0" :class="model.status === 'blocked' ? 'text-red-300' : model.status === 'normal' ? 'text-emerald-300' : 'text-gray-400'">{{ modelStatusText(model.status) }}</span></div>
             <p v-if="model.reason" class="mt-1 text-gray-300">{{ model.reason }}</p>
           </div>
-        </section>
+        </component>
         <p v-if="loading" role="status">{{ t('common.loading') }}</p>
         <div v-else-if="loadError" role="alert">
           {{ t('admin.accounts.qualityDetails.loadFailed') }}
           <button type="button" class="ml-2 text-primary-300 underline" @click.stop="loadDetails">{{ t('common.retry') }}</button>
         </div>
         <p v-else-if="!holds.length && (isQualityPaused || hasBlockedModels || !modelStatuses.length)" class="text-gray-400">{{ t('admin.accounts.qualityDetails.empty') }}</p>
-        <template v-else-if="holds.length">
+        <template v-else-if="legacyHolds.length">
           <p class="text-[11px] text-gray-400">{{ t('admin.accounts.qualityDetails.evidenceHint') }}</p>
-          <section v-for="(hold, index) in holds" :key="`${hold.plan_id}-${index}`" class="space-y-3 rounded-lg border border-white/10 p-3">
+          <section v-for="(hold, index) in legacyHolds" :key="`${hold.plan_id}-${index}`" class="space-y-3 rounded-lg border border-white/10 p-3">
             <div>
               <div class="flex flex-wrap items-baseline gap-x-2 font-semibold text-white">{{ hold.plan_name || `#${hold.plan_id}` }}<span v-if="hold.model_id" class="break-all font-mono text-[11px] font-normal text-gray-300" data-hold-model>{{ hold.model_id }}</span></div>
-              <p v-if="hold.reason !== reason" class="mt-1 text-amber-200">{{ hold.reason }}</p>
+              <p v-if="hold.reason !== reason || intelligenceHolds.length" class="mt-1 text-amber-200">{{ hold.reason }}</p>
               <div class="mt-1 text-[11px] text-gray-400">{{ t('admin.accounts.qualityDetails.updatedAt', { time: formatDateTime(hold.updated_at) }) }}</div>
               <p v-if="hold.prior_round" class="mt-1 text-amber-300">{{ t('admin.accounts.qualityDetails.retained') }}</p>
             </div>
@@ -119,6 +138,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch, type CSSProperties } from 'vue'
 import { useI18n } from 'vue-i18n'
+import IntelligenceCheckDetails from '@/components/tests/IntelligenceCheckDetails.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { getAccountProtection, type QualityProtectionHold } from '@/api/admin/tests'
 import type { Account, TestCombinationCondition } from '@/types'
@@ -128,6 +148,7 @@ import { accountQualityModels, type AccountQualityModelStatus } from '@/utils/ac
 
 const props = defineProps<{ account: Account }>()
 const { t } = useI18n()
+const tr = (key: string, params = {}) => t('channelMonitorV2.intelligence.' + key, params)
 const isQualityPaused = computed(() => props.account.status === 'quality_paused')
 const modelStatuses = computed(() => accountQualityModels(props.account.extra))
 const hasBlockedModels = computed(() => modelStatuses.value.some(model => model.status === 'blocked'))
@@ -142,6 +163,10 @@ const open = ref(false)
 const loading = ref(false)
 const loadError = ref(false)
 const holds = ref<QualityProtectionHold[]>([])
+const intelligenceHolds = computed(() => holds.value.filter((h): h is QualityProtectionHold & {
+  intelligence: NonNullable<QualityProtectionHold['intelligence']>
+} => !!h.intelligence))
+const legacyHolds = computed(() => holds.value.filter(h => !h.intelligence))
 let pinned = false
 let requestVersion = 0
 let closeTimer: ReturnType<typeof setTimeout> | undefined

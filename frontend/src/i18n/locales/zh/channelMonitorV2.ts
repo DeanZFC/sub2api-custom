@@ -2,8 +2,15 @@
 export default {
   channelMonitorV2: {
     intelligence: {
+      publicVisibility: '在渠道状态向用户展示近 20 轮智力检测',
       editPolicy: '编辑策略 · {name}',
-      backToPolicies: '返回策略列表',
+      policyResults: '检测结果 · {name}',
+      holdEvidence: '最近一次隔离依据',
+      checksUnavailable: '该轮未保留分项明细',
+      passedChecks: '通过项（{count}）',
+      needsAttention: '仅看异常和待确认',
+      noIssues: '近期记录均已通过',
+      resultRange: '第 {from}–{to} 条，共 {total} 条',
       emptyPolicies: '暂无智商监测策略',
       viewPolicyResults: '查看结果',
       policyName: '策略名称（选填）',
@@ -66,7 +73,10 @@ export default {
       reject: "否决作品",
       reviewRule: "生成此作品时，该轮自动检测均已通过。人工否决后，本次结果记为确认降智。",
       monitor: '智商监测', title: '智商监测 · 近 20 轮分组检测', summary: '近 20 轮汇总', round: '分组巡检', group: '分组', account: '账号', artwork: '鹈鹕作品', viewArtwork: '查看作品', review: '作品审批', verdict: '最终判定', completed: '检测完成',
-      legend: { pass: '全部通过', suspect: '有待复核', partial: '少数账号降智', degraded: '至少半数账号降智', unknown: '结果不全' },
+      legend: { pass: '全部模型达标', partial: '部分模型达标', degraded: '全部模型未达标', unknown: '暂无法判定' },
+      modelThreshold: '本轮至少有一个账号通过，该模型即达标。',
+      modelNormalRate: '已判定账号中 {pass}/{total} 正常',
+      noDecidedAccounts: '暂无已判定账号',
       states: { pass: '通过', suspect: '疑似降智', degraded: '确认降智', unknown: '未能判定' },
       checks: { fingerprint: '行为指纹', codex_state: 'Codex 状态探针', candy: '糖果题', rate_limit: '连续三轮 HTTP 429' },
       checkStates: { pass: '通过', fail: '异常', unknown: '未能判定' },

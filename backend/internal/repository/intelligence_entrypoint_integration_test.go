@@ -161,6 +161,22 @@ func TestIntelligenceStandardAdminCreateAndRun(t *testing.T) {
 	require.Len(t, overview.States, 1, "%+v", overview)
 	require.Equal(t, private, overview.States[0].AccountID)
 	require.True(t, overview.States[0].Blocked)
+	initialRound := overview.States[0].HoldRound
+	require.NotNil(t, initialRound)
+	require.Equal(t, service.IntelligenceCheck{Key: "candy", Status: "fail", Detail: "回答 19，参考答案 21"}, initialRound.Checks[0])
+	activeHold := func(account int64) *service.IntelligenceProtectionDetail {
+		t.Helper()
+		holds, err := svc.AccountProtectionDetails(ctx, account)
+		require.NoError(t, err)
+		require.Len(t, holds, 1)
+		require.Equal(t, "intelligence", holds[0].Mode)
+		require.Equal(t, plan.ModelID, holds[0].ModelID)
+		require.Equal(t, plan.ID, holds[0].PlanID)
+		require.NotNil(t, holds[0].Intelligence)
+		require.NotNil(t, holds[0].Intelligence.HoldRound)
+		return holds[0].Intelligence
+	}
+	require.Equal(t, initialRound, activeHold(private).HoldRound)
 	for _, row := range overview.Results {
 		require.NotNil(t, row.Evidence)
 		require.Len(t, row.Evidence.Checks, 2)
@@ -171,6 +187,33 @@ func TestIntelligenceStandardAdminCreateAndRun(t *testing.T) {
 	counts := map[int64]int{both: up.calls[both], private: up.calls[private], imageOnly: up.calls[imageOnly]}
 	up.mu.Unlock()
 	require.Equal(t, map[int64]int{both: 2, private: 1, imageOnly: 0}, counts, "%+v", overview)
+	// The plan has run and the administrator already sees the results. User
+	// publication is a separate setting that must be explicitly enabled.
+	settings := admin.NewSettingHandler(service.NewSettingService(repository.NewSettingRepository(client), cfg), nil, nil, nil, nil, nil, nil)
+	router.GET("/admin/settings/intelligence-visibility", settings.GetIntelligenceVisibility)
+	router.PUT("/admin/settings/intelligence-visibility", settings.UpdateIntelligenceVisibility)
+	t.Cleanup(func() { exec(`DELETE FROM settings WHERE key=$1`, service.SettingKeyIntelligenceRoundsVisible) })
+	visibilityRequest := func(method, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, "/admin/settings/intelligence-visibility", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+	getVisibility := func(want bool) {
+		t.Helper()
+		w := visibilityRequest(http.MethodGet, "")
+		require.Equal(t, http.StatusOK, w.Code)
+		var state struct{ Data struct{ Enabled *bool } }
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &state))
+		require.NotNil(t, state.Data.Enabled)
+		require.Equal(t, want, *state.Data.Enabled)
+	}
+	getVisibility(false)
+	require.Equal(t, http.StatusBadRequest, visibilityRequest(http.MethodPut, `{}`).Code)
+	require.Equal(t, http.StatusOK, visibilityRequest(http.MethodPut, `{"enabled":true}`).Code)
+	getVisibility(true)
 	pub, err := svc.PublicIntelligence()
 	require.NoError(t, err)
 	publicRound, err := pub.PublicIntelligenceRounds(ctx, user, g1, "")
@@ -203,6 +246,10 @@ func TestIntelligenceStandardAdminCreateAndRun(t *testing.T) {
 	// An administrator can correct the automatically accepted artwork. Both
 	// the same public round and this target's scheduling reflect the decision.
 	require.NoError(t, svc.ReviewIntelligenceArt(ctx, artwork, user, "fail", "invalid drawing"))
+	veto := activeHold(both).HoldRound
+	require.Equal(t, artwork, veto.ResultID)
+	require.True(t, veto.ArtworkVeto)
+	require.Equal(t, "invalid drawing", veto.ReviewReason)
 	reviewed, err := pub.PublicIntelligenceRounds(ctx, user, g1, "")
 	require.NoError(t, err)
 	require.Equal(t, "degraded", reviewed[0].Verdict)
@@ -214,6 +261,12 @@ func TestIntelligenceStandardAdminCreateAndRun(t *testing.T) {
 	require.EqualValues(t, 1, id(`SELECT count(*) FROM accounts WHERE id=$1 AND status='active'`, both))
 	require.EqualValues(t, 1, id(`SELECT count(*) FROM accounts WHERE id=$1 AND status='quality_paused'`, private))
 	require.EqualValues(t, 3, id(`SELECT count(*) FROM quality_probe_attempts WHERE intelligence_probe AND account_id=ANY($1)`, pq.Array([]int64{both, private, imageOnly})))
+
+	require.Equal(t, http.StatusOK, visibilityRequest(http.MethodPut, `{"enabled":false}`).Code)
+	getVisibility(false)
+	unpublished, err := pub.PublicIntelligenceRounds(ctx, user, g1, "")
+	require.NoError(t, err)
+	require.Empty(t, unpublished)
 
 	// Advance only the persisted due time to exercise the real runner without
 	// a 30-minute wait. Both the delay and account status are verified first.
@@ -253,6 +306,9 @@ func TestIntelligenceStandardAdminCreateAndRun(t *testing.T) {
 	advance()
 	run(false)
 	checkState(private, "pass", 1, 5, "quality_paused")
+	recovering := activeHold(private)
+	require.Equal(t, 1, recovering.Passes)
+	require.Equal(t, initialRound, recovering.HoldRound)
 	checkState(both, "suspect", 0, 5, "active")
 	advance()
 	run(true, service.IntelligenceTarget{AccountID: private, Model: plan.ModelID}, service.IntelligenceTarget{AccountID: both, Model: plan.ModelID})
@@ -263,4 +319,12 @@ func TestIntelligenceStandardAdminCreateAndRun(t *testing.T) {
 	checkState(both, "confirmed", 0, 30, "quality_paused")
 	require.EqualValues(t, 3, id(`SELECT count(DISTINCT run_id) FROM scheduled_test_results
  WHERE plan_id=$1 AND account_id=$2 AND execution_info->'intelligence'->>'candy_http_status'='429'`, plan.ID, both))
+	// This targeted retest has no public-round snapshot. Its isolation reason
+	// must still be readable after routine result retention.
+	require.NoError(t, results.PruneOldResults(ctx, plan.ID, 0))
+	limitedRound := activeHold(both).HoldRound
+	require.Equal(t, service.IntelligenceCheck{Key: "http_429", Status: "fail", Detail: "连续限流 3/3"}, limitedRound.Checks[1])
+	require.NoError(t, svc.ReleaseIntelligenceHold(ctx, plan.ID, both, plan.ModelID, user))
+	require.NoError(t, results.PruneOldResults(ctx, plan.ID, 0))
+	require.Zero(t, id(`SELECT count(*) FROM scheduled_test_results WHERE id=$1`, limitedRound.ResultID))
 }

@@ -7,9 +7,17 @@ import (
 	"time"
 )
 
+type IntelligenceProtectionDetail struct {
+	HoldRound      *IntelligenceHoldRound `json:"hold_round,omitempty"`
+	Passes         int                    `json:"passes"`
+	RecoveryPasses int                    `json:"recovery_passes"`
+	NextCheck      *time.Time             `json:"next_check,omitempty"`
+}
+
 // This read-only projection intentionally separates the persisted hold from
 // current evidence: protection states are replaced at the start of each round.
 type ScheduledTestProtectionHold struct {
+	Intelligence    *IntelligenceProtectionDetail     `json:"intelligence,omitempty"`
 	ModelID         string                            `json:"model_id,omitempty"`
 	PlanID          int64                             `json:"plan_id"`
 	PlanName        string                            `json:"plan_name"`
@@ -86,6 +94,7 @@ type ScheduledTestThresholdDetail struct {
 // Source fields are private to the admin projection and never serialized to
 // clients. In particular, full model output is only used to evaluate metrics.
 type ScheduledTestProtectionHoldSource struct {
+	Intelligence    *IntelligenceProtectionDetail
 	ModelID         string
 	PlanID          int64
 	PlanName        string
@@ -152,6 +161,11 @@ func BuildScheduledTestProtectionHold(source ScheduledTestProtectionHoldSource) 
 	hold := ScheduledTestProtectionHold{PlanID: source.PlanID, PlanName: source.PlanName,
 		Reason: source.Reason, UpdatedAt: source.UpdatedAt, Mode: "per_test", ModelID: source.ModelID,
 		Rules: []ScheduledTestProtectionHit{}, Tests: []ScheduledTestProtectionEvidence{}, TriggerSnapshot: source.TriggerSnapshot}
+	if source.Intelligence != nil {
+		hold.Mode = "intelligence"
+		hold.Intelligence = source.Intelligence
+		return hold
+	}
 	verdicts := map[int64]string{}
 	for _, state := range source.States {
 		if state.Current {

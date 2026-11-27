@@ -8,6 +8,23 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
+// hold_version is retained while a model is recovering, even across policy edits.
+// A review of an old artwork can change its display verdict without changing routing_veto.
+const intelligenceHoldObservationSQL = `SELECT o.result_id,o.finished_at,o.routing_veto
+ FROM intelligence_observations o
+ WHERE s.blocked AND o.plan_id=s.plan_id AND o.account_id=s.account_id AND o.model_key=s.model_key
+ AND o.policy_version=s.hold_version AND NOT o.released AND o.auto_isolate AND (o.verdict='confirmed' OR o.routing_veto)
+ ORDER BY o.started_at DESC,o.result_id DESC LIMIT 1`
+
+const intelligenceHoldRoundJoin = ` LEFT JOIN LATERAL (
+ SELECT jsonb_build_object('result_id',o.result_id,'finished_at',o.finished_at,
+   'checks',r.execution_info->'intelligence'->'checks','artwork_veto',o.routing_veto,
+   'review_reason',CASE WHEN o.routing_veto AND v.verdict='fail' THEN v.reason END) AS evidence
+ FROM (` + intelligenceHoldObservationSQL + `) o
+ LEFT JOIN scheduled_test_results r ON r.id=o.result_id
+ LEFT JOIN intelligence_artwork_reviews v ON v.result_id=o.result_id
+ ) hold_round ON true `
+
 func (r *scheduledTestResultRepository) IntelligenceOverview(ctx context.Context, planID int64) (*service.IntelligenceAdminOverview, error) {
 	out := &service.IntelligenceAdminOverview{Results: []service.IntelligenceAdminResult{}, States: []service.IntelligenceAdminState{}}
 	rows, err := r.db.QueryContext(ctx, `SELECT o.result_id,o.account_id,a.name,o.model_key,
@@ -16,7 +33,7 @@ func (r *scheduledTestResultRepository) IntelligenceOverview(ctx context.Context
  (r.status='failed' AND p.enabled AND NOT o.released AND NOT r.protection_revoked
   AND o.policy_version=p.protection->'intelligence'->>'version'
   AND r.execution_info->'intelligence'->>'artwork'='missing'),
- r.execution_info->'intelligence',COALESCE(v.reason,'')
+ r.execution_info->'intelligence',COALESCE(v.reason,''),COALESCE(r.error_message,'')
  FROM intelligence_observations o JOIN scheduled_test_plans p ON p.id=o.plan_id
  JOIN scheduled_test_results r ON r.id=o.result_id JOIN accounts a ON a.id=o.account_id
  LEFT JOIN intelligence_artwork_reviews v USING(result_id)
@@ -27,7 +44,7 @@ func (r *scheduledTestResultRepository) IntelligenceOverview(ctx context.Context
 	for rows.Next() {
 		var h service.IntelligenceAdminResult
 		var raw []byte
-		if err = rows.Scan(&h.ResultID, &h.AccountID, &h.AccountName, &h.Model, &h.Verdict, &h.Artwork, &h.Reviewed, &h.FinishedAt, &h.RetryableArtwork, &raw, &h.ReviewReason); err != nil {
+		if err = rows.Scan(&h.ResultID, &h.AccountID, &h.AccountName, &h.Model, &h.Verdict, &h.Artwork, &h.Reviewed, &h.FinishedAt, &h.RetryableArtwork, &raw, &h.ReviewReason, &h.ErrorMessage); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -44,15 +61,23 @@ func (r *scheduledTestResultRepository) IntelligenceOverview(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
-	rows, err = r.db.QueryContext(ctx, `SELECT s.account_id,a.name,s.model_key,s.blocked,s.passes,s.verdict,s.next_check FROM intelligence_model_states s JOIN accounts a ON a.id=s.account_id JOIN scheduled_test_plans p ON p.id=s.plan_id WHERE s.plan_id=$1 AND s.model_key=ANY(p.model_ids) AND NOT(s.account_id=ANY(p.excluded_account_ids)) AND (s.blocked OR s.verdict='suspect') ORDER BY s.next_check NULLS LAST,a.name,s.model_key`, planID)
+	rows, err = r.db.QueryContext(ctx, `SELECT s.account_id,a.name,s.model_key,s.blocked,s.passes,s.verdict,s.next_check,hold_round.evidence
+ FROM intelligence_model_states s JOIN accounts a ON a.id=s.account_id JOIN scheduled_test_plans p ON p.id=s.plan_id
+ `+intelligenceHoldRoundJoin+` WHERE s.plan_id=$1 AND s.model_key=ANY(p.model_ids) AND NOT(s.account_id=ANY(p.excluded_account_ids)) AND (s.blocked OR s.verdict='suspect') ORDER BY s.next_check NULLS LAST,a.name,s.model_key`, planID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var s service.IntelligenceAdminState
-		if err = rows.Scan(&s.AccountID, &s.AccountName, &s.Model, &s.Blocked, &s.Passes, &s.Verdict, &s.NextCheck); err != nil {
+		var raw []byte
+		if err = rows.Scan(&s.AccountID, &s.AccountName, &s.Model, &s.Blocked, &s.Passes, &s.Verdict, &s.NextCheck, &raw); err != nil {
 			return nil, err
+		}
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &s.HoldRound); err != nil {
+				return nil, err
+			}
 		}
 		out.States = append(out.States, s)
 	}

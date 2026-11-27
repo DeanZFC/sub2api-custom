@@ -31,7 +31,7 @@
         data-state="unknown"
         aria-hidden="true"
       >
-        <span class="monitor-status-mark bg-gray-300 dark:bg-dark-600" />
+        <span class="monitor-status-mark" :class="colors.unknown" />
       </span>
       <button
         v-for="r in roundCells"
@@ -58,6 +58,7 @@
       <span v-for="(color, s) in colors" :key="s" class="inline-flex items-center gap-1">
         <i class="h-2 w-2 rounded-sm" :class="color" />{{ tr('legend.' + s) }}
       </span>
+      <span>{{ tr('modelThreshold') }}</span>
     </div>
     <div
       v-if="active && group"
@@ -80,6 +81,11 @@
       </header>
       <div ref="scroller" class="round-body min-h-0 space-y-2 overflow-y-auto overscroll-contain px-3 py-2">
         <template v-if="header || totals">
+          <ul v-if="header" class="space-y-0.5">
+            <li v-for="m in header.model_counts" :key="m.model">
+              {{ m.model }} · {{ m.pass + m.degraded ? tr('modelNormalRate', { pass: m.pass, total: m.pass + m.degraded }) : tr('noDecidedAccounts') }}
+            </li>
+          </ul>
           <p>
             {{
               header
@@ -90,7 +96,7 @@
           </p>
           <p v-if="totals && !header" class="flex flex-wrap gap-x-3 gap-y-1">
             <span v-for="s in states" :key="s"
-              ><i class="mr-1 inline-block h-2 w-2 rounded-sm" :class="colors[s]" />{{ tr('states.' + s) }}
+              ><i class="mr-1 inline-block h-2 w-2 rounded-sm" :class="colors[s === 'suspect' ? 'unknown' : s]" />{{ tr('states.' + s) }}
               {{ totals.counts[s] }}</span
             >
           </p>
@@ -196,6 +202,7 @@ import {
   type RoundDetail,
   type IntelligenceSummary,
   type IntelligenceModel,
+  type IntelligenceModelCounts,
   type IntelligenceCounts,
   type RoundAccount,
 } from '@/api/intelligence'
@@ -210,10 +217,16 @@ const tr = (key: string, params: Record<string, unknown> = {}) => t('channelMoni
 const states: IntelligenceVerdict[] = ['pass', 'suspect', 'degraded', 'unknown']
 const colors = {
   pass: 'health-score10',
-  suspect: 'health-score5',
-  partial: 'health-score3',
+  partial: 'health-score6',
   degraded: 'health-critical',
   unknown: 'health-unknown',
+}
+function roundState(models: IntelligenceModelCounts[]): keyof typeof colors {
+  const decided = models.filter(m => m.pass + m.degraded > 0)
+  const passing = decided.filter(m => m.pass > 0).length
+  if (passing > 0 && passing < decided.length) return 'partial'
+  if (decided.length === 0 || decided.length < models.length) return 'unknown'
+  return passing > 0 ? 'pass' : 'degraded'
 }
 function roundAccountLabel(round: IntelligenceRound) {
   return states
@@ -234,7 +247,7 @@ const rounds = ref<IntelligenceRound[]>([]),
   reload = ref(0)
 const roundCells = computed(() => rounds.value.map((round) => ({
   ...round,
-  state: round.verdict === 'degraded' && round.counts.degraded * 2 < round.accounts ? 'partial' as const : round.verdict,
+  state: roundState(round.model_counts ?? []),
 })))
 const emptyMessage = computed(() => {
   if (!props.group && props.directoryMessage) return props.directoryMessage

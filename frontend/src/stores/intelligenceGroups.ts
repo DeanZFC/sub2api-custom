@@ -1,11 +1,12 @@
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
-import { intelligenceGroups, type IntelligenceGroup } from '@/api/intelligence'
+import { intelligenceDirectory, type IntelligenceGroup } from '@/api/intelligence'
 import { useAuthStore } from './auth'
 
 export const useIntelligenceGroupsStore = defineStore('intelligence-groups', () => {
   const auth = useAuthStore()
   const groups = ref<IntelligenceGroup[]>([])
+  const roundsVisible = ref(false)
   const refreshed = ref(0)
   const failed = ref(false)
   const loading = ref(false)
@@ -17,6 +18,7 @@ export const useIntelligenceGroupsStore = defineStore('intelligence-groups', () 
     () => {
       controller?.abort()
       pending = undefined
+      roundsVisible.value = false
       groups.value = []
       refreshed.value = 0
       failed.value = false
@@ -31,15 +33,17 @@ export const useIntelligenceGroupsStore = defineStore('intelligence-groups', () 
     const request = new AbortController()
     controller = request
     loading.value = true
-    pending = intelligenceGroups(request.signal)
-      .then((items) => {
+    pending = intelligenceDirectory(request.signal)
+      .then((directory) => {
         if (request.signal.aborted) return
-        groups.value = items
+        roundsVisible.value = directory.rounds_visible === true
+        groups.value = directory.groups
         refreshed.value = Date.now()
         failed.value = false
       })
       .catch(() => {
         if (request.signal.aborted) return
+        roundsVisible.value = false
         groups.value = []
         failed.value = true
       })
@@ -51,5 +55,5 @@ export const useIntelligenceGroupsStore = defineStore('intelligence-groups', () 
       })
     return pending
   }
-  return { groups, refreshed, failed, loading, load }
+  return { groups, roundsVisible, refreshed, failed, loading, load }
 })

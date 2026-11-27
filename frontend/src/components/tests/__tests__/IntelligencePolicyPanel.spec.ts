@@ -93,7 +93,7 @@ function mountPanel(plans: TestPlan[] = [], initialPlanId?: number, catalogReady
         IntelligencePolicyResults: true,
         BaseDialog: {
           props: ['show', 'title'],
-          template: '<div v-if="show" role="dialog"><h3>{{ title }}</h3><slot/><slot name="footer"/></div>',
+          template: `<div v-if="show" role="dialog"><h3>{{ title }}</h3><button data-close-dialog @click="$emit('close')">Close</button><slot/><slot name="footer"/></div>`,
         },
       },
     },
@@ -309,7 +309,9 @@ describe('intelligence monitoring policy', () => {
     expect(api.update).toHaveBeenLastCalledWith(15, { enabled: false })
     await w.get('[data-policy-id="15"] [data-policy-results]').trigger('click')
     expect(w.getComponent(IntelligencePolicyResults).props('plan').id).toBe(15)
-    await w.get('[data-back-to-policies]').trigger('click')
+    expect(w.get('[role=dialog] h3').text()).toContain('检测结果 · Second')
+    expect(w.findAll('[data-policy-id]')).toHaveLength(2)
+    await w.get('[data-close-dialog]').trigger('click')
     await w.get('[data-policy-id="9"] [data-run-policy]').trigger('click')
     await flushPromises()
     expect(api.run).toHaveBeenCalledWith(9)
@@ -342,7 +344,9 @@ describe('intelligence monitoring policy', () => {
     await w.setProps({ plans: [plan, second], catalogReady: true })
     await flushPromises()
     expect(w.getComponent(IntelligencePolicyResults).props('plan').id).toBe(15)
-    await w.get('[data-back-to-policies]').trigger('click')
+    expect(w.get('[role=dialog] h3').text()).toContain('检测结果 · Second')
+    expect(w.findAll('[data-policy-id]')).toHaveLength(2)
+    await w.get('[data-close-dialog]').trigger('click')
     expect(w.findAll('[data-policy-id]')).toHaveLength(2)
     expect(w.findComponent(IntelligencePolicyResults).exists()).toBe(false)
     w.unmount()
@@ -359,9 +363,9 @@ describe('intelligence monitoring policy', () => {
       },
     })
     await flushPromises()
-    const action = w.get('li button')
+    const action = w.get('ul li button')
     await action.trigger('click')
-    expect(w.get('[role=dialog]').text()).toContain('B 的 gpt-a')
+    expect(w.get('[role=dialog]').text()).toContain('B #2 的 gpt-a')
     expect(api.release).not.toHaveBeenCalled()
     await w.get('[role=dialog] .btn-secondary').trigger('click')
     expect(api.release).not.toHaveBeenCalled()
@@ -370,7 +374,7 @@ describe('intelligence monitoring policy', () => {
     await w.get('[role=dialog] .btn-primary').trigger('click')
     await flushPromises()
     expect(api.release).toHaveBeenCalledWith(9, 2, 'gpt-a')
-    expect(w.find('li button').exists()).toBe(false)
+    expect(w.find('ul li button').exists()).toBe(false)
     w.unmount()
   })
   it('retries only the selected missing artwork and reloads the authoritative result', async () => {
@@ -381,12 +385,12 @@ describe('intelligence monitoring policy', () => {
       global: { plugins: [i18n()], stubs: { BaseDialog: true } },
     })
     await flushPromises()
-    expect(w.findAll('tbody button')).toHaveLength(1)
-    await w.get('tbody button').trigger('click')
+    expect(w.findAll('[data-result-id] button')).toHaveLength(1)
+    await w.get('[data-result-id] button').trigger('click')
     await flushPromises()
     expect(api.retry).toHaveBeenCalledWith(5)
     expect(api.art).not.toHaveBeenCalled()
-    expect(w.get('tbody').text()).toContain('默认通过')
+    expect(w.get('[data-result-id]').text()).toContain('默认通过')
     expect(w.text()).toContain('沿用本轮已记录的检测结果')
     w.unmount()
   })
@@ -413,9 +417,37 @@ describe('intelligence monitoring policy', () => {
       global: { plugins: [i18n()], stubs: { BaseDialog: true } },
     })
     await flushPromises()
-    const checks = w.findAll('tbody tr').map(r => r.findAll('dt').map(check => check.text()))
+    const checks = w.findAll('[data-result-id]').map(r => r.findAll('dt').map(check => check.text()))
     expect(checks[0]).toEqual(['糖果题 · 通过', '连续三轮 HTTP 429 · 通过'])
     expect(checks[1]).toEqual(['行为指纹 · 未能判定', 'Codex 状态探针 · 未能判定', ...checks[0]])
+    w.unmount()
+  })
+  it('shows failed checks immediately and keeps inconclusive rounds when filtering by issues', async () => {
+    const row = defaults.results[0]
+    api.overview.mockResolvedValue({ states: [], results: [
+      { ...row, result_id: 12, account_id: 8, account_name: 'Same name', model: 'model-A', verdict: 'confirmed',
+        evidence: { auto_verdict: 'confirmed', checks: [
+          { key: 'candy', status: 'fail', detail: '回答 19，参考答案 21' },
+          { key: 'http_429', status: 'pass', detail: '0/3' },
+        ] } },
+      { ...row, result_id: 11, account_id: 9, account_name: 'Same name', model: 'model-B', verdict: 'unknown',
+        error_message: '请求中断', evidence: null },
+      ...Array.from({ length: 10 }, (_, i) => ({ ...row, result_id: 10 - i })),
+    ] })
+    const w = mount(IntelligencePolicyResults, {
+      props: { plan, refreshKey: 0 }, global: { plugins: [i18n()], stubs: { BaseDialog: true } },
+    })
+    await flushPromises()
+    expect(w.findAll('[data-result-id]')).toHaveLength(10)
+    const failed = w.get('[data-result-id="12"]')
+    for (const text of ['Same name', '#8', 'model-A', '糖果题 · 异常', '回答 19，参考答案 21']) expect(failed.text()).toContain(text)
+    expect(failed.get('dt').element.closest('details')).toBeNull()
+    await w.get('nav button:last-child').trigger('click')
+    expect(w.find('[data-result-id="12"]').exists()).toBe(false)
+    await w.get('input[type=checkbox]').setValue(true)
+    expect(w.findAll('[data-result-id]')).toHaveLength(2)
+    expect(w.get('[data-result-id="11"]').text()).toContain('请求中断')
+    expect(w.get('[data-result-id="11"]').text()).toContain('该轮未保留分项明细')
     w.unmount()
   })
   it('loads artwork only when selected and refreshes the final verdict from the server after a veto', async () => {
@@ -433,7 +465,7 @@ describe('intelligence monitoring policy', () => {
     expect(w.text()).toContain('恢复进度 1/2')
     expect(w.text()).toContain('下次复测')
     expect(api.art).not.toHaveBeenCalled()
-    await w.get('tbody button').trigger('click')
+    await w.get('[data-result-id] button').trigger('click')
     await flushPromises()
     expect(api.art).toHaveBeenCalledWith(5, expect.any(AbortSignal))
     await w.get('textarea').setValue(' 图中没有自行车 ')
@@ -448,12 +480,10 @@ describe('intelligence monitoring policy', () => {
     await flushPromises()
     expect(api.review).toHaveBeenCalledWith(5, 'fail', '图中没有自行车')
     expect(w.find('[role=dialog]').exists()).toBe(false)
-    expect(w.get('tbody details summary').text()).toContain('确认降智')
-    await w.get('tbody details summary').trigger('click')
-    expect(w.get('tbody dl').text()).toContain('连续三轮 HTTP 429 · 通过')
-    expect(w.get('tbody details').text()).toContain('上次审批说明 · 图中没有自行车')
-    expect(w.get('tbody').text()).toContain('人工否决')
-    expect(w.get('tbody').text()).toContain('确认降智')
+    expect(w.get('[data-result-id] details').text()).toContain('连续三轮 HTTP 429 · 通过')
+    expect(w.get('[data-result-id]').text()).toContain('图中没有自行车')
+    expect(w.get('[data-result-id]').text()).toContain('人工否决')
+    expect(w.get('[data-result-id]').text()).toContain('确认降智')
     w.unmount()
   })
 })

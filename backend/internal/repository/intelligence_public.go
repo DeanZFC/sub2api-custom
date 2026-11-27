@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
 )
 
 var _ service.PublicIntelligenceRepository = (*scheduledTestResultRepository)(nil)
@@ -20,37 +19,40 @@ const intelligenceEntitledGroups = `SELECT g.id,g.name FROM groups g
  OR EXISTS(SELECT 1 FROM user_allowed_groups ag WHERE ag.user_id=$1 AND ag.group_id=g.id)
  OR EXISTS(SELECT 1 FROM user_subscriptions s WHERE s.user_id=$1 AND s.group_id=g.id
  AND s.deleted_at IS NULL AND s.status='active' AND s.starts_at<=NOW() AND s.expires_at>NOW()))`
-const intelligencePlanVisible = `p.enabled AND jsonb_typeof(p.protection->'intelligence')='object'`
 
-func (r *scheduledTestResultRepository) PublicIntelligenceGroups(ctx context.Context, user int64) ([]service.PublicIntelligenceGroup, error) {
+// Read the opt-in in the same database snapshot as the result, including direct
+// requests for a previously visible artwork or round.
+const intelligenceRoundsVisibleSQL = `EXISTS (SELECT 1 FROM settings WHERE key='` + service.SettingKeyIntelligenceRoundsVisible + `' AND value='true')`
+const intelligencePlanVisible = intelligenceRoundsVisibleSQL + ` AND p.enabled AND jsonb_typeof(p.protection->'intelligence')='object'`
+
+func (r *scheduledTestResultRepository) PublicIntelligenceDirectory(ctx context.Context, user int64) (*service.PublicIntelligenceDirectory, error) {
 	// The established legacy projector performs account and plan visibility checks.
 	// Selecting just the group ID lets Postgres omit all output and diagnostic fields.
-	rows, err := r.db.QueryContext(ctx, scheduledTestVisibleProjectionCTE+scheduledTestVisibleAccessCTE+`,
+	var dir service.PublicIntelligenceDirectory
+	var raw []byte
+	err := r.db.QueryRowContext(ctx, scheduledTestVisibleProjectionCTE+scheduledTestVisibleAccessCTE+`,
  legacy AS (SELECT DISTINCT group_id FROM visible_results WHERE status IN ('success','passed','failed','error')),
  entitled_groups AS (`+intelligenceEntitledGroups+`),
  selected AS (SELECT g.id, models.model FROM entitled_groups g
  JOIN scheduled_test_plans p ON g.id=ANY(p.group_ids) AND `+intelligencePlanVisible+`
- CROSS JOIN LATERAL unnest(CASE WHEN cardinality(p.model_ids)>0 THEN p.model_ids ELSE ARRAY[p.model_id] END) models(model))
- SELECT g.id,g.name,COALESCE(array_agg(DISTINCT sel.model ORDER BY sel.model) FILTER (WHERE sel.model IS NOT NULL),'{}'::text[]),
- l.group_id IS NOT NULL FROM entitled_groups g LEFT JOIN selected sel ON sel.id=g.id LEFT JOIN legacy l ON l.group_id=g.id
- WHERE sel.id IS NOT NULL OR l.group_id IS NOT NULL GROUP BY g.id,g.name,l.group_id ORDER BY g.name,g.id`, user)
+ CROSS JOIN LATERAL unnest(CASE WHEN cardinality(p.model_ids)>0 THEN p.model_ids ELSE ARRAY[p.model_id] END) models(model)), visible_groups AS (
+ SELECT g.id,g.name,COALESCE(array_agg(DISTINCT sel.model ORDER BY sel.model) FILTER (WHERE sel.model IS NOT NULL),'{}'::text[]) AS models,
+ l.group_id IS NOT NULL AS has_legacy_results FROM entitled_groups g LEFT JOIN selected sel ON sel.id=g.id LEFT JOIN legacy l ON l.group_id=g.id
+ WHERE sel.id IS NOT NULL OR l.group_id IS NOT NULL GROUP BY g.id,g.name,l.group_id)
+ SELECT `+intelligenceRoundsVisibleSQL+`, COALESCE(json_agg(g ORDER BY g.name,g.id),'[]'::json) FROM visible_groups g`, user).Scan(&dir.RoundsVisible, &raw)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	out := []service.PublicIntelligenceGroup{}
-	for rows.Next() {
-		var g service.PublicIntelligenceGroup
-		if err = rows.Scan(&g.ID, &g.Name, pq.Array(&g.Models), &g.HasLegacyResults); err != nil {
-			return nil, err
-		}
-		out = append(out, g)
+	if err := json.Unmarshal(raw, &dir.Groups); err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return &dir, nil
 }
 
 // Selecting the run before loading the models preserves the group's completion
 // boundary even when a viewer filters down to a model that finished early.
+// For each model, an account contributes its worst conclusive result across
+// efforts. Keep the full severity separately for the account detail and summary.
 const publicIntelligenceWindow = `WITH entitled AS (` + intelligenceEntitledGroups + `),
  recent AS MATERIALIZED (SELECT b.run_id,b.started_at,b.finished_at
  FROM intelligence_rounds b JOIN scheduled_test_plans p ON p.id=b.plan_id
@@ -63,7 +65,8 @@ const publicIntelligenceWindow = `WITH entitled AS (` + intelligenceEntitledGrou
  CASE WHEN COALESCE(r.execution_info->'intelligence'->>'auto_verdict','unknown')<>'pass' THEN 'skipped'
  WHEN r.execution_info->'intelligence'->>'artwork' IS DISTINCT FROM 'default' OR octet_length(r.output_html)=0 THEN 'missing'
  WHEN rv.verdict='fail' THEN 'veto' WHEN rv.verdict='pass' THEN 'approved' ELSE 'default' END AS artwork,
- CASE WHEN r.execution_info->'intelligence'->>'auto_verdict'='confirmed' THEN 3
+ CASE WHEN r.status IN ('failed','error') THEN 1
+ WHEN r.execution_info->'intelligence'->>'auto_verdict'='confirmed' THEN 3
  WHEN r.execution_info->'intelligence'->>'auto_verdict'='suspect' THEN 2
  WHEN r.execution_info->'intelligence'->>'auto_verdict' IS DISTINCT FROM 'pass' THEN 1
  WHEN r.execution_info->'intelligence'->>'artwork' IS DISTINCT FROM 'default' OR octet_length(r.output_html)=0 THEN 1
@@ -71,10 +74,19 @@ const publicIntelligenceWindow = `WITH entitled AS (` + intelligenceEntitledGrou
  FROM recent b JOIN intelligence_round_targets t ON t.run_id=b.run_id AND t.group_id=$2 AND ($3='' OR t.model=$3)
  LEFT JOIN scheduled_test_results r ON r.id=t.result_id
  LEFT JOIN intelligence_artwork_reviews rv ON rv.result_id=t.result_id),
- accounts AS (SELECT run_id,alias,MAX(severity) AS severity,count(*) AS targets,count(*) FILTER(WHERE severity=0) AS passed
- FROM targets GROUP BY run_id,alias)`
+ model_accounts AS (SELECT run_id,alias,model,MAX(severity) AS severity,
+ MAX(severity) FILTER(WHERE severity IN (0,3)) AS decided_severity,
+ count(*) AS targets,count(*) FILTER(WHERE severity=0) AS passed
+ FROM targets GROUP BY run_id,alias,model),
+ accounts AS (SELECT run_id,alias,MAX(severity) AS severity,sum(targets) AS targets,sum(passed) AS passed
+ FROM model_accounts GROUP BY run_id,alias)`
 const intellCountSQL = `count(*) FILTER(WHERE a.severity=0),count(*) FILTER(WHERE a.severity=2),count(*) FILTER(WHERE a.severity=3),count(*) FILTER(WHERE a.severity=1)`
-const intellRoundSQL = `SELECT b.run_id,b.started_at,b.finished_at,MAX(a.severity),` + intellCountSQL + `,count(*),sum(a.targets),sum(a.passed)
+const intellRoundSQL = `, model_counts AS (
+ SELECT run_id,model,count(*) FILTER(WHERE decided_severity=0) AS pass,count(*) FILTER(WHERE decided_severity=3) AS degraded
+ FROM model_accounts GROUP BY run_id,model)
+ SELECT b.run_id,b.started_at,b.finished_at,MAX(a.severity),` + intellCountSQL + `,count(*),sum(a.targets),sum(a.passed),
+ (SELECT json_agg(json_build_object('model',m.model,'pass',m.pass,'degraded',m.degraded) ORDER BY m.model)
+  FROM model_counts m WHERE m.run_id=b.run_id)
  FROM recent b JOIN accounts a ON a.run_id=b.run_id`
 const intellRoundGroup = ` GROUP BY b.run_id,b.started_at,b.finished_at ORDER BY b.finished_at,b.run_id`
 
@@ -84,8 +96,12 @@ func publicIntelligenceVerdict(severity int) string {
 func scanIntelligenceRound(row scannable) (service.PublicIntelligenceRound, error) {
 	var b service.PublicIntelligenceRound
 	var severity int
-	err := row.Scan(&b.ID, &b.StartedAt, &b.FinishedAt, &severity, &b.Counts.Pass, &b.Counts.Suspect, &b.Counts.Degraded, &b.Counts.Unknown, &b.Accounts, &b.Targets, &b.PassedTargets)
+	var models []byte
+	if err := row.Scan(&b.ID, &b.StartedAt, &b.FinishedAt, &severity, &b.Counts.Pass, &b.Counts.Suspect, &b.Counts.Degraded, &b.Counts.Unknown, &b.Accounts, &b.Targets, &b.PassedTargets, &models); err != nil {
+		return b, err
+	}
 	b.Verdict = publicIntelligenceVerdict(severity)
+	err := json.Unmarshal(models, &b.ModelCounts)
 	return b, err
 }
 func (r *scheduledTestResultRepository) PublicIntelligenceRounds(ctx context.Context, user, group int64, model string) ([]service.PublicIntelligenceRound, error) {

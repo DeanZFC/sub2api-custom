@@ -3,17 +3,7 @@
     <p v-if="error" role="alert" class="text-sm text-red-600">{{ error }}</p>
     <p v-if="notice" role="status" class="text-sm text-gray-600 dark:text-dark-300">{{ notice }}</p>
 
-    <template v-if="resultPlan">
-      <header class="flex flex-wrap items-center gap-3">
-        <button type="button" class="btn btn-secondary btn-sm" data-back-to-policies @click="showList">
-          <Icon name="arrowLeft" size="sm" />{{ tr('backToPolicies') }}
-        </button>
-        <h3 class="font-semibold">{{ resultPlan.name || '#' + resultPlan.id }}</h3>
-      </header>
-      <IntelligencePolicyResults :key="resultPlan.id" :plan="resultPlan" :refresh-key="overviewRefresh" />
-    </template>
-
-    <div v-else class="card overflow-hidden">
+    <div class="card overflow-hidden">
       <header class="card-header flex flex-wrap items-center justify-between gap-3">
         <h3 class="font-semibold">{{ tr('policy') }}</h3>
         <button type="button" class="btn btn-primary btn-sm" data-new-policy :disabled="busy || !catalogReady" @click="edit()">
@@ -71,6 +61,15 @@
         </table>
       </div>
     </div>
+
+    <BaseDialog
+      :show="!!resultPlan"
+      :title="tr('policyResults', { name: resultPlan?.name || '#' + resultPlanId })"
+      width="extra-wide"
+      @close="resultPlanId = undefined"
+    >
+      <IntelligencePolicyResults v-if="resultPlan" :key="resultPlan.id" :plan="resultPlan" :refresh-key="overviewRefresh" />
+    </BaseDialog>
 
     <BaseDialog
       :show="editorOpen"

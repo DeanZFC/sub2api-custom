@@ -80,6 +80,7 @@ func (s *ScheduledTestService) prepareIntelligencePolicy(ctx context.Context, p 
 }
 
 type IntelligenceAdminResult struct {
+	ErrorMessage     string                `json:"error_message,omitempty"`
 	Evidence         *IntelligenceEvidence `json:"evidence,omitempty"`
 	ReviewReason     string                `json:"review_reason,omitempty"`
 	ResultID         int64                 `json:"result_id"`
@@ -92,14 +93,25 @@ type IntelligenceAdminResult struct {
 	Reviewed         string                `json:"reviewed"`
 	FinishedAt       time.Time             `json:"finished_at"`
 }
+
+// IntelligenceHoldRound identifies the most recent round that established or
+// renewed an active isolation. Subsequent recovery checks do not replace it.
+type IntelligenceHoldRound struct {
+	ResultID     int64               `json:"result_id"`
+	FinishedAt   time.Time           `json:"finished_at"`
+	Checks       []IntelligenceCheck `json:"checks"`
+	ArtworkVeto  bool                `json:"artwork_veto"`
+	ReviewReason string              `json:"review_reason,omitempty"`
+}
 type IntelligenceAdminState struct {
-	AccountID   int64      `json:"account_id"`
-	AccountName string     `json:"account_name"`
-	Model       string     `json:"model"`
-	Blocked     bool       `json:"blocked"`
-	Passes      int        `json:"passes"`
-	Verdict     string     `json:"verdict"`
-	NextCheck   *time.Time `json:"next_check,omitempty"`
+	HoldRound   *IntelligenceHoldRound `json:"hold_round,omitempty"`
+	AccountID   int64                  `json:"account_id"`
+	AccountName string                 `json:"account_name"`
+	Model       string                 `json:"model"`
+	Blocked     bool                   `json:"blocked"`
+	Passes      int                    `json:"passes"`
+	Verdict     string                 `json:"verdict"`
+	NextCheck   *time.Time             `json:"next_check,omitempty"`
 }
 type IntelligenceAdminOverview struct {
 	Results []IntelligenceAdminResult `json:"results"`

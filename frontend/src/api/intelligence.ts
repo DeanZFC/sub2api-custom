@@ -2,6 +2,11 @@ import { apiClient } from './client'
 
 export type IntelligenceVerdict = 'pass' | 'suspect' | 'degraded' | 'unknown'
 export type IntelligenceCounts = Record<IntelligenceVerdict, number>
+export interface IntelligenceModelCounts {
+  model: string
+  pass: number
+  degraded: number
+}
 export type ArtworkStatus = 'default' | 'approved' | 'veto' | 'missing' | 'skipped'
 export interface IntelligenceGroup {
   id: number
@@ -15,6 +20,7 @@ export interface IntelligenceRound {
   finished_at: string
   verdict: IntelligenceVerdict
   counts: IntelligenceCounts
+  model_counts: IntelligenceModelCounts[]
   accounts: number
   targets: number
   passed_targets: number
@@ -59,8 +65,8 @@ export interface IntelligenceSummary extends Page {
   }[]
 }
 const base = '/user/intelligence/groups'
-export async function intelligenceGroups(signal?: AbortSignal) {
-  return (await apiClient.get<IntelligenceGroup[]>(base, { signal })).data || []
+export async function intelligenceDirectory(signal?: AbortSignal) {
+  return (await apiClient.get<{ rounds_visible: boolean; groups: IntelligenceGroup[] }>('/user/intelligence/directory', { signal })).data
 }
 export async function intelligenceRounds(group: number, model?: string, signal?: AbortSignal) {
   return (

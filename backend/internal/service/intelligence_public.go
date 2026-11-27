@@ -14,21 +14,32 @@ type PublicIntelligenceGroup struct {
 	Models           []string `json:"models"`
 	HasLegacyResults bool     `json:"has_legacy_results"`
 }
+type PublicIntelligenceDirectory struct {
+	RoundsVisible bool                      `json:"rounds_visible"`
+	Groups        []PublicIntelligenceGroup `json:"groups"`
+}
+
 type PublicIntelligenceCounts struct {
 	Pass     int `json:"pass"`
 	Suspect  int `json:"suspect"`
 	Degraded int `json:"degraded"`
 	Unknown  int `json:"unknown"`
 }
+type PublicIntelligenceModelCounts struct {
+	Model    string `json:"model"`
+	Pass     int    `json:"pass"`
+	Degraded int    `json:"degraded"`
+}
 type PublicIntelligenceRound struct {
-	ID            string                   `json:"id"`
-	StartedAt     time.Time                `json:"started_at"`
-	FinishedAt    time.Time                `json:"finished_at"`
-	Verdict       string                   `json:"verdict"`
-	Counts        PublicIntelligenceCounts `json:"counts"`
-	Accounts      int                      `json:"accounts"`
-	Targets       int                      `json:"targets"`
-	PassedTargets int                      `json:"passed_targets"`
+	ID            string                          `json:"id"`
+	StartedAt     time.Time                       `json:"started_at"`
+	FinishedAt    time.Time                       `json:"finished_at"`
+	Verdict       string                          `json:"verdict"`
+	Counts        PublicIntelligenceCounts        `json:"counts"`
+	ModelCounts   []PublicIntelligenceModelCounts `json:"model_counts"`
+	Accounts      int                             `json:"accounts"`
+	Targets       int                             `json:"targets"`
+	PassedTargets int                             `json:"passed_targets"`
 }
 type PublicIntelligenceCheck struct {
 	Key    string `json:"key"`
@@ -86,7 +97,7 @@ type PublicIntelligenceSummary struct {
 	PageSize       int                              `json:"page_size"`
 }
 type PublicIntelligenceRepository interface {
-	PublicIntelligenceGroups(context.Context, int64) ([]PublicIntelligenceGroup, error)
+	PublicIntelligenceDirectory(context.Context, int64) (*PublicIntelligenceDirectory, error)
 	PublicIntelligenceRounds(context.Context, int64, int64, string) ([]PublicIntelligenceRound, error)
 	PublicIntelligenceRoundDetails(context.Context, int64, int64, string, string, int) (*PublicIntelligenceRoundDetails, error)
 	PublicIntelligenceSummary(context.Context, int64, int64, string, int) (*PublicIntelligenceSummary, error)

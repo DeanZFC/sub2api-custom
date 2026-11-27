@@ -20,6 +20,7 @@ const round: api.IntelligenceRound = {
   targets: 1,
   passed_targets: 1,
   counts,
+  model_counts: [{ model: 'm1', pass: 1, degraded: 0 }],
   verdict: 'pass',
 }
 const result: api.IntelligenceModel = {
@@ -104,19 +105,20 @@ describe('intelligence history', () => {
   })
 
   it.each([
-    { counts: [3, 0, 1, 0], verdict: 'degraded', color: 'health-score3', label: '3/4 个账号通过 · 1/4 个账号确认降智' },
-    { counts: [0, 0, 1, 3], verdict: 'degraded', color: 'health-score3', label: '1/4 个账号确认降智 · 3/4 个账号未能判定' },
-    { counts: [2, 0, 2, 0], verdict: 'degraded', color: 'health-critical', label: '2/4 个账号确认降智' },
-    { counts: [0, 0, 1, 0], verdict: 'degraded', color: 'health-critical', label: '1/1 个账号确认降智' },
-    { counts: [2, 1, 0, 1], verdict: 'suspect', color: 'health-score5', label: '1/4 个账号疑似降智' },
-    { counts: [3, 0, 0, 1], verdict: 'unknown', color: 'health-unknown', label: '1/4 个账号未能判定' },
-    { counts: [4, 0, 0, 0], verdict: 'pass', color: 'health-score10', label: '4/4 个账号通过' },
-  ] as const)('colors the round by distinct accounts ($counts)', async ({ counts, verdict, color, label }) => {
-    const [pass, suspect, degraded, unknown] = counts
-    // Several model checks per account must not change the denominator.
+    { models: [[1, 3], [1, 3]], color: 'health-score10', label: '全部模型达标' },
+    { models: [[1, 3], [0, 4]], color: 'health-score6', label: '部分模型达标' },
+    { models: [[0, 4], [4, 0]], color: 'health-score6', label: '部分模型达标' },
+    { models: [[0, 4], [0, 4]], color: 'health-critical', label: '全部模型未达标' },
+    { models: [[1, 0], [0, 0]], color: 'health-unknown', label: '暂无法判定' },
+    { models: [[0, 0], [0, 0]], color: 'health-unknown', label: '暂无法判定' },
+    { models: [[0, 0], [1, 3], [0, 4]], color: 'health-score6', label: '部分模型达标' },
+    { models: [[1, 0]], color: 'health-score10', label: '全部模型达标' },
+    { models: [[2, 2]], color: 'health-score10', label: '全部模型达标' },
+    { models: [[0, 4]], color: 'health-critical', label: '全部模型未达标' },
+  ] as const)('checks for at least one passing account per model ($models)', async ({ models, color, label }) => {
+    const model_counts = models.map(([pass, degraded], i) => ({ model: 'm' + (i + 1), pass, degraded }))
     vi.mocked(api.intelligenceRounds).mockResolvedValue([{
-      ...round, accounts: pass + suspect + degraded + unknown, counts: { pass, suspect, degraded, unknown },
-      targets: 12, passed_targets: 6, verdict,
+      ...round, model_counts,
     }])
     const w = render()
     await flushPromises()
@@ -124,7 +126,27 @@ describe('intelligence history', () => {
     expect(cell.get('.monitor-status-mark').classes()).toContain(color)
     expect(cell.attributes('aria-label')).toContain(label)
     await cell.trigger('focus')
-    expect(w.get('[role="dialog"]').text()).toContain(label)
+    const details = w.get('[role="dialog"]')
+    for (const m of model_counts) {
+      const total = m.pass + m.degraded
+      expect(details.text()).toContain(m.model + ' · ' + (total ? `已判定账号中 ${m.pass}/${total} 正常` : '暂无已判定账号'))
+    }
+    w.unmount()
+  })
+
+  it('keeps inconclusive accounts visible alongside the model denominator', async () => {
+    vi.mocked(api.intelligenceRounds).mockResolvedValue([{
+      ...round, accounts: 4, targets: 4, verdict: 'suspect',
+      counts: { pass: 1, suspect: 1, degraded: 0, unknown: 2 },
+    }])
+    const w = render()
+    await flushPromises()
+    const cell = w.get('.round-cell')
+    const breakdown = '1/4 个账号通过 · 1/4 个账号疑似降智 · 2/4 个账号未能判定'
+    expect(cell.attributes('aria-label')).toContain(breakdown)
+    await cell.trigger('focus')
+    expect(w.get('[role="dialog"]').text()).toContain(breakdown)
+    expect(w.get('[role="dialog"]').text()).toContain('m1 · 已判定账号中 1/1 正常')
     w.unmount()
   })
 

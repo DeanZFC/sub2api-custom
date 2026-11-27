@@ -268,6 +268,7 @@
           :coverage="matrix.coverage"
           :group-by="matrixGroupBy"
           :health-mode="healthMode"
+          :show-intelligence-rounds="intelligence.roundsVisible"
           :intelligence-groups="intelligence.groups"
           :intelligence-directory-message="intelligenceDirectoryMessage"
           :scope-model="filter.models.length === 1 ? filter.models[0] : undefined"

@@ -46,7 +46,7 @@
               @select-model="selectedModels[cardKey(row)] = $event"
             />
             <IntelligenceRounds
-              v-if="row.group_id"
+              v-if="showIntelligenceRounds && row.group_id"
               :group="intelligenceByGroup.get(row.group_id)"
               :directory-message="intelligenceDirectoryMessage"
               :model="row.detail.model || scopeModel"
@@ -103,7 +103,7 @@ import { formatLatencyPrivacy, formatMonitorSuccessRateFromError, healthModeScor
 const props = withDefaults(defineProps<{
   rows: MonitorMatrixRow[]; coverage: MonitorCoverage; groupBy: MonitorMatrixGroupBy; healthMode: HealthDisplayMode
   modelRows?: MonitorMatrixRow[]; modelCoverage?: MonitorCoverage
-  intelligenceGroups?: IntelligenceGroup[]; intelligenceDirectoryMessage?: string; refreshKey?: number; scopeModel?: string
+  showIntelligenceRounds?: boolean; intelligenceGroups?: IntelligenceGroup[]; intelligenceDirectoryMessage?: string; refreshKey?: number; scopeModel?: string
 }>(), { modelRows: () => [], intelligenceGroups: () => [] })
 const intelligenceByGroup = computed(() => new Map(props.intelligenceGroups.filter(g => g.models.length).map(g => [g.id,g])))
 const { t, locale } = useI18n()

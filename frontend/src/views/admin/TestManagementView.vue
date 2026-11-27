@@ -11,19 +11,22 @@
             <Icon name="refresh" size="sm" :class="{ 'animate-spin': loading }" />{{ t('common.refresh') }}
           </button>
         </div>
-        <nav class="tabs mt-4 inline-flex" role="tablist" :aria-label="t('admin.tests.title')">
-          <button
-            v-for="tab in tabs"
-            :key="tab.key"
-            type="button"
-            role="tab"
-            class="tab"
-            :class="{ 'tab-active': activeTab === tab.key }"
-            :data-quality-section="tab.key"
-            :aria-selected="activeTab === tab.key"
-            @click="navigate(tab.key)"
-          >{{ t(tab.label) }}</button>
-        </nav>
+        <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <nav class="tabs inline-flex" role="tablist" :aria-label="t('admin.tests.title')">
+            <button
+              v-for="tab in tabs"
+              :key="tab.key"
+              type="button"
+              role="tab"
+              class="tab"
+              :class="{ 'tab-active': activeTab === tab.key }"
+              :data-quality-section="tab.key"
+              :aria-selected="activeTab === tab.key"
+              @click="navigate(tab.key)"
+            >{{ t(tab.label) }}</button>
+          </nav>
+          <IntelligenceVisibilitySwitch v-if="activeTab === 'intelligence'" ref="visibilitySwitch" />
+        </div>
       </header>
       <p v-if="catalogError" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ catalogError }}</p>
       <QualityOperationsPanel v-if="activeTab === 'operations'" ref="operations" :visible="true" :accounts="accounts" />
@@ -49,6 +52,7 @@ import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
+import IntelligenceVisibilitySwitch from '@/components/tests/IntelligenceVisibilitySwitch.vue'
 import IntelligencePolicyPanel from '@/components/tests/IntelligencePolicyPanel.vue'
 import QualityOperationsPanel from '@/components/tests/QualityOperationsPanel.vue'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -69,6 +73,7 @@ const accounts = ref<AccountListItem[]>([])
 const catalogReady = ref(false)
 const loading = ref(false)
 const catalogError = ref('')
+const visibilitySwitch = ref<InstanceType<typeof IntelligenceVisibilitySwitch> | null>(null)
 const intelligencePanel = ref<InstanceType<typeof IntelligencePolicyPanel> | null>(null)
 const operations = ref<InstanceType<typeof QualityOperationsPanel> | null>(null)
 let catalogRequest = 0

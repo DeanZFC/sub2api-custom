@@ -1,4 +1,5 @@
 import { apiClient } from '../client'
+import type { IntelligenceHoldRound } from './intelligence'
 import type {
   CreateTestPlanRequest,
   CreateTestTypeRequest,
@@ -44,7 +45,13 @@ export interface QualityProtectionHold {
   model_id?: string
   plan_id: number
   plan_name: string
-  mode: 'combined' | 'per_test' | 'all_pass'
+  mode: 'combined' | 'per_test' | 'all_pass' | 'intelligence'
+  intelligence?: {
+    hold_round?: IntelligenceHoldRound
+    passes: number
+    recovery_passes: number
+    next_check?: string
+  }
   reason: string
   updated_at: string
   trigger_snapshot?: QualityProtectionTrigger

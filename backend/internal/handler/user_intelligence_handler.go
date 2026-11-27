@@ -67,12 +67,25 @@ func intelligenceResponse(c *gin.Context, payload any, err error) {
 	c.JSON(http.StatusOK, payload)
 }
 func (h *UserHandler) IntelligenceGroups(c *gin.Context) {
+	h.intelligenceDirectory(c, true)
+}
+
+func (h *UserHandler) IntelligenceDirectory(c *gin.Context) {
+	h.intelligenceDirectory(c, false)
+}
+
+func (h *UserHandler) intelligenceDirectory(c *gin.Context, groupsOnly bool) {
 	q, ok := h.intelligenceQuery(c)
 	if !ok {
 		return
 	}
-	v, err := q.repo.PublicIntelligenceGroups(c.Request.Context(), q.userID)
-	intelligenceResponse(c, v, err)
+	directory, err := q.repo.PublicIntelligenceDirectory(c.Request.Context(), q.userID)
+	if groupsOnly && err == nil {
+		// Keep the list response for existing clients.
+		intelligenceResponse(c, directory.Groups, nil)
+		return
+	}
+	intelligenceResponse(c, directory, err)
 }
 func (h *UserHandler) IntelligenceRounds(c *gin.Context) {
 	q, ok := h.intelligenceQuery(c)

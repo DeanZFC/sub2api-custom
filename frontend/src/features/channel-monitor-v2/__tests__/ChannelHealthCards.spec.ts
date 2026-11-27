@@ -231,6 +231,9 @@ describe('channel health cards', () => {
         stubs: { ProviderIcon: true },
       },
     })
+    expect(wrapper.find('[data-testid=intelligence-rounds]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid=health-history]').exists()).toBe(true)
+    await wrapper.setProps({ showIntelligenceRounds: true })
     expect(wrapper.get('[data-testid=intelligence-rounds]').text()).toContain(zhCommon.common.loading)
     expect(fetchRounds).not.toHaveBeenCalled()
     await wrapper.setProps({
@@ -254,6 +257,8 @@ describe('channel health cards', () => {
     expect(fetchRounds).toHaveBeenCalledTimes(1)
     expect(fetchRounds).toHaveBeenCalledWith(7, 'model-a', expect.any(AbortSignal))
     expect(wrapper.find('[data-testid=pelican-gallery-open]').exists()).toBe(false)
+    await wrapper.setProps({ showIntelligenceRounds: false })
+    expect(wrapper.find('[data-testid=intelligence-rounds]').exists()).toBe(false)
     wrapper.unmount()
     fetchRounds.mockRestore()
   })

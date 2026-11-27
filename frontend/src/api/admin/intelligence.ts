@@ -1,5 +1,19 @@
 import { apiClient } from '../client'
 
+export interface IntelligenceCheck {
+  key: 'fingerprint' | 'codex_state' | 'candy' | 'http_429'
+  status: 'pass' | 'fail' | 'unknown'
+  detail: string
+}
+
+export interface IntelligenceHoldRound {
+  result_id: number
+  finished_at: string
+  checks: IntelligenceCheck[] | null
+  artwork_veto: boolean
+  review_reason?: string
+}
+
 export interface IntelligenceObservation {
   result_id: number
   account_id: number
@@ -11,16 +25,15 @@ export interface IntelligenceObservation {
   review_reason?: string
   evidence?: {
     auto_verdict: IntelligenceObservation['verdict']
-    checks: {
-      key: 'fingerprint' | 'codex_state' | 'candy' | 'http_429'
-      status: 'pass' | 'fail' | 'unknown'
-      detail: string
-    }[]
+    checks: IntelligenceCheck[] | null
+    candy_http_status?: number
   }
+  error_message?: string
   retryable_artwork?: boolean
   finished_at: string
 }
 export interface IntelligenceAccountState {
+  hold_round?: IntelligenceHoldRound
   account_id: number
   account_name: string
   model: string
@@ -66,4 +79,12 @@ export async function intelligenceScope(
 
 export async function releaseIntelligenceHold(planId: number, accountId: number, model: string) {
   await apiClient.post(`/admin/test-plans/${planId}/intelligence-release`, { account_id: accountId, model })
+}
+
+const visibilityURL = '/admin/settings/intelligence-visibility'
+export async function getIntelligenceVisibility() {
+  return (await apiClient.get<{ enabled: boolean }>(visibilityURL)).data.enabled
+}
+export async function setIntelligenceVisibility(enabled: boolean) {
+  return (await apiClient.put<{ enabled: boolean }>(visibilityURL, { enabled })).data.enabled
 }

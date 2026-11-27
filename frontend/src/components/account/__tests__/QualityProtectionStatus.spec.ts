@@ -7,7 +7,7 @@ import type { Account } from '@/types'
 
 vi.mock('@/api/admin/tests', () => ({ getAccountProtection: vi.fn() }))
 vi.mock('vue-i18n', async () => {
-  const dictionary = { admin: { ...(await import('@/i18n/locales/zh/admin/accounts')).default, tests: { experience: (await import('@/i18n/locales/zh/admin/qualityExperience')).default } }, common: { close: '关闭', loading: '加载中', retry: '重试' } }
+  const dictionary = { ...(await import('@/i18n/locales/zh/channelMonitorV2')).default, admin: { ...(await import('@/i18n/locales/zh/admin/accounts')).default, tests: { experience: (await import('@/i18n/locales/zh/admin/qualityExperience')).default } }, common: { close: '关闭', loading: '加载中', retry: '重试' } }
   return { ...await vi.importActual<typeof import('vue-i18n')>('vue-i18n'), useI18n: () => ({ t: (key: string, params: Record<string, unknown> = {}) => {
     const value = key.split('.').reduce<unknown>((node, part) => (node as Record<string, unknown>)?.[part], dictionary)
     return typeof value === 'string' ? value.replace(/\{(\w+)\}/g, (_, name) => String(params[name] ?? '')) : key
@@ -98,6 +98,27 @@ describe('quality pause details', () => {
     expect(Array.from(dialog()?.querySelectorAll('[data-hold-model]') || []).map(node => node.textContent)).toEqual(['model-a', 'model-b'])
   })
 
+  it('shows the specific isolation evidence for each model during recovery', async () => {
+    const round = { result_id: 42, finished_at: '2026-10-13T05:00:00Z', artwork_veto: false,
+      checks: [{ key: 'candy' as const, status: 'fail' as const, detail: '回答 19，参考答案 21' }] }
+    vi.mocked(getAccountProtection).mockResolvedValueOnce([
+      { ...details[0], mode: 'intelligence', model_id: 'model-a',
+        intelligence: { hold_round: round, passes: 1, recovery_passes: 2 } },
+      { ...details[0], mode: 'intelligence', model_id: 'model-b',
+        intelligence: { hold_round: { ...round, checks: [], artwork_veto: true, review_reason: '没有自行车' }, passes: 0, recovery_passes: 2 } },
+      { ...details[0], mode: 'intelligence', model_id: 'model-c',
+        intelligence: { passes: 0, recovery_passes: 2 } },
+      details[0],
+    ])
+    await trigger().trigger('mouseenter'); await flushPromises()
+    const cards = dialog()!.querySelectorAll('[data-intelligence-hold]')
+    for (const text of ['model-a', '糖果题 · 异常', '回答 19，参考答案 21', '恢复进度 1/2']) expect(cards[0].textContent).toContain(text)
+    expect(cards[1].textContent).toContain('鹈鹕作品 · 人工否决')
+    expect(cards[1].textContent).toContain('没有自行车')
+    expect(cards[1].textContent).not.toContain('糖果题')
+    expect(cards[2].textContent).toContain('该轮未保留分项明细')
+    expect(dialog()!.textContent).toContain('延迟检测')
+  })
   it('loads only on hover and displays nested rules, actual values and manual decisions', async () => {
     let resolve!: (value: QualityProtectionHold[]) => void
     vi.mocked(getAccountProtection).mockReturnValueOnce(new Promise(done => { resolve = done }))

@@ -16,6 +16,18 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
+func (s *SettingService) IntelligenceRoundsVisible(ctx context.Context) (bool, error) {
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyIntelligenceRoundsVisible)
+	if errors.Is(err, ErrSettingNotFound) {
+		return false, nil
+	}
+	return value == "true" && err == nil, err
+}
+
+func (s *SettingService) SetIntelligenceRoundsVisible(ctx context.Context, visible bool) error {
+	return s.settingRepo.Set(ctx, SettingKeyIntelligenceRoundsVisible, strconv.FormatBool(visible))
+}
+
 // IsRegistrationEnabled 检查是否开放注册
 func (s *SettingService) IsRegistrationEnabled(ctx context.Context) bool {
 	value, err := s.settingRepo.GetValue(ctx, SettingKeyRegistrationEnabled)

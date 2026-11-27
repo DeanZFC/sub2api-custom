@@ -1116,6 +1116,11 @@ func (r *scheduledTestResultRepository) Delete(ctx context.Context, id int64) er
 
 func (r *scheduledTestResultRepository) PruneOldResults(ctx context.Context, planID int64, keepCount int) error {
 	_, err := r.db.ExecContext(ctx, `
+		WITH held_rounds AS (
+			SELECT evidence.result_id FROM intelligence_model_states s
+			CROSS JOIN LATERAL (`+intelligenceHoldObservationSQL+`) evidence
+			WHERE s.plan_id=$1 AND s.blocked
+		)
 		DELETE FROM scheduled_test_results
 		WHERE id IN (
 			SELECT id FROM (
@@ -1129,7 +1134,9 @@ func (r *scheduledTestResultRepository) PruneOldResults(ctx context.Context, pla
 				WHERE plan_id = $1 AND status NOT IN ('running', 'pending')
 				  AND NOT EXISTS (SELECT 1 FROM scheduled_test_protection_states protection WHERE protection.result_id = scheduled_test_results.id)
 			) ranked
-			WHERE rn > $2 AND NOT EXISTS (SELECT 1 FROM intelligence_round_targets snapshot WHERE snapshot.result_id=ranked.id)
+			WHERE rn > $2
+			AND NOT EXISTS (SELECT 1 FROM intelligence_round_targets snapshot WHERE snapshot.result_id=ranked.id)
+			AND NOT EXISTS (SELECT 1 FROM held_rounds WHERE held_rounds.result_id=ranked.id)
 		)
 	`, planID, keepCount)
 	return err

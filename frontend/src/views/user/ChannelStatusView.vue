@@ -11,12 +11,12 @@
         class="tab"
         :class="{ 'tab-active': quality }"
         :to="{ path: '/monitor', query: { ...route.query, section: 'intelligence' } }"
-        >{{ tr('monitor') }}</RouterLink
+        >{{ tr(directory.roundsVisible ? 'monitor' : 'legacy') }}</RouterLink
       >
     </nav>
     <template v-if="quality">
       <header class="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h1 class="page-title">{{ tr('monitor') }}</h1>
+        <h1 class="page-title">{{ tr(directory.roundsVisible ? 'monitor' : 'legacy') }}</h1>
         <button type="button" class="btn btn-secondary btn-sm" :disabled="directory.loading" @click="directory.load(true)">
           {{ t('common.refresh') }}
         </button>
@@ -58,8 +58,12 @@
         <LegacyResults v-if="openLegacy" embedded class="mt-4" />
       </details>
     </template>
-    <ChannelStatusV1View v-else-if="isV1" />
-    <ChannelStatusV2View v-else />
+    <ChannelStatusV1View v-else-if="traffic && isV1" />
+    <ChannelStatusV2View v-else-if="traffic" />
+    <p v-else class="card p-5 text-sm text-gray-500" role="status">
+      {{ directory.loading ? t('common.loading') : directory.failed ? tr('loadError') : tr('noGroups') }}
+      <button v-if="directory.failed" type="button" class="ml-2 underline" @click="directory.load(true)">{{ t('common.retry') }}</button>
+    </p>
   </AppLayout>
 </template>
 <script setup lang="ts">
@@ -83,8 +87,9 @@ const { t } = useI18n()
 const tr = (k: string) => t('channelMonitorV2.intelligence.' + k)
 const isV1 = computed(isChannelMonitorV1Mode)
 const traffic = computed(isChannelMonitorRouteEnabled)
-const quality = computed(() => !traffic.value || route.query.section === 'intelligence')
-const standard = computed(() => directory.groups.filter((g) => g.models.length))
+const quality = computed(() => (directory.roundsVisible || directory.groups.some(g => g.has_legacy_results))
+  && (!traffic.value || route.query.section === 'intelligence'))
+const standard = computed(() => directory.roundsVisible ? directory.groups.filter((g) => g.models.length) : [])
 const groupFilter = computed(() => {
   const selected = standard.value.find((g) => String(g.id) === route.query.group)
   return selected ? String(selected.id) : ''
@@ -106,15 +111,22 @@ watch(
   () => auth.user?.id,
   () => {
     openLegacy.value = false
-    void directory.load()
+    void directory.load(true)
   },
   { immediate: true },
 )
 let timer: ReturnType<typeof setInterval>
+function recheckVisibility() {
+  if (!document.hidden) void directory.load(true)
+}
 onMounted(() => {
+  document.addEventListener('visibilitychange', recheckVisibility)
   timer = setInterval(() => {
-    if (!document.hidden && (quality.value || isV1.value)) void directory.load(true)
+    if (!document.hidden) void directory.load()
   }, 60_000)
 })
-onBeforeUnmount(() => clearInterval(timer))
+onBeforeUnmount(() => {
+  clearInterval(timer)
+  document.removeEventListener('visibilitychange', recheckVisibility)
+})
 </script>

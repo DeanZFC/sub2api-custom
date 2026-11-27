@@ -22,6 +22,32 @@ func intelligenceID(c *gin.Context) (int64, bool) {
 	}
 	return id, true
 }
+
+func (h *SettingHandler) GetIntelligenceVisibility(c *gin.Context) {
+	enabled, err := h.settingService.IntelligenceRoundsVisible(c.Request.Context())
+	if err != nil {
+		response.InternalError(c, "unable to read intelligence visibility")
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	response.Success(c, gin.H{"enabled": enabled})
+}
+
+func (h *SettingHandler) UpdateIntelligenceVisibility(c *gin.Context) {
+	var req struct {
+		Enabled *bool `json:"enabled" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "enabled must be a boolean")
+		return
+	}
+	if err := h.settingService.SetIntelligenceRoundsVisible(c.Request.Context(), *req.Enabled); err != nil {
+		response.InternalError(c, "unable to save intelligence visibility")
+		return
+	}
+	response.Success(c, gin.H{"enabled": *req.Enabled})
+}
+
 func (h *ScheduledTestHandler) IntelligenceOverview(c *gin.Context) {
 	id, ok := intelligenceID(c)
 	if !ok {

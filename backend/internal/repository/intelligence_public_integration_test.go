@@ -50,14 +50,17 @@ func TestPublicIntelligenceFrozenRounds(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { exec(`DELETE FROM scheduled_test_plans WHERE id=$1`, plan.ID) })
 	selectedModel := "test-model"
+	targetFor := func(account int64, model, effort string) *service.ScheduledTestResult {
+		now := time.Now().UTC()
+		return &service.ScheduledTestResult{PlanID: plan.ID, AccountID: &account, GroupID: &g1, TestDefinitionID: &def, OutputKind: "html", TargetMode: "all_accounts", StartedAt: now, FinishedAt: now, Status: "pending", ModelID: model, ReasoningEffort: effort}
+	}
 	launch := func(retest bool, accounts ...int64) (string, []*service.ScheduledTestResult) {
 		t.Helper()
 		plan.IntelligenceRetest = retest
 		var targets []*service.ScheduledTestResult
-		now := time.Now().UTC()
 		run := uuid.NewString()
 		for _, a := range accounts {
-			targets = append(targets, &service.ScheduledTestResult{PlanID: plan.ID, AccountID: &a, GroupID: &g1, TestDefinitionID: &def, OutputKind: "html", TargetMode: "all_accounts", StartedAt: now, FinishedAt: now, Status: "pending", ModelID: selectedModel, ReasoningEffort: "high"})
+			targets = append(targets, targetFor(a, selectedModel, "high"))
 		}
 		rows, err := r.BeginRun(ctx, plan, run, targets)
 		require.NoError(t, err)
@@ -77,6 +80,33 @@ func TestPublicIntelligenceFrozenRounds(t *testing.T) {
 	finish(rows[0])
 	require.Empty(t, recent(g1))
 	finish(rows[1])
+	settings := service.NewSettingService(NewSettingRepository(integrationEntClient), nil)
+	setVisibility := func(visible bool) {
+		t.Helper()
+		require.NoError(t, settings.SetIntelligenceRoundsVisible(ctx, visible))
+	}
+	t.Cleanup(func() { exec(`DELETE FROM settings WHERE key=$1`, service.SettingKeyIntelligenceRoundsVisible) })
+	checkHidden := func() {
+		t.Helper()
+		directory, err := r.PublicIntelligenceDirectory(ctx, u)
+		require.NoError(t, err)
+		require.False(t, directory.RoundsVisible)
+		for _, g := range directory.Groups {
+			require.Empty(t, g.Models)
+			require.True(t, g.HasLegacyResults)
+		}
+		require.Empty(t, recent(g1))
+		_, err = r.PublicIntelligenceRoundDetails(ctx, u, g1, "", run1, 1)
+		require.ErrorIs(t, err, sql.ErrNoRows)
+		summary, err := r.PublicIntelligenceSummary(ctx, u, g1, "", 1)
+		require.NoError(t, err)
+		require.Zero(t, summary.Rounds)
+		require.Empty(t, summary.Items)
+		_, err = r.PublicIntelligenceArtwork(ctx, u, g1, rows[0].ID)
+		require.ErrorIs(t, err, sql.ErrNoRows)
+	}
+	checkHidden()
+	setVisibility(true)
 	rr := recent(g1)
 	require.Len(t, rr, 1)
 	require.Equal(t, "pass", rr[0].Verdict)
@@ -86,13 +116,17 @@ func TestPublicIntelligenceFrozenRounds(t *testing.T) {
 	require.ErrorIs(t, err, sql.ErrNoRows)
 	_, err = r.PublicIntelligenceArtwork(ctx, u, g1, rows[0].ID)
 	require.NoError(t, err)
-	groups, err := r.PublicIntelligenceGroups(ctx, u)
+	directory, err := r.PublicIntelligenceDirectory(ctx, u)
 	require.NoError(t, err)
-	require.Contains(t, groups, service.PublicIntelligenceGroup{ID: g1, Name: groupName, Models: []string{"other-model", "test-model"}})
+	require.True(t, directory.RoundsVisible)
+	require.Contains(t, directory.Groups, service.PublicIntelligenceGroup{ID: g1, Name: groupName, Models: []string{"other-model", "test-model"}})
 	d, err := r.PublicIntelligenceRoundDetails(ctx, u, g1, "", run1, 1)
 	require.NoError(t, err)
 	require.Len(t, d.Accounts, 2)
 	require.Equal(t, []service.PublicIntelligenceCheck{{Key: "candy", Status: "pass", Detail: "21"}, {Key: "rate_limit", Status: "pass"}}, d.Accounts[0].Models[0].Checks)
+	setVisibility(false)
+	checkHidden()
+	setVisibility(true)
 	// Earlier rounds keep their recorded fingerprint and Codex checks.
 	exec(`UPDATE scheduled_test_results SET execution_info=jsonb_set(execution_info,'{intelligence,checks}',
 	 '[{"key":"fingerprint","status":"unknown","detail":"insufficient"},{"key":"codex_state","status":"pass"}]'::jsonb
@@ -140,6 +174,7 @@ func TestPublicIntelligenceFrozenRounds(t *testing.T) {
 	summary, err = r.PublicIntelligenceSummary(ctx, u, g1, "test-model", 1)
 	require.NoError(t, err)
 	require.Equal(t, 1, summary.Counts.Degraded)
+	require.Equal(t, []service.PublicIntelligenceModelCounts{{Model: "test-model", Pass: 1, Degraded: 1}}, recent(g1)[0].ModelCounts)
 	markup, err := r.PublicIntelligenceArtwork(ctx, u, g1, rows[0].ID)
 	require.NoError(t, err)
 	require.Equal(t, "<svg/>", markup)
@@ -174,6 +209,34 @@ func TestPublicIntelligenceFrozenRounds(t *testing.T) {
 	require.NoError(t, r.PruneOldResults(ctx, plan.ID, 0))
 	_, err = r.PublicIntelligenceArtwork(ctx, u, g1, rows[0].ID)
 	require.NoError(t, err)
+	// One account can participate in multiple models and at multiple efforts.
+	// Each model counts that account once and keeps failures out of its denominator.
+	exec(`INSERT INTO account_groups(account_id,group_id) VALUES($1,$2)`, a1, g1)
+	mixedRun := uuid.NewString()
+	mixed, err := r.BeginRun(ctx, plan, mixedRun, []*service.ScheduledTestResult{
+		targetFor(a1, "test-model", "high"), targetFor(a1, "test-model", "low"),
+		targetFor(a2, "test-model", "high"), targetFor(a1, "other-model", "high"),
+		targetFor(a2, "other-model", "high"),
+	})
+	require.NoError(t, err)
+	finish(mixed[0])
+	finish(mixed[1])
+	finish(mixed[2])
+	exec(`UPDATE scheduled_test_results SET status='success', execution_info='{"intelligence":{"auto_verdict":"confirmed"}}' WHERE id=$1`, mixed[3].ID)
+	exec(`UPDATE scheduled_test_results SET status='failed', execution_info='{"intelligence":{"auto_verdict":"confirmed"}}' WHERE id=$1`, mixed[4].ID)
+	wantModels := []service.PublicIntelligenceModelCounts{{Model: "other-model", Degraded: 1}, {Model: "test-model", Pass: 2}}
+	rounds := recent(g1)
+	require.Equal(t, wantModels, rounds[len(rounds)-1].ModelCounts)
+	mixedDetail, err := r.PublicIntelligenceRoundDetails(ctx, u, g1, "", mixedRun, 1)
+	require.NoError(t, err)
+	require.Equal(t, wantModels, mixedDetail.Round.ModelCounts)
+	single, err := r.PublicIntelligenceRounds(ctx, u, g1, "other-model")
+	require.NoError(t, err)
+	require.Equal(t, wantModels[:1], single[len(single)-1].ModelCounts)
+	exec(`UPDATE scheduled_test_results SET status='failed' WHERE id=$1`, mixed[3].ID)
+	single, err = r.PublicIntelligenceRounds(ctx, u, g1, "other-model")
+	require.NoError(t, err)
+	require.Equal(t, []service.PublicIntelligenceModelCounts{{Model: "other-model"}}, single[len(single)-1].ModelCounts)
 	exec(`DELETE FROM user_allowed_groups WHERE user_id=$1 AND group_id=$2`, u, g1)
 	require.Empty(t, recent(g1))
 	_, err = r.PublicIntelligenceArtwork(ctx, u, g1, rows[0].ID)

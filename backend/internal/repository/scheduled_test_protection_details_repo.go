@@ -19,7 +19,7 @@ func (r *scheduledTestResultRepository) ListProtectionHolds(ctx context.Context,
  UNION ALL
  SELECT plan_id,account_id,0,reason,updated_at,rule_ids,trigger_event_id,model_key
  FROM scheduled_test_combination_states WHERE account_id=$1 AND blocked
- ) SELECT h.plan_id,p.name,h.test_definition_id,h.reason,h.updated_at,h.rule_ids,p.protection,
+ ), details AS (SELECT h.plan_id,p.name,h.test_definition_id,h.reason,h.updated_at,h.rule_ids,p.protection,
  COALESCE((SELECT jsonb_agg(jsonb_build_object(
  'test_definition_id',s.test_definition_id,'test_name',d.name,'round_started_at',s.round_started_at,'run_id',r.run_id,
  'current',s.completed AND s.result_started_at>=s.round_started_at
@@ -38,11 +38,22 @@ func (r *scheduledTestResultRepository) ListProtectionHolds(ctx context.Context,
  LEFT JOIN scheduled_test_results r ON r.id=s.result_id
  WHERE s.plan_id=h.plan_id AND s.account_id=h.account_id AND s.model_key=h.model_key
  AND (h.test_definition_id=0 OR s.test_definition_id=h.test_definition_id)), '[]'::jsonb),
- (SELECT snapshot || jsonb_build_object('id',id) FROM scheduled_test_protection_events e WHERE e.id=h.trigger_event_id AND e.account_id=h.account_id AND e.plan_id=h.plan_id),h.model_key
+ (SELECT snapshot || jsonb_build_object('id',id) FROM scheduled_test_protection_events e WHERE e.id=h.trigger_event_id AND e.account_id=h.account_id AND e.plan_id=h.plan_id),h.model_key,NULL::jsonb AS intelligence
  FROM holds h JOIN scheduled_test_plans p ON p.id=h.plan_id
  JOIN accounts a ON a.id=h.account_id
  WHERE a.deleted_at IS NULL
- ORDER BY (h.test_definition_id=0) DESC,h.updated_at DESC,h.plan_id,h.test_definition_id`, accountID)
+ UNION ALL
+ SELECT s.plan_id,p.name,0,'',s.updated_at,'[]'::jsonb,'{}'::jsonb,'[]'::jsonb,NULL::jsonb,s.model_key,
+ jsonb_build_object('hold_round',hold_round.evidence,'passes',s.passes,
+   'recovery_passes',p.protection->'intelligence'->'recovery_passes','next_check',s.next_check)
+ FROM intelligence_model_states s JOIN scheduled_test_plans p ON p.id=s.plan_id
+ JOIN accounts a ON a.id=s.account_id
+ `+intelligenceHoldRoundJoin+`
+ WHERE s.account_id=$1 AND s.blocked AND a.deleted_at IS NULL AND p.enabled
+ AND jsonb_typeof(p.protection->'intelligence')='object'
+ AND s.model_key=ANY(p.model_ids) AND NOT(s.account_id=ANY(p.excluded_account_ids))
+ AND EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=s.account_id AND ag.group_id=ANY(p.group_ids))
+ ) SELECT * FROM details ORDER BY (intelligence IS NOT NULL) DESC,(test_definition_id=0) DESC,updated_at DESC,plan_id,test_definition_id,model_key`, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -50,8 +61,8 @@ func (r *scheduledTestResultRepository) ListProtectionHolds(ctx context.Context,
 	items := make([]service.ScheduledTestProtectionHoldSource, 0)
 	for rows.Next() {
 		var item service.ScheduledTestProtectionHoldSource
-		var idsRaw, configRaw, statesRaw, triggerRaw []byte
-		if err := rows.Scan(&item.PlanID, &item.PlanName, &item.DefinitionID, &item.Reason, &item.UpdatedAt, &idsRaw, &configRaw, &statesRaw, &triggerRaw, &item.ModelID); err != nil {
+		var idsRaw, configRaw, statesRaw, triggerRaw, intelligenceRaw []byte
+		if err := rows.Scan(&item.PlanID, &item.PlanName, &item.DefinitionID, &item.Reason, &item.UpdatedAt, &idsRaw, &configRaw, &statesRaw, &triggerRaw, &item.ModelID, &intelligenceRaw); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(idsRaw, &item.RuleIDs); err != nil {
@@ -65,6 +76,11 @@ func (r *scheduledTestResultRepository) ListProtectionHolds(ctx context.Context,
 		}
 		if len(triggerRaw) > 0 {
 			if err := json.Unmarshal(triggerRaw, &item.TriggerSnapshot); err != nil {
+				return nil, err
+			}
+		}
+		if len(intelligenceRaw) > 0 {
+			if err := json.Unmarshal(intelligenceRaw, &item.Intelligence); err != nil {
 				return nil, err
 			}
 		}

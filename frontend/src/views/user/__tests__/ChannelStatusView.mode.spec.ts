@@ -9,7 +9,7 @@ const state = vi.hoisted(() => ({
   v1: false,
   traffic: true,
   query: {} as Record<string, string>,
-  directory: { groups: [] as IntelligenceGroup[], load: vi.fn(), loading: false, failed: false },
+  directory: { roundsVisible: false, groups: [] as IntelligenceGroup[], load: vi.fn(), loading: false, failed: false },
 }))
 vi.mock('@/utils/featureFlags', () => ({
   isChannelMonitorV1Mode: () => state.v1,
@@ -42,6 +42,7 @@ describe('channel status visibility', () => {
     state.v1 = false
     state.traffic = true
     state.query = {}
+    state.directory.roundsVisible = true
     state.directory.groups = []
   })
   it.each([false, true])('selects the configured traffic view (v1 %s)', (v1) => {
@@ -57,6 +58,24 @@ describe('channel status visibility', () => {
     const wrapper = render()
     expect(wrapper.get('intelligence-rounds-stub').exists()).toBe(true)
     expect(wrapper.find('channel-status-v2-view-stub').exists()).toBe(false)
+    wrapper.unmount()
+  })
+  it.each([true, false])('hides recent rounds on a direct link when publication is off (traffic %s)', traffic => {
+    state.traffic = traffic
+    state.query = { section: 'intelligence', group: '7' }
+    state.directory.roundsVisible = false
+    const wrapper = render()
+    expect(wrapper.find('intelligence-rounds-stub').exists()).toBe(false)
+    expect(wrapper.find('channel-status-v2-view-stub').exists()).toBe(traffic)
+    wrapper.unmount()
+  })
+  it('keeps independently published legacy results accessible when recent rounds are off', () => {
+    state.directory.roundsVisible = false
+    state.directory.groups = [{ id: 7, name: 'Legacy', models: [], has_legacy_results: true }]
+    state.query = { section: 'intelligence' }
+    const wrapper = render()
+    expect(wrapper.get('summary').text()).toContain('历史检测与投票')
+    expect(wrapper.find('intelligence-rounds-stub').exists()).toBe(false)
     wrapper.unmount()
   })
   it('restores only authorized group and model selections from a bookmark', () => {
