@@ -56,6 +56,7 @@ func TestChannelMonitorExcludesClientRejections(t *testing.T) {
 		{RequestID: "client-isolation-dedup", ErrorPhase: "request", ErrorType: "billing_error", ErrorOwner: "client", ErrorSource: "client_request", StatusCode: 403, IsBusinessLimited: true},
 	}
 	for i, row := range rows {
+		row.Stream = true
 		row.Platform = "openai"
 		row.Model = model
 		row.Severity = "P3"

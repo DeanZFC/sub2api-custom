@@ -47,6 +47,7 @@ func TestOpsMonitorCapabilityRejectionsAndForwardedDuplicates(t *testing.T) {
 		{RequestID: "monitor-reg-duplicate", StatusCode: 502, ErrorOwner: "provider", ErrorPhase: "upstream"},
 	}
 	for i, row := range rows {
+		row.Stream = true
 		row.Platform, row.Model, row.Severity = "openai", model, "P3"
 		if row.ErrorType == "" {
 			row.ErrorType = "api_error"
