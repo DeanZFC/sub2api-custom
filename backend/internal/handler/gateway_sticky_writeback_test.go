@@ -153,6 +153,7 @@ func TestGatewayMessagesStickyWritebackAfterForward(t *testing.T) {
 			// profitGate installs the group profit gate, which makes the request
 			// write the admitted account eagerly and skip a different binding.
 			profitGate bool
+			trialFirst bool
 			// readErr fails the binding lookup at request start.
 			readErr bool
 			during  func(*stickyWritebackCache)
@@ -213,6 +214,11 @@ func TestGatewayMessagesStickyWritebackAfterForward(t *testing.T) {
 				during: func(c *stickyWritebackCache) { c.accountID = 9455 },
 			},
 			{
+				name: "profit gate preserves concurrent binding to failed trial account", failover: true, profitGate: true, trialFirst: true, rebindOnServe: true,
+				wantSeen: []int64{9401, 9499}, checkFinal: true, wantFinal: 9401,
+				during: func(c *stickyWritebackCache) { c.accountID = 9401 },
+			},
+			{
 				// Without a profit gate the scheduler binds before every forward,
 				// so a failed account found in the key was bound by another request
 				// and is kept.
@@ -240,6 +246,10 @@ func TestGatewayMessagesStickyWritebackAfterForward(t *testing.T) {
 					}
 				}
 				account := newAccount(9401, 0, true)
+				if tt.trialFirst {
+					due := time.Now().Add(-time.Minute)
+					account.PerformanceTrialDueAt = &due
+				}
 				other := newAccount(9499, 1, tt.failover)
 				// third is only bound by the other request; it only has to resolve
 				// as a known account.

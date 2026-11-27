@@ -931,8 +931,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				requestCtx = service.WithGatewaySchedulingModel(requestCtx, reqModel)
 			}
 			// 只记利润门准入的账号：准入时本请求自己写过绑定，failover 后可能留在键里；
-			// 不开门时每次转发前选号都已把键写成当前账号，键里的失败账号只能是别的请求写的
-			if selection.ProfitGateActive() {
+			// 保护原绑定的试用账号不会执行准入后绑定，不能用作终值写回的可替换账号。
+			if selection.ProfitGateActive() && !selection.PreserveStickyBinding {
 				attemptedAccountIDs = append(attemptedAccountIDs, account.ID)
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
