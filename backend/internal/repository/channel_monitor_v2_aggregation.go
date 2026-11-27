@@ -15,9 +15,21 @@ const channelMonitorV2ModelSQL = `COALESCE(NULLIF(TRIM(ul.requested_model), ''),
 // status is recorded explicitly even when the provider omits token usage.
 const channelMonitorV2UsageSuccessSQL = "(" + usageLogSuccessFilterUL + " OR (ul.api_key_id IS NULL AND ul.http_status BETWEEN 200 AND 299))"
 
-// Cache rate includes only streaming/WS requests. Explicit synchronous and
-// cyber-billing request types are excluded even if legacy flags are set.
-const channelMonitorV2CacheEligibleUL = `(COALESCE(ul.request_type, 0) NOT IN (1, 4, 6) AND (ul.stream = TRUE OR ul.openai_ws_mode = TRUE) AND (ul.api_key_id IS NOT NULL OR (ul.quality_usage->>'cache_read_tokens' IS NOT NULL AND ul.quality_usage->>'input_tokens' IS NOT NULL)))`
+// Explicit request types take precedence over legacy transport flags. Error logs
+// only have the stream flag; usage logs also recorded WebSocket mode separately.
+func channelMonitorV2StreamingSQL(alias, legacyFlags string) string {
+	return fmt.Sprintf("(%[1]s.request_type IN (2, 3) OR (COALESCE(%[1]s.request_type, 0) = 0 AND (%[2]s)))", alias, legacyFlags)
+}
+
+func channelMonitorV2StreamingUsageSQL(alias string) string {
+	return channelMonitorV2StreamingSQL(alias, alias+".stream OR "+alias+".openai_ws_mode")
+}
+
+var channelMonitorV2StreamingUL = channelMonitorV2StreamingUsageSQL("ul")
+
+// The input rows already passed the transport filter. Quality probes can lack
+// cache telemetry even when they contain billable tokens.
+const channelMonitorV2CacheTelemetryUL = `(ul.api_key_id IS NOT NULL OR (ul.quality_usage->>'cache_read_tokens' IS NOT NULL AND ul.quality_usage->>'input_tokens' IS NOT NULL))`
 
 // Tiered retention balances UI windows against storage:
 //
@@ -183,7 +195,7 @@ func (r *channelMonitorV2Repository) RecomputeRange(ctx context.Context, start, 
 	return nil
 }
 
-const channelMonitorV2UsageMetricsSQL = `
+var channelMonitorV2UsageMetricsSQL = `
 INSERT INTO channel_monitor_v2_metrics_1m (
   bucket_start, platform, group_id, model, success_requests,
   input_tokens, cache_eligible_input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_eligible_creation_tokens, cache_eligible_read_tokens,
@@ -191,14 +203,14 @@ INSERT INTO channel_monitor_v2_metrics_1m (
 )
 SELECT date_trunc('minute', ul.created_at), %s, ` + channelMonitorV2UsageGroup + `, %s,
        COUNT(DISTINCT COALESCE(NULLIF(ul.request_id, ''), 'usage:' || ul.id::text))
-         FILTER (WHERE COALESCE(ul.request_type, 0) NOT IN (4, 6) AND ` + channelMonitorV2UsageSuccessSQL + `),
+         FILTER (WHERE ` + channelMonitorV2UsageSuccessSQL + `),
        COALESCE(SUM(ul.input_tokens) FILTER (WHERE ` + channelMonitorV2UsageSuccessSQL + `), 0),
-       COALESCE(SUM(ul.input_tokens) FILTER (WHERE ` + channelMonitorV2CacheEligibleUL + ` AND ` + channelMonitorV2UsageSuccessSQL + `), 0),
+       COALESCE(SUM(ul.input_tokens) FILTER (WHERE ` + channelMonitorV2CacheTelemetryUL + ` AND ` + channelMonitorV2UsageSuccessSQL + `), 0),
        COALESCE(SUM(ul.output_tokens) FILTER (WHERE ` + channelMonitorV2UsageSuccessSQL + `), 0),
        COALESCE(SUM(ul.cache_creation_tokens) FILTER (WHERE ` + channelMonitorV2UsageSuccessSQL + `), 0),
        COALESCE(SUM(ul.cache_read_tokens) FILTER (WHERE ` + channelMonitorV2UsageSuccessSQL + `), 0),
-       COALESCE(SUM(ul.cache_creation_tokens) FILTER (WHERE ` + channelMonitorV2CacheEligibleUL + ` AND ` + channelMonitorV2UsageSuccessSQL + `), 0),
-       COALESCE(SUM(ul.cache_read_tokens) FILTER (WHERE ` + channelMonitorV2CacheEligibleUL + ` AND ` + channelMonitorV2UsageSuccessSQL + `), 0),
+       COALESCE(SUM(ul.cache_creation_tokens) FILTER (WHERE ` + channelMonitorV2CacheTelemetryUL + ` AND ` + channelMonitorV2UsageSuccessSQL + `), 0),
+       COALESCE(SUM(ul.cache_read_tokens) FILTER (WHERE ` + channelMonitorV2CacheTelemetryUL + ` AND ` + channelMonitorV2UsageSuccessSQL + `), 0),
        COALESCE(SUM(ul.first_token_ms) FILTER (WHERE ul.first_token_ms IS NOT NULL AND ` + channelMonitorV2UsageSuccessSQL + `), 0),
        COUNT(ul.first_token_ms) FILTER (WHERE ` + channelMonitorV2UsageSuccessSQL + `),
        COALESCE(SUM(ul.duration_ms) FILTER (WHERE ul.duration_ms IS NOT NULL AND ` + channelMonitorV2UsageSuccessSQL + `), 0),
@@ -207,9 +219,10 @@ FROM usage_logs ul
 LEFT JOIN groups g ON g.id = ul.group_id
 LEFT JOIN accounts a ON a.id = ul.account_id
 WHERE ul.created_at >= $1 AND ul.created_at < $2
+  AND ` + channelMonitorV2StreamingUL + `
 GROUP BY 1, 2, 3, 4`
 
-const channelMonitorV2UserMetricsSQL = `
+var channelMonitorV2UserMetricsSQL = `
 INSERT INTO channel_monitor_v2_user_metrics_1m (
   bucket_start, platform, group_id, model, user_id, success_requests,
   input_tokens, cache_eligible_input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_eligible_creation_tokens, cache_eligible_read_tokens,
@@ -217,14 +230,14 @@ INSERT INTO channel_monitor_v2_user_metrics_1m (
 )
 SELECT date_trunc('minute', ul.created_at), %s, ` + channelMonitorV2UsageGroup + `, %s, ul.user_id,
        COUNT(DISTINCT COALESCE(NULLIF(ul.request_id, ''), 'usage:' || ul.id::text))
-         FILTER (WHERE COALESCE(ul.request_type, 0) NOT IN (4, 6) AND ` + usageLogSuccessFilterUL + `),
+         FILTER (WHERE ` + usageLogSuccessFilterUL + `),
        COALESCE(SUM(ul.input_tokens) FILTER (WHERE ` + usageLogSuccessFilterUL + `), 0),
-       COALESCE(SUM(ul.input_tokens) FILTER (WHERE ` + channelMonitorV2CacheEligibleUL + ` AND ` + usageLogSuccessFilterUL + `), 0),
+       COALESCE(SUM(ul.input_tokens) FILTER (WHERE ` + channelMonitorV2CacheTelemetryUL + ` AND ` + usageLogSuccessFilterUL + `), 0),
        COALESCE(SUM(ul.output_tokens) FILTER (WHERE ` + usageLogSuccessFilterUL + `), 0),
        COALESCE(SUM(ul.cache_creation_tokens) FILTER (WHERE ` + usageLogSuccessFilterUL + `), 0),
        COALESCE(SUM(ul.cache_read_tokens) FILTER (WHERE ` + usageLogSuccessFilterUL + `), 0),
-       COALESCE(SUM(ul.cache_creation_tokens) FILTER (WHERE ` + channelMonitorV2CacheEligibleUL + ` AND ` + usageLogSuccessFilterUL + `), 0),
-       COALESCE(SUM(ul.cache_read_tokens) FILTER (WHERE ` + channelMonitorV2CacheEligibleUL + ` AND ` + usageLogSuccessFilterUL + `), 0),
+       COALESCE(SUM(ul.cache_creation_tokens) FILTER (WHERE ` + channelMonitorV2CacheTelemetryUL + ` AND ` + usageLogSuccessFilterUL + `), 0),
+       COALESCE(SUM(ul.cache_read_tokens) FILTER (WHERE ` + channelMonitorV2CacheTelemetryUL + ` AND ` + usageLogSuccessFilterUL + `), 0),
        COALESCE(SUM(ul.first_token_ms) FILTER (WHERE ul.first_token_ms IS NOT NULL AND ` + usageLogSuccessFilterUL + `), 0),
        COUNT(ul.first_token_ms) FILTER (WHERE ` + usageLogSuccessFilterUL + `),
        COALESCE(SUM(ul.duration_ms) FILTER (WHERE ul.duration_ms IS NOT NULL AND ` + usageLogSuccessFilterUL + `), 0),
@@ -232,10 +245,11 @@ SELECT date_trunc('minute', ul.created_at), %s, ` + channelMonitorV2UsageGroup +
 FROM usage_logs ul
 LEFT JOIN groups g ON g.id = ul.group_id
 LEFT JOIN accounts a ON a.id = ul.account_id
-WHERE ul.created_at >= $1 AND ul.created_at < $2 AND ul.user_id IS NOT NULL
+WHERE ul.created_at >= $1 AND ul.created_at < $2
+  AND ` + channelMonitorV2StreamingUL + ` AND ul.user_id IS NOT NULL
 GROUP BY 1, 2, 3, 4, 5`
 
-const channelMonitorV2HistogramSQL = `
+var channelMonitorV2HistogramSQL = `
 INSERT INTO channel_monitor_v2_latency_histograms_1m (
   bucket_start, platform, group_id, model, user_id, metric, upper_bound_ms, sample_count
 )
@@ -247,6 +261,7 @@ LEFT JOIN accounts a ON a.id = ul.account_id
 CROSS JOIN LATERAL (VALUES (0::bigint), (ul.user_id)) audience(user_id)
 CROSS JOIN LATERAL (VALUES ('ttft'::text, ul.first_token_ms), ('duration'::text, ul.duration_ms)) latency(metric, value_ms)
 WHERE ul.created_at >= $1 AND ul.created_at < $2
+  AND ` + channelMonitorV2StreamingUL + `
   AND audience.user_id IS NOT NULL AND latency.value_ms IS NOT NULL AND latency.value_ms >= 0
   AND ` + channelMonitorV2UsageSuccessSQL + `
 GROUP BY 1, 2, 3, 4, 5, 6, 7`
@@ -267,7 +282,7 @@ ELSE 2147483647 END`
 // Session blocks are audited before account selection. Exclude them before
 // deduplication so they cannot mask another request outcome with the same ID.
 func channelMonitorV2FailureSQL(alias string) string {
-	return fmt.Sprintf(`(%[1]s.error_type IS DISTINCT FROM 'cyber_policy_session_blocked'
+	return channelMonitorV2StreamingSQL(alias, alias+".stream") + fmt.Sprintf(` AND (%[1]s.error_type IS DISTINCT FROM 'cyber_policy_session_blocked'
       AND (COALESCE(%[1]s.status_code, 0) >= 400 OR %[1]s.error_type = 'cyber_policy'))`, alias)
 }
 

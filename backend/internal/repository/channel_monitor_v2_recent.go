@@ -81,7 +81,7 @@ func channelMonitorV2RecentQuery(filter service.ChannelMonitorV2Filter, cfg serv
   FROM jsonb_to_recordset($4::jsonb) AS d(idx integer, platform text, group_id bigint, model text)
   CROSS JOIN LATERAL (
     (SELECT ul.created_at, ul.id, ` + usageModel + ` AS model, FALSE AS is_error, ul.first_token_ms::bigint, ul.duration_ms::bigint,
-      CASE WHEN ` + channelMonitorV2CacheEligibleUL + ` THEN ul.cache_read_tokens::double precision /
+      CASE WHEN ` + channelMonitorV2CacheTelemetryUL + ` THEN ul.cache_read_tokens::double precision /
         NULLIF(ul.input_tokens::bigint + ul.cache_creation_tokens::bigint + ul.cache_read_tokens::bigint, 0) END AS cache_rate,
       CASE WHEN ` + channelMonitorV2OutputTPSEligibleSQL + ` THEN ` + usageOutputTPSSQL + ` END AS output_tps,
       ''::text AS error_type, ''::text AS error_owner, ''::text AS error_source, 0 AS status_code, 0 AS upstream_status_code, ''::text AS message, ''::text AS error_summary
@@ -90,13 +90,13 @@ func channelMonitorV2RecentQuery(filter service.ChannelMonitorV2Filter, cfg serv
     LEFT JOIN accounts a ON a.id = ul.account_id
     ` + channelMonitorV2UsageFailureJoinSQL + `
     WHERE ` + scope("ul", channelMonitorV2PlatformSQL, usageModel) + `
-      AND COALESCE(ul.request_type, 0) NOT IN (4, 6) AND (` + channelMonitorV2UsageSuccessSQL + ` OR (ul.api_key_id IS NOT NULL AND ul.output_tokens>0))
+      AND ` + channelMonitorV2StreamingUL + ` AND (` + channelMonitorV2UsageSuccessSQL + ` OR (ul.api_key_id IS NOT NULL AND ul.output_tokens>0))
       AND e.request_id IS NULL
       AND (COALESCE(ul.request_type,0)=3 OR COALESCE(ul.openai_ws_mode,false) OR NULLIF(ul.request_id, '') IS NULL OR NOT EXISTS (
         SELECT 1 FROM usage_logs newer WHERE newer.request_id = ul.request_id
           AND COALESCE(newer.api_key_id,0)=COALESCE(ul.api_key_id,0) AND COALESCE(newer.account_id,0)=COALESCE(ul.account_id,0)
           AND newer.created_at >= $1 AND newer.created_at < $2
-          AND (newer.actual_cost > 0 OR newer.output_tokens>0) AND COALESCE(newer.request_type, 0) NOT IN (4, 6)
+          AND (newer.actual_cost > 0 OR newer.output_tokens>0) AND ` + channelMonitorV2StreamingUsageSQL("newer") + `
           AND (newer.created_at, newer.id) > (ul.created_at, ul.id)))
     ORDER BY ul.created_at DESC, ul.id DESC LIMIT 20)
     UNION ALL

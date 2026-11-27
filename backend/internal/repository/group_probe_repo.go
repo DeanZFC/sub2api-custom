@@ -129,7 +129,7 @@ var groupProbeActivitySQL = `WITH failures AS MATERIALIZED (
         AND COALESCE(ul.request_type,0)<>3 AND NOT COALESCE(ul.openai_ws_mode,false)
     WHERE ul.group_id=$1 AND COALESCE(NULLIF(ul.requested_model,''),ul.model)=$2
       AND ul.created_at >= LEAST($3::timestamptz, now()-interval '10 minutes')
-      AND ul.api_key_id IS NOT NULL AND COALESCE(ul.request_type,0) NOT IN(4,6)
+      AND ul.api_key_id IS NOT NULL AND ` + channelMonitorV2StreamingUL + `
       AND (ul.http_status BETWEEN 200 AND 299 OR (ul.http_status IS NULL AND (ul.output_tokens>0 OR ul.actual_cost>0)))
       AND fk.request_id IS NULL
     ORDER BY ul.created_at DESC LIMIT $4

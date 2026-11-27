@@ -47,7 +47,7 @@ CREATE TABLE accounts (id bigint PRIMARY KEY, platform text);
 CREATE TABLE channel_quality_group_sets(id bigserial primary key, group_ids bigint[] unique);
 CREATE TABLE usage_logs (quality_group_set_id bigint, quality_usage jsonb,id bigserial PRIMARY KEY,http_status smallint, created_at timestamptz, group_id bigint, account_id bigint DEFAULT 1, api_key_id bigint DEFAULT 1, request_id text, model text, requested_model text, request_type int DEFAULT 2, actual_cost numeric DEFAULT 1, first_token_ms int DEFAULT 1000,
  duration_ms int DEFAULT 3500, output_tokens int DEFAULT 100, image_count int DEFAULT 0, video_count int DEFAULT 0, image_output_tokens int DEFAULT 0, billing_mode text,inbound_endpoint text, upstream_endpoint text, native_compaction_v2 boolean DEFAULT false, input_tokens int DEFAULT 100, cache_creation_tokens int DEFAULT 100, cache_read_tokens int DEFAULT 800, stream boolean DEFAULT true, openai_ws_mode boolean DEFAULT false);
-CREATE TABLE ops_error_logs (quality_group_set_id bigint,id bigserial PRIMARY KEY, created_at timestamptz, group_id bigint, account_id bigint DEFAULT 1, api_key_id bigint DEFAULT 1, request_id text, client_request_id text, request_type int DEFAULT 2, platform text DEFAULT 'openai', model text DEFAULT 'gpt-named', requested_model text, is_count_tokens boolean DEFAULT false, status_code int DEFAULT 503, upstream_status_code int, error_type text DEFAULT 'upstream', error_owner text, error_source text, error_message text, upstream_error_message text, upstream_error_detail text, error_body text,
+CREATE TABLE ops_error_logs (quality_group_set_id bigint,id bigserial PRIMARY KEY, created_at timestamptz, group_id bigint, account_id bigint DEFAULT 1, api_key_id bigint DEFAULT 1, request_id text, client_request_id text, request_type int DEFAULT 2, stream boolean DEFAULT false, platform text DEFAULT 'openai', model text DEFAULT 'gpt-named', requested_model text, is_count_tokens boolean DEFAULT false, status_code int DEFAULT 503, upstream_status_code int, error_type text DEFAULT 'upstream', error_owner text, error_source text, error_message text, upstream_error_message text, upstream_error_detail text, error_body text,
  duration_ms int, time_to_first_token_ms bigint, error_phase text, is_business_limited boolean DEFAULT false, upstream_errors jsonb);
 INSERT INTO groups VALUES(7,'openai'),(8,'openai'),(9,'composite');
 INSERT INTO accounts VALUES(1,'openai');
@@ -68,6 +68,11 @@ INSERT INTO ops_error_logs(created_at,group_id,request_id,status_code,error_type
 INSERT INTO ops_error_logs(created_at,group_id,request_id,account_id,model,status_code,error_type,error_source)
  VALUES ('2026-10-20T00:55:00Z',7,'blocked',NULL,'deepseek-v4.1-flash',403,'cyber_policy_session_blocked','gateway_local');
 UPDATE ops_error_logs SET platform='composite' WHERE group_id=9;
+-- A later synchronous row must neither appear nor mask eligible rows with the same ID.
+INSERT INTO usage_logs(created_at,group_id,request_id,model,request_type,stream) VALUES
+ ('2026-10-20T00:56:00Z',7,'duplicate','gpt-named',1,true);
+INSERT INTO ops_error_logs(created_at,group_id,request_id,request_type,stream) VALUES
+ ('2026-10-20T00:57:00Z',7,'final-error',1,true),('2026-10-20T00:58:00Z',7,'seven-24',1,true);
 INSERT INTO ops_error_logs(created_at,group_id,request_id,is_count_tokens,error_type) VALUES('2026-10-20T00:54:00Z',7,'token-count',true,'count-token-error');
 UPDATE usage_logs SET input_tokens=0, cache_creation_tokens=0, cache_read_tokens=0 WHERE request_id='seven-20';
 UPDATE usage_logs SET cache_read_tokens=0, first_token_ms=0, duration_ms=0 WHERE request_id='seven-21';
@@ -93,7 +98,7 @@ UPDATE ops_error_logs SET upstream_error_detail='Credential expired', error_mess
 		require.NoError(t, repo.loadChannelMonitorV2RecentRequests(ctx, filter, cfg, items, false))
 		recent := items[0].RecentRequests
 		require.Len(t, recent, 20)
-		errors, ignored, unnamed, syncRequests := 0, 0, 0, 0
+		errors, ignored, unnamed := 0, 0, 0
 		for i, request := range recent {
 			require.Nil(t, request.Error)
 			require.Empty(t, request.ErrorCategory)
@@ -115,7 +120,7 @@ UPDATE ops_error_logs SET upstream_error_detail='Credential expired', error_mess
 				require.Nil(t, request.CacheRate)
 			}
 			if request.Status == "success" {
-				if request.OccurredAt.Equal(start.Add(21*time.Minute)) || request.OccurredAt.Equal(start.Add(23*time.Minute)) || request.OccurredAt.Equal(start.Add(25*time.Minute)) {
+				if request.OccurredAt.Equal(start.Add(21*time.Minute)) || request.OccurredAt.Equal(start.Add(25*time.Minute)) {
 					require.Nil(t, request.OutputTPS)
 				} else {
 					require.NotNil(t, request.OutputTPS)
@@ -125,8 +130,7 @@ UPDATE ops_error_logs SET upstream_error_detail='Credential expired', error_mess
 				case 20 * time.Minute:
 					require.Nil(t, request.CacheRate) // no input or cache tokens
 				case 22 * time.Minute, 23 * time.Minute:
-					syncRequests++
-					require.Nil(t, request.CacheRate) // explicit and legacy synchronous requests remain visible without a cache-rate sample
+					t.Fatalf("synchronous request at %s leaked into recent requests", request.OccurredAt)
 				case 21 * time.Minute:
 					require.Zero(t, *request.CacheRate) // known zero is distinct from missing data
 					require.Zero(t, *request.TTFTMs)
@@ -146,7 +150,6 @@ UPDATE ops_error_logs SET upstream_error_detail='Credential expired', error_mess
 		require.Equal(t, 1, errors)
 		require.Equal(t, 1, ignored) // ignored categories are indistinguishable from generic failures to users
 		require.Equal(t, 1, unnamed) // unauthorized group's 45 requests do not leak into platform view
-		require.Equal(t, 2, syncRequests)
 		require.Equal(t, start.Add(33*time.Minute), recent[19].OccurredAt)
 	}
 	filter.RestrictGroups = false

@@ -103,13 +103,14 @@ CREATE TABLE usage_logs (quality_group_set_id bigint, quality_usage jsonb,id BIG
  first_token_ms INT,duration_ms INT,image_count INT DEFAULT 0,video_count INT DEFAULT 0,image_output_tokens INT DEFAULT 0,
  billing_mode TEXT,inbound_endpoint TEXT,upstream_endpoint TEXT,native_compaction_v2 BOOLEAN DEFAULT false);
 CREATE TABLE ops_error_logs(quality_group_set_id bigint,id BIGSERIAL,created_at TIMESTAMPTZ,account_id BIGINT DEFAULT 62,api_key_id BIGINT DEFAULT 1,
- request_id TEXT,client_request_id TEXT,request_type INT DEFAULT 2,is_count_tokens BOOLEAN DEFAULT false,status_code INT DEFAULT 503,error_type TEXT DEFAULT 'upstream_error');
+ request_id TEXT,client_request_id TEXT,request_type INT DEFAULT 2,stream BOOLEAN DEFAULT false,is_count_tokens BOOLEAN DEFAULT false,status_code INT DEFAULT 503,error_type TEXT DEFAULT 'upstream_error');
 INSERT INTO groups VALUES (8,'openai'); INSERT INTO accounts VALUES (62,'openai');`)
 	start := time.Now().UTC().Truncate(time.Hour)
 	end := start.Add(time.Hour)
 	exec(`INSERT INTO usage_logs(created_at,request_id,request_type,stream,openai_ws_mode,input_tokens,cache_creation_tokens,cache_read_tokens) VALUES
- ($1,'sync',1,false,false,1000,30,50),($1,'stream',2,true,false,10,10,90),($1,'ws',3,false,true,10,0,90),($1,'legacy-sync',0,false,false,2000,0,0),
- ($1,'stale-sync-flags',1,true,true,100,20,10),($1,'legacy-stream',0,true,false,0,0,100)`, start)
+ ($1,'sync',1,false,false,1000,30,50),($1,'stream',2,false,false,10,10,90),($1,'ws',3,false,false,10,0,90),($1,'legacy-sync',0,false,false,2000,0,0),
+ ($1,'stale-sync-flags',1,true,true,100,20,10),($1,'legacy-stream',0,true,false,0,0,100),
+ ($1,'live',5,true,true,1000,1000,1000),($1,'unknown-type',9,true,true,1000,1000,1000)`, start)
 	for _, query := range []string{channelMonitorV2UsageMetricsSQL, channelMonitorV2UserMetricsSQL} {
 		exec(fmt.Sprintf(query, channelMonitorV2PlatformSQL, channelMonitorV2ModelSQL), start, end)
 	}
@@ -122,15 +123,14 @@ INSERT INTO groups VALUES (8,'openai'); INSERT INTO accounts VALUES (62,'openai'
 		acc := newMetricAccumulator()
 		acc.addFact(f)
 		metric := acc.metric(1, true)
-		require.Equal(t, int64(6), metric.RequestCount, table)
-		require.Equal(t, int64(3580), metric.TokenCount, table)
-		require.Equal(t, int64(340), metric.CacheReadTokens, table)
+		require.Equal(t, int64(3), metric.RequestCount, table)
+		require.Equal(t, int64(340), metric.TokenCount, table)
+		require.Equal(t, int64(280), metric.CacheReadTokens, table)
 		require.Equal(t, int64(280), metric.CacheRateNumerator, table)
 		require.Equal(t, int64(310), metric.CacheRateDenominator, table)
 		require.True(t, metric.HasCacheSamples, table)
 		require.InDelta(t, 280.0/310.0, metric.CacheRate, .00001, table)
-		// Both minute facts and rollups retain the streaming/WS subset, including
-		// cache writes, while synchronous traffic stays in the full token totals.
+		// Minute and rollup totals include only the two explicit transports and the legacy stream.
 		require.Equal(t, int64(20), f.CacheEligibleInput, table)
 		require.Equal(t, int64(10), f.CacheEligibleCreation, table)
 		require.Equal(t, int64(280), f.CacheEligibleRead, table)
@@ -157,7 +157,7 @@ INSERT INTO groups VALUES (8,'openai'); INSERT INTO accounts VALUES (62,'openai'
  ($1+INTERVAL '1 minute','fast',2,true,false,100,100,3000,4000),
  ($1+INTERVAL '2 minutes','ws',3,false,true,100,20,100,200),
  ($1,'missing-ttft',2,true,false,100,9999,NULL,10000),
- ($1,'empty-interval',2,true,false,100,9999,10000,10000),
+ ($1,'empty-interval',0,false,true,100,9999,10000,10000),
  ($1,'negative-ttft',2,true,false,100,9999,-1,10000),
  ($1,'sync',1,false,false,100,9999,1000,10000),
  ($1,'cyber',4,true,false,100,9999,1000,10000),
@@ -178,10 +178,10 @@ INSERT INTO groups VALUES (8,'openai'); INSERT INTO accounts VALUES (62,'openai'
 		rates, err := repo.loadOutputTPS(ctx, filter, cfg, "", true)
 		require.NoError(t, err)
 		total := rates[channelMonitorV2RateKey{}]
-		// Eligible rates: 100/11, 20, 25, 100 and four times 999.9.
+		// Eligible rates: 100/11, 20, 25, 100 and three times 999.9.
 		// TTFT is irrelevant, including missing, negative or equal to duration.
-		require.EqualValues(t, 8, total.samples)
-		require.InDelta(t, (100+999.9)/2, *total.p50, .00001)
+		require.EqualValues(t, 7, total.samples)
+		require.InDelta(t, 100.0, *total.p50, .00001)
 		fast := rates[channelMonitorV2RateKey{bucket: start.Add(time.Minute).Format(time.RFC3339Nano)}]
 		require.EqualValues(t, 1, fast.samples)
 		require.Equal(t, 25.0, *fast.p50)

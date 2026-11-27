@@ -390,20 +390,19 @@ func TestChannelMonitorV2ErrorAggregationResolvesCompositePlatform(t *testing.T)
 	require.NotContains(t, query, "nullif(trim(a.platform))")
 }
 
-func TestChannelMonitorV2UsageSuccessExcludesCyberBillingRows(t *testing.T) {
+func TestChannelMonitorV2UsageAggregatesRequireStreaming(t *testing.T) {
 	for _, query := range []string{channelMonitorV2UsageMetricsSQL, channelMonitorV2UserMetricsSQL} {
-		require.Contains(t, query, "COALESCE(ul.request_type, 0) NOT IN (4, 6)")
-		require.Contains(t, query, "COALESCE(ul.request_type, 0) NOT IN (1, 4, 6)")
+		require.Contains(t, query, channelMonitorV2StreamingUL)
 		require.Contains(t, query, "ul.actual_cost > 0")
 		require.Contains(t, query, "cache_eligible_input_tokens")
-		require.Contains(t, query, "ul.stream = TRUE OR ul.openai_ws_mode = TRUE")
 	}
 	require.Contains(t, channelMonitorV2PlatformSQL, "g.platform = 'composite'")
 	require.Contains(t, channelMonitorV2PlatformSQL, "a.platform")
 	require.Contains(t, channelMonitorV2HistogramSQL, "ul.actual_cost > 0")
+	require.Contains(t, channelMonitorV2HistogramSQL, channelMonitorV2StreamingUL)
 }
 
-func TestChannelMonitorV2CacheRateExcludesSynchronousRequests(t *testing.T) {
+func TestChannelMonitorV2CacheRateExcludesMissingTelemetry(t *testing.T) {
 	acc := newMetricAccumulator()
 	acc.addFact(channelMonitorV2Fact{Success: 1, Input: 100, Output: 20, CacheCreation: 30, CacheRead: 50})
 	m := acc.metric(1, true)
@@ -445,7 +444,7 @@ func TestChannelMonitorV2CacheRateDistinguishesMissingTokensAndZeroHits(t *testi
 		hasSamples    bool
 	}{
 		{name: "empty denominator"},
-		{name: "synchronous input without cache hits", input: 100},
+		{name: "probe input without cache telemetry", input: 100},
 		{name: "streaming input without cache hits", input: 100, eligibleInput: 100, hasSamples: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -463,8 +462,7 @@ func TestChannelMonitorV2CacheRateDistinguishesMissingTokensAndZeroHits(t *testi
 }
 
 func TestChannelMonitorV2CacheRateDoesNotUseIneligibleTokenTotals(t *testing.T) {
-	// Full totals alone cannot identify streaming/WS traffic and must not be
-	// treated as eligible samples.
+	// A probe can report tokens without reporting cache telemetry.
 	acc := newMetricAccumulator()
 	acc.addFact(channelMonitorV2Fact{Success: 4, Input: 3020, Output: 40, CacheCreation: 30, CacheRead: 230})
 	m := acc.metric(1, true)

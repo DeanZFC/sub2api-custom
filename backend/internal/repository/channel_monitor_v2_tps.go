@@ -36,9 +36,10 @@ const channelMonitorV2UsageFailureJoinSQL = `LEFT JOIN tps_final_failure_keys e
 
 // The monitor reports text responses. Keep its exclusions for generated media,
 // compaction and policy-block records when applying the Ops rate to channel traffic.
-var channelMonitorV2OutputTPSEligibleSQL = usageOutputTPSEligibleSQL + `
+var channelMonitorV2OutputTPSEligibleSQL = usageTextOutputTPSFieldsSQL + `
+ AND ` + channelMonitorV2StreamingUL + `
  AND (ul.api_key_id IS NOT NULL OR ul.http_status BETWEEN 200 AND 299)
- AND ul.request_type <> 4 AND COALESCE(ul.video_count,0)=0
+ AND COALESCE(ul.video_count,0)=0
  AND COALESCE(ul.inbound_endpoint,'') !~* '(^|/)(images|videos|audio|compact)(/|$)'
  AND COALESCE(ul.upstream_endpoint,'') !~* '(^|/)(images|videos|audio|compact)(/|$)'
  AND NOT COALESCE(ul.native_compaction_v2,false)`

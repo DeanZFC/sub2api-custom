@@ -62,7 +62,7 @@ CREATE TABLE usage_logs (quality_group_set_id bigint, quality_usage jsonb,id BIG
  first_token_ms INT DEFAULT 100,duration_ms INT DEFAULT 1100,image_count INT DEFAULT 0,video_count INT DEFAULT 0,image_output_tokens INT DEFAULT 0,
  billing_mode TEXT,inbound_endpoint TEXT,upstream_endpoint TEXT,native_compaction_v2 BOOLEAN DEFAULT false);
 CREATE TABLE ops_error_logs (quality_group_set_id bigint,id BIGSERIAL,created_at TIMESTAMPTZ,group_id BIGINT DEFAULT 8,account_id BIGINT DEFAULT 62,user_id BIGINT DEFAULT 7,api_key_id BIGINT DEFAULT 1,
- request_id TEXT,client_request_id TEXT,request_type INT DEFAULT 2,is_count_tokens BOOLEAN DEFAULT false,status_code INT DEFAULT 503,error_type TEXT DEFAULT 'upstream_error',
+ request_id TEXT,client_request_id TEXT,request_type INT DEFAULT 2,stream BOOLEAN DEFAULT false,is_count_tokens BOOLEAN DEFAULT false,status_code INT DEFAULT 503,error_type TEXT DEFAULT 'upstream_error',
  platform TEXT DEFAULT 'openai',model TEXT DEFAULT 'model-a',requested_model TEXT,error_owner TEXT,error_source TEXT,upstream_status_code INT,
  error_message TEXT,upstream_error_message TEXT,upstream_error_detail TEXT,error_body TEXT,upstream_errors JSONB,error_phase TEXT,is_business_limited BOOLEAN DEFAULT false);
 INSERT INTO groups VALUES (8,'openai'); INSERT INTO accounts VALUES (62,'openai');`)
@@ -140,6 +140,51 @@ INSERT INTO groups VALUES (8,'openai'); INSERT INTO accounts VALUES (62,'openai'
 		require.Len(t, matrix.Items, 1)
 		require.EqualValues(t, 6, matrix.Items[0].Metrics.SuccessRequests)
 		require.Nil(t, matrix.Items[0].Metrics.OutputTPS)
+	})
+
+	t.Run("upgrade rebuilds the health strip with streaming and websocket traffic only", func(t *testing.T) {
+		reset(t)
+		start := now.Add(-2 * time.Hour).Truncate(time.Hour)
+		second := start.Add(5 * time.Minute)
+		end := second.Add(5 * time.Minute)
+		// Seed mixed historical metrics, including latency and error buckets.
+		exec(t, `INSERT INTO usage_logs(created_at,request_id) VALUES ($1,'sync'),($2,'ws')`, start, second)
+		exec(t, `INSERT INTO ops_error_logs(created_at,request_id) VALUES ($1,'sync-error'),($2,'stream-error')`, start, second)
+		require.NoError(t, repo.RecomputeRange(ctx, start, end))
+		exec(t, `UPDATE usage_logs SET request_type=CASE WHEN request_id='ws' THEN 3 ELSE 1 END, stream=false;
+UPDATE ops_error_logs SET request_type=CASE WHEN request_id='sync-error' THEN 1 END, stream=true;
+CREATE TABLE group_probes(last_user_at timestamptz);
+INSERT INTO group_probes VALUES(now())`)
+		raw, err := os.ReadFile("../../migrations/367_channel_monitor_v2_streaming_requests.sql")
+		require.NoError(t, err)
+		exec(t, string(raw))
+		watermark, err := repo.GetAggregationWatermark(ctx)
+		require.NoError(t, err)
+		require.False(t, watermark.HasData)
+		for _, tier := range []string{"1m", "rollup"} {
+			for _, kind := range []string{"metrics", "user_metrics", "latency_histograms", "error_metrics"} {
+				var count int
+				require.NoError(t, db.QueryRowContext(ctx, "SELECT count(*) FROM channel_monitor_v2_"+kind+"_"+tier).Scan(&count))
+				require.Zero(t, count, "%s %s", tier, kind)
+			}
+		}
+		require.NoError(t, repo.RecomputeRange(ctx, start, end))
+		cfg := service.ChannelMonitorV2Config{Platforms: []service.ChannelMonitorV2PlatformConfig{{Platform: "openai", Enabled: true}}}
+		filter := service.ChannelMonitorV2Filter{Start: start, End: end, Bucket: 5 * time.Minute}
+		matrix, err := repo.GetMatrix(ctx, filter, cfg, service.ChannelMonitorV2GroupByPlatformGroup, true)
+		require.NoError(t, err)
+		require.Len(t, matrix.Items, 1)
+		require.Len(t, matrix.Items[0].Buckets, 1, "the sync-only interval must have no health sample")
+		bucket := matrix.Items[0].Buckets[0]
+		require.True(t, bucket.BucketStart.Equal(second))
+		require.EqualValues(t, 1, bucket.Metrics.SuccessRequests)
+		require.EqualValues(t, 1, bucket.Metrics.ErrorRequests)
+		require.EqualValues(t, 1, bucket.Metrics.TTFT.SampleCount)
+		require.EqualValues(t, 1, bucket.Metrics.TPSSamples)
+		details, err := repo.loadErrorDetails(ctx, filter, cfg)
+		require.NoError(t, err)
+		require.Len(t, details["internal"], 1)
+		require.EqualValues(t, 1, details["internal"][0].Count)
 	})
 
 	t.Run("local session block does not create a model or affect group health", func(t *testing.T) {

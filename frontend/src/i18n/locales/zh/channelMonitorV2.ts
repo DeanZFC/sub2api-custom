@@ -3,7 +3,7 @@ export default {
   channelMonitorV2: {
     probes: {
       title: '分组主动探测',
-      hint: '选择支持 Chat Completions 的文本模型。同组、同模型在观察窗口内的成功和失败请求都计入。低于阈值时立即探测，并按设定间隔持续到本轮结束。之后再观察一个完整窗口，仍低于阈值就启动下一轮。',
+      hint: '选择支持 Chat Completions 的文本模型。观察窗口内，只统计同组、同模型的流式和 WebSocket 用户请求，成功和失败均计入。低于阈值时立即探测，并按设定间隔持续到本轮结束。之后再观察一个完整窗口，仍低于阈值就启动下一轮。',
       windowMinutes: '观察窗口（分钟）',
       minRequests: '请求少于（笔）',
       duration: '持续探测（分钟）',
@@ -48,7 +48,7 @@ export default {
       overall: '整体', allModels: '全部模型', models: '各模型', modelCount: '{count} 个模型',
       expandModels: '展开其余 {count} 个模型', collapseModels: '收起模型',
       noModels: '当前范围内暂无模型调用', currentScope: '状态明细：{model}', backToOverall: '返回整体',
-      title: '渠道健康', description: '指标按所选时间范围汇总',
+      title: '渠道健康', description: '仅统计所选时段内的流式和 WebSocket 请求',
       passive: '被动健康', availability: '可用率', groupRateMultiplier: '倍率 {rate}×',
       past: '过去', now: '最近',
       healthHistory: '近 20 个时段统计',

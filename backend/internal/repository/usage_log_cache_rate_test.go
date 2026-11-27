@@ -6,6 +6,6 @@ import (
 	"testing"
 )
 
-func TestUsageCacheEligibilityMatchesChannelMonitor(t *testing.T) {
-	require.Equal(t, usageLogCacheEligible, strings.ReplaceAll(channelMonitorV2CacheEligibleUL, "ul.", ""))
+func TestUsageAndMonitorCacheRatesRequireProbeTelemetry(t *testing.T) {
+	require.Contains(t, usageLogCacheEligible, strings.ReplaceAll(channelMonitorV2CacheTelemetryUL, "ul.", ""))
 }

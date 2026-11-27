@@ -3,7 +3,7 @@ export default {
   channelMonitorV2: {
     probes: {
       title: 'Group probes',
-      hint: 'Choose a Chat Completions text model. Successful and failed user requests for this group and model both count. Below the threshold, probes start immediately and repeat at the chosen interval for the full duration. After another observation window, a new round starts if traffic is still low.',
+      hint: 'Choose a Chat Completions text model. Only streaming and WebSocket user requests for this group and model count, including failures. Below the threshold, probes start immediately and repeat at the chosen interval for the full duration. After another observation window, a new round starts if traffic is still low.',
       windowMinutes: 'Observation window (minutes)',
       minRequests: 'Probe below (requests)',
       duration: 'Probe duration (minutes)',
@@ -48,7 +48,7 @@ export default {
       overall: 'Overall', allModels: 'All models', models: 'Models', modelCount: '{count} models',
       expandModels: 'Show {count} more models', collapseModels: 'Show fewer models',
       noModels: 'No model traffic in this range', currentScope: 'Status: {model}', backToOverall: 'Back to overall',
-      title: 'Channel health', description: 'Metrics cover the selected time range',
+      title: 'Channel health', description: 'Metrics cover streaming and WebSocket requests in the selected time range',
       passive: 'Passive health', availability: 'Availability', groupRateMultiplier: 'Rate {rate}×',
       past: 'Past', now: 'Latest',
       healthHistory: 'Last 20 statistical intervals',

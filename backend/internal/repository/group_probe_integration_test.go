@@ -65,8 +65,8 @@ func TestGroupProbeActivityAndLeases(t *testing.T) {
 
 	// Traffic recovers during the round. Five free calls will suppress a new
 	// round, but the running round retains its original deadline and cadence.
-	exec(`INSERT INTO usage_logs(group_id,user_id,api_key_id,account_id,model,requested_model,http_status,request_id,output_tokens)
-        SELECT $1,$2,$3,$4,'mapped',$5,200,'group-probe-user-'||i,1 FROM generate_series(1,5) i`, group.ID, user.ID, key.ID, acct.ID, model)
+	exec(`INSERT INTO usage_logs(group_id,user_id,api_key_id,account_id,model,requested_model,http_status,request_id,output_tokens,request_type)
+        SELECT $1,$2,$3,$4,'mapped',$5,200,'group-probe-user-'||i,1,2 FROM generate_series(1,5) i`, group.ID, user.ID, key.ID, acct.ID, model)
 	exec("UPDATE group_probes SET round_until=now()+interval '8 minutes 45 seconds',next_poll_at=now() WHERE group_id=$1", group.ID)
 	readSchedule()
 	deadline := end
@@ -116,8 +116,8 @@ func TestGroupProbeActivityAndLeases(t *testing.T) {
 	require.EqualValues(t, 30, row().IntervalSeconds)
 	require.Nil(t, row().RoundUntil)
 	// Two server failures after the last success trigger an early probe.
-	exec(`INSERT INTO ops_error_logs(group_id,api_key_id,request_id,model,status_code,error_phase,error_type)
-         SELECT $1,$2,'group-probe-fail-'||i,$3,503,'upstream','error' FROM generate_series(1,2) i`, group.ID, key.ID, model)
+	exec(`INSERT INTO ops_error_logs(group_id,api_key_id,request_id,model,status_code,error_phase,error_type,request_type)
+         SELECT $1,$2,'group-probe-fail-'||i,$3,503,'upstream','error',3 FROM generate_series(1,2) i`, group.ID, key.ID, model)
 	poll()
 	second := claim(true)
 	require.NoError(t, repo.Finish(ctx, second, service.GroupProbeResult{Detail: "incomplete_stream"}))
@@ -186,18 +186,20 @@ func TestGroupProbeTrafficThreshold(t *testing.T) {
 	require.NoError(t, repo.Configure(ctx, group.ID, model, true, service.GroupProbeRuleUpdate{}))
 
 	// One completed call and one failed call with partial usage and duplicate error logs.
-	exec(`INSERT INTO usage_logs(group_id,user_id,api_key_id,account_id,requested_model,model,http_status,request_id,created_at) VALUES
-		($1,$2,$3,$4,$5,'mapped',200,'completed',now()),
-		($1,$2,$3,$4,$5,'mapped',200,'client:partial',now()),
-		($1,$2,$3,$4,$5,'mapped',200,'older',now()-interval '8 minutes'),
-		($1,$2,$3,$4,'another-model','mapped',200,'unrelated-model',now()),
-		($6,$2,$3,$4,$5,'mapped',200,'unrelated-group',now())`, group.ID, user.ID, key.ID, account.ID, model, other.ID)
+	exec(`INSERT INTO usage_logs(group_id,user_id,api_key_id,account_id,requested_model,model,http_status,request_id,created_at,request_type) VALUES
+		($1,$2,$3,$4,$5,'mapped',200,'completed',now(),3),
+		($1,$2,$3,$4,$5,'mapped',200,'client:partial',now(),2),
+		($1,$2,$3,$4,$5,'mapped',200,'older',now()-interval '8 minutes',2),
+		($1,$2,$3,$4,'another-model','mapped',200,'unrelated-model',now(),2),
+		($6,$2,$3,$4,$5,'mapped',200,'unrelated-group',now(),2),
+		($1,$2,$3,$4,$5,'mapped',200,'sync-user',now(),1)`, group.ID, user.ID, key.ID, account.ID, model, other.ID)
 	exec(`INSERT INTO usage_logs(group_id,account_id,model,http_status,request_id,inbound_endpoint)
 		VALUES($1,$2,$3,200,'internal-probe','/internal/channel-quality')`, group.ID, account.ID, model)
-	exec(`INSERT INTO ops_error_logs(group_id,api_key_id,model,request_id,client_request_id,status_code,error_phase,error_type,is_count_tokens) VALUES
-		($1,$2,$3,'local-id','partial',400,'request','error',false),
-		($1,$2,$3,'local-id','partial',400,'request','error',false),
-		($1,$2,$3,'count-tokens',NULL,400,'request','error',true)`, group.ID, key.ID, model)
+	exec(`INSERT INTO ops_error_logs(group_id,api_key_id,model,request_id,client_request_id,status_code,error_phase,error_type,is_count_tokens,request_type) VALUES
+		($1,$2,$3,'local-id','partial',400,'request','error',false,2),
+		($1,$2,$3,'local-id','partial',400,'request','error',false,2),
+		($1,$2,$3,'count-tokens',NULL,400,'request','error',true,2),
+		($1,$2,$3,'sync-error',NULL,503,'upstream','error',false,1)`, group.ID, key.ID, model)
 	// Move the end of the previous round to exercise the observation period.
 	claimAfter := func(minutes int) *service.GroupProbeJob {
 		t.Helper()
