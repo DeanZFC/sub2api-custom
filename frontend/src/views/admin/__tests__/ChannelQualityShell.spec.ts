@@ -1,32 +1,87 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { createI18n } from 'vue-i18n'
 import TestManagementView from '../TestManagementView.vue'
-const refresh = vi.fn()
-vi.mock('@/components/tests/ActiveQualityPanel.vue', () => ({ default: { props: ['tab'], template: '<div data-active :data-tab="tab" />', setup: () => ({ refresh }) } }))
-vi.mock('@/components/tests/QualityOperationsPanel.vue', () => ({ default: { template: '<div data-operations />' } }))
-describe('active intelligence management navigation', () => {
-  it('defaults to active checks, retains active deep links, and replaces retired sections', async () => {
-    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/admin/tests', component: TestManagementView }] })
-    await router.push('/admin/tests?plan_id=5&account_id=62'); await router.isReady()
-    const wrapper = mount(TestManagementView, { global: { plugins: [router, createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: {} })], stubs: { AppLayout: { template: '<main><slot/></main>' }, Icon: true } } })
-    expect(wrapper.findAll('[role="tab"]')).toHaveLength(4)
-    expect(wrapper.get('[data-active]').isVisible()).toBe(true)
-    expect(wrapper.get('[data-quality-section="plans"]').attributes('aria-selected')).toBe('true')
-    expect(router.currentRoute.value.query).toEqual({ plan_id: '5', account_id: '62' })
-    for (const tab of ['passive', 'group-targets', 'records', 'overview', 'scoring', 'legacy']) {
-      await router.replace({ path: '/admin/tests', query: { tab, policy_id: '7' } }); await flushPromises()
-      expect(wrapper.get('[data-active]').attributes('data-tab')).toBe('plans')
-      expect(wrapper.get('[data-quality-section="plans"]').attributes('aria-selected')).toBe('true')
-      expect(wrapper.find('[data-quality-section="group-targets"]').exists()).toBe(false)
+import IntelligencePolicyPanel from '@/components/tests/IntelligencePolicyPanel.vue'
+import QualityOperationsPanel from '@/components/tests/QualityOperationsPanel.vue'
+
+const api = vi.hoisted(() => ({
+  plans: vi.fn(), groups: vi.fn(), accounts: vi.fn(), listTypes: vi.fn(),
+  refreshIntelligence: vi.fn(), refreshOperations: vi.fn(),
+}))
+vi.mock('@/api/admin', () => ({
+  adminAPI: { tests: { listPlans: api.plans, listTypes: api.listTypes }, groups: { getAll: api.groups }, accounts: { list: api.accounts } },
+}))
+vi.mock('@/components/tests/IntelligencePolicyPanel.vue', () => ({
+  default: { props: ['groups', 'accounts', 'plans', 'catalogReady', 'initialPlanId'], emits: ['changed'], template: '<div />', setup: () => ({ refresh: api.refreshIntelligence }) },
+}))
+vi.mock('@/components/tests/QualityOperationsPanel.vue', () => ({
+  default: { props: ['accounts', 'visible'], template: '<div />', setup: () => ({ refresh: api.refreshOperations }) },
+}))
+
+async function render(url: string) {
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/admin/tests', component: TestManagementView }] })
+  await router.push(url)
+  await router.isReady()
+  const wrapper = mount(TestManagementView, { global: {
+    plugins: [router, createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: {} })],
+    stubs: { AppLayout: { template: '<main><slot /></main>' }, Icon: true },
+  } })
+  await flushPromises()
+  return { wrapper, router }
+}
+
+beforeEach(() => {
+  vi.resetAllMocks()
+  api.plans.mockResolvedValue([{ id: 5, protection: { intelligence: {} } }])
+  api.groups.mockResolvedValue([{ id: 7, name: 'Plus' }])
+  api.accounts.mockImplementation(async (page: number) => page === 1
+    ? { items: [{ id: 62 }], pages: 2, total: 2 }
+    : { items: [{ id: 63, status: 'disabled' }], pages: 2, total: 2 })
+})
+
+describe('intelligence management navigation', () => {
+  it('loads the catalog independently of retired tabs and keeps direct result links', async () => {
+    const { wrapper, router } = await render('/admin/tests?tab=plans&plan_id=5')
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.attributes('data-quality-section'))).toEqual(['intelligence', 'operations'])
+    expect(wrapper.getComponent(IntelligencePolicyPanel).props()).toMatchObject({
+      initialPlanId: 5, groups: [{ id: 7 }], plans: [{ id: 5 }],
+      accounts: [{ id: 62 }, { id: 63, status: 'disabled' }], catalogReady: true,
+    })
+    for (const tab of ['plans', 'types']) {
+      await router.replace({ query: { tab } })
+      await flushPromises()
+      expect(wrapper.get('[data-quality-section="intelligence"]').attributes('aria-selected')).toBe('true')
     }
-    await wrapper.get('[data-quality-section="types"]').trigger('click'); await flushPromises()
-    expect(router.currentRoute.value.query).toEqual({ tab: 'types' })
-    expect(wrapper.get('[data-active]').attributes('data-tab')).toBe('types')
-    await wrapper.get('[data-quality-section="operations"]').trigger('click'); await flushPromises()
-    expect(wrapper.get('[data-operations]').isVisible()).toBe(true)
-    expect(wrapper.get('[data-active]').attributes('style')).toContain('display: none')
+    await wrapper.get('[data-quality-section="operations"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.getComponent(QualityOperationsPanel).props('accounts')).toEqual([{ id: 62 }, { id: 63, status: 'disabled' }])
+    await wrapper.get('header button').trigger('click')
+    await flushPromises()
+    expect(api.refreshOperations).toHaveBeenCalledOnce()
+    expect(api.listTypes).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('retries a failed catalog and keeps the latest list after overlapping refreshes', async () => {
+    api.plans.mockRejectedValueOnce(new Error('Could not load plans'))
+    const { wrapper } = await render('/admin/tests')
+    expect(wrapper.get('[role="alert"]').text()).toContain('Could not load plans')
+    expect(wrapper.findComponent(IntelligencePolicyPanel).exists()).toBe(false)
+    await wrapper.get('header button').trigger('click')
+    await flushPromises()
+    const panel = wrapper.getComponent(IntelligencePolicyPanel)
+    expect(panel.props('catalogReady')).toBe(true)
+    let resolveOlder!: (plans: { id: number }[]) => void
+    api.plans.mockReturnValueOnce(new Promise(resolve => { resolveOlder = resolve }))
+    panel.vm.$emit('changed')
+    api.plans.mockResolvedValueOnce([{ id: 7 }])
+    panel.vm.$emit('changed')
+    await flushPromises()
+    resolveOlder([{ id: 6 }])
+    await flushPromises()
+    expect(panel.props('plans')).toEqual([{ id: 7 }])
     wrapper.unmount()
   })
 })

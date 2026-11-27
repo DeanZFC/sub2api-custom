@@ -171,7 +171,7 @@ func (s *ScheduledTestRunnerService) executePlanSnapshot(ctx context.Context, pl
 		var accountTargets []*int64
 		if len(accountIDs) > 0 && targetErr == nil {
 			for _, id := range accountIDs {
-				if catalog != nil && (catalog[id] == nil || !catalog[id].IsModelSupported(execution.ModelID)) {
+				if catalog != nil && !catalog[id].SupportsIntelligenceModel(execution.ModelID) {
 					continue
 				}
 				if plan.IntelligenceRetest && !due[IntelligenceTarget{AccountID: id, Model: execution.ModelID}] {

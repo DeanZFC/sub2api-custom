@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -20,72 +19,53 @@ import (
 
 // Drive the real scheduler, normal OAuth request builder, SSE reader,
 // content contract, result repository and budget boundary using a local transport.
-func TestIntelligenceFourChecksAndArtworkOnWire(t *testing.T) {
-	const marker = "opaque-value-should-never-be-persisted"
-	raw, err := os.ReadFile("../pkg/modelfingerprint/testdata/astra-high.txt")
-	require.NoError(t, err)
-	completed := func(txt string, turn bool) *http.Response {
-		delta, _ := json.Marshal(map[string]string{"type": "response.output_text.delta", "delta": txt})
-		resp := newJSONResponse(200, fmt.Sprintf("data: %s\n\ndata: {\"type\":\"response.completed\"}\n\n", delta))
-		if turn {
-			resp.Header.Set(openAICodexTurnStateHeader, marker)
-		}
-		return resp
+func TestIntelligenceCandyAndArtworkOnWire(t *testing.T) {
+	for _, accountType := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
+		t.Run(accountType, func(t *testing.T) {
+			completed := func(txt string) *http.Response {
+				delta, _ := json.Marshal(map[string]string{"type": "response.output_text.delta", "delta": txt})
+				return newJSONResponse(200, fmt.Sprintf("data: %s\n\ndata: {\"type\":\"response.completed\"}\n\n", delta))
+			}
+			account := &Account{ID: 19, Platform: PlatformOpenAI, Type: accountType, Status: StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"access_token": "example", "api_key": "example"}}
+			up := &queuedHTTPUpstream{responses: []*http.Response{completed("21"), completed(contentTestHTML)}}
+			budgets := &qualityOperationsStub{}
+			sent := 0
+			budgets.reserve = func(_ context.Context, id, tokens int64, _ bool, session string) (*QualityProbeReservation, error) {
+				require.Equal(t, account.ID, id)
+				require.Equal(t, "intelligence:round", session)
+				sent++
+				return &QualityProbeReservation{ID: int64(sent), AccountID: id}, nil
+			}
+			results := &retryResultRepoStub{}
+			accounts := &modelIdentityAccountRepo{account: account}
+			runner := &ScheduledTestRunnerService{accountTestSvc: &AccountTestService{accountRepo: accounts, httpUpstream: up, cfg: &config.Config{}, qualityOperations: budgets}, scheduledSvc: &ScheduledTestService{resultRepo: results}}
+			plan := &ScheduledTestPlan{ID: 3, ModelID: "gpt-6.2-astra", ReasoningEffort: "high", Protection: ScheduledTestProtectionConfig{Intelligence: &IntelligencePolicy{Version: "v", CandyPrompt: "candy question", ArtworkPrompt: "鹈鹕骑摩托车"}}}
+			pending := &ScheduledTestResult{ID: 91, RunID: "round", StartedAt: time.Now(), AccountID: &account.ID}
+			ctx := context.WithValue(context.Background(), qualityRunKey{}, "intelligence:round")
+			result := runner.runAccountWithResult(ctx, plan, account.ID, "discarded legacy prompt", "html", pending)
+			require.NotNil(t, result)
+			require.Equal(t, "success", result.Status, result.ErrorMessage)
+			e := result.ExecutionInfo.Intelligence
+			require.NotNil(t, e)
+			require.Equal(t, "pass", e.AutoVerdict)
+			require.Equal(t, "pass", e.FinalVerdict(""))
+			require.Equal(t, "confirmed", e.FinalVerdict("fail"))
+			require.Equal(t, "default", e.Artwork)
+			require.Equal(t, []IntelligenceCheck{{"candy", "pass", "答案为 21"}, {"http_429", "pass", "本轮请求成功，连续限流 0/3"}}, e.Checks)
+			require.Equal(t, contentTestHTML, result.OutputHTML)
+			require.Len(t, result.ExecutionInfo.Attempts, 2)
+			require.Len(t, up.requests, 2)
+			require.Equal(t, 2, sent)
+			require.Len(t, budgets.outcomes, 2)
+			for i, prompt := range []string{"candy question", "鹈鹕骑自行车"} {
+				body, err := io.ReadAll(up.requests[i].Body)
+				require.NoError(t, err)
+				require.Equal(t, "gpt-6.2-astra", gjson.GetBytes(body, "model").String())
+				require.Equal(t, "high", gjson.GetBytes(body, "reasoning.effort").String())
+				require.Equal(t, prompt, gjson.GetBytes(body, "input.0.content.0.text").String())
+			}
+		})
 	}
-	account := &Account{ID: 19, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Concurrency: 1, Credentials: map[string]any{"access_token": "example"}}
-	up := &queuedHTTPUpstream{responses: []*http.Response{completed(string(raw), false), completed("OK", true), completed("OK", true), completed("21", false), completed(contentTestHTML, false)}}
-	budgets := &qualityOperationsStub{}
-	sent := 0
-	budgets.reserve = func(_ context.Context, id, tokens int64, _ bool, session string) (*QualityProbeReservation, error) {
-		require.Equal(t, account.ID, id)
-		require.Equal(t, "intelligence:round", session)
-		sent++
-		return &QualityProbeReservation{ID: int64(sent), AccountID: id}, nil
-	}
-	results := &retryResultRepoStub{}
-	accounts := &modelIdentityAccountRepo{account: account}
-	runner := &ScheduledTestRunnerService{accountTestSvc: &AccountTestService{accountRepo: accounts, httpUpstream: up, cfg: &config.Config{}, qualityOperations: budgets}, scheduledSvc: &ScheduledTestService{resultRepo: results}}
-	plan := &ScheduledTestPlan{ID: 3, ModelID: "gpt-6.2-astra", ReasoningEffort: "high", Protection: ScheduledTestProtectionConfig{Intelligence: &IntelligencePolicy{Version: "v", CandyPrompt: "candy question", ArtworkPrompt: "鹈鹕骑摩托车"}}}
-	pending := &ScheduledTestResult{ID: 91, RunID: "round", StartedAt: time.Now(), AccountID: &account.ID}
-	ctx := context.WithValue(context.Background(), qualityRunKey{}, "intelligence:round")
-	result := runner.runAccountWithResult(ctx, plan, account.ID, "discarded legacy prompt", "html", pending)
-	require.NotNil(t, result)
-	require.Equal(t, "success", result.Status, result.ErrorMessage)
-	e := result.ExecutionInfo.Intelligence
-	require.NotNil(t, e)
-	require.Equal(t, "pass", e.AutoVerdict)
-	require.Equal(t, "pass", e.FinalVerdict(""))
-	require.Equal(t, "confirmed", e.FinalVerdict("fail"))
-	require.Equal(t, "default", e.Artwork)
-	require.Len(t, e.Checks, 4)
-	for _, c := range e.Checks {
-		require.Equal(t, "pass", c.Status, c.Key)
-	}
-	require.Equal(t, contentTestHTML, result.OutputHTML)
-	require.Len(t, result.ExecutionInfo.Attempts, 5)
-	require.Len(t, up.requests, 5)
-	require.Equal(t, 5, sent)
-	require.Len(t, budgets.outcomes, 5)
-	require.NotEmpty(t, up.requests[1].Header.Get("session_id"))
-	require.Equal(t, up.requests[1].Header.Get("session_id"), up.requests[2].Header.Get("session_id"))
-	require.Empty(t, up.requests[1].Header.Get(openAICodexTurnStateHeader))
-	require.Equal(t, marker, up.requests[2].Header.Get(openAICodexTurnStateHeader))
-	require.Empty(t, up.requests[3].Header.Get(openAICodexTurnStateHeader))
-	for i, r := range up.requests {
-		body, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
-		require.Equal(t, "gpt-6.2-astra", gjson.GetBytes(body, "model").String())
-		require.Equal(t, "high", gjson.GetBytes(body, "reasoning.effort").String())
-		if i == 2 {
-			require.Equal(t, "OK", gjson.GetBytes(body, "input.1.content").String())
-		}
-		if i == 4 {
-			require.Equal(t, "鹈鹕骑自行车", gjson.GetBytes(body, "input.0.content.0.text").String())
-		}
-	}
-	serialized, err := json.Marshal(results.previous)
-	require.NoError(t, err)
-	require.NotContains(t, string(serialized), marker)
 }
 
 type intelligenceStreakRepo struct {
@@ -97,49 +77,55 @@ func (r intelligenceStreakRepo) PreviousIntelligence429(context.Context, *Schedu
 	return r.prior, nil
 }
 
-func TestIntelligenceDistinctFailuresAnd429Rounds(t *testing.T) {
+func TestIntelligenceCandyVerdictAnd429Rounds(t *testing.T) {
 	for _, tc := range []struct {
-		prior      int
-		marker     string
-		http       int
-		candy      float64
-		want, rate string
+		name                             string
+		prior, http                      int
+		candy                            string
+		wantVerdict, wantCandy, wantRate string
 	}{
-		{0, "", 429, 0, "unknown", "unknown"}, {1, "", 429, 0, "unknown", "unknown"}, {2, "", 429, 0, "suspect", "fail"},
-		{2, "changed", 429, 0, "confirmed", "fail"}, {2, "changed", 200, 19, "confirmed", "pass"},
-		{2, "", 200, 19, "suspect", "pass"}, {2, "", 503, 0, "unknown", "unknown"},
+		{"first limited round", 0, 429, "", "suspect", "unknown", "unknown"},
+		{"second limited round", 1, 429, "", "suspect", "unknown", "unknown"},
+		{"third limited round", 2, 429, "", "confirmed", "unknown", "fail"},
+		{"one wrong answer", 2, 200, "29", "confirmed", "fail", "pass"},
+		{"malformed answer", 2, 200, "unparseable", "unknown", "unknown", "pass"},
+		{"upstream error", 2, 503, "", "unknown", "unknown", "unknown"},
+		{"missing HTTP evidence", 2, 0, "29", "unknown", "unknown", "unknown"},
 	} {
-		runner := &ScheduledTestRunnerService{scheduledSvc: &ScheduledTestService{resultRepo: intelligenceStreakRepo{prior: tc.prior}}}
-		plan := &ScheduledTestPlan{ModelID: "unsupported", Protection: ScheduledTestProtectionConfig{Intelligence: &IntelligencePolicy{Version: "v", CandyPrompt: "Q"}}}
-		res := runner.runIntelligence(context.Background(), plan, &ScheduledTestResult{ID: 11}, "art", func(ctx context.Context, prompt, kind string, _ int) *ScheduledTestResult {
-			if turn, _ := ctx.Value(intelligenceTurnKey{}).(*intelligenceTurn); turn != nil {
-				turn.observed = true
-				turn.received = "start"
-				if turn.sent != "" {
-					turn.received = tc.marker
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &ScheduledTestRunnerService{scheduledSvc: &ScheduledTestService{resultRepo: intelligenceStreakRepo{prior: tc.prior}}}
+			plan := &ScheduledTestPlan{ModelID: "model", Protection: ScheduledTestProtectionConfig{Intelligence: &IntelligencePolicy{Version: "v", CandyPrompt: "Q"}}}
+			res := runner.runIntelligence(context.Background(), plan, &ScheduledTestResult{ID: 11}, "art", func(_ context.Context, prompt, kind string, _ int) *ScheduledTestResult {
+				require.Equal(t, "Q", prompt)
+				require.Equal(t, "number", kind, "no artwork is due")
+				status := "failed"
+				if tc.http == 200 || tc.http == 0 {
+					status = "success"
 				}
-				return &ScheduledTestResult{Status: "success", ResponseText: "OK"}
+				result := &ScheduledTestResult{Status: status, ResponseText: tc.candy, ExecutionInfo: &ScheduledTestExecutionInfo{Attempts: []ScheduledTestRequestAttempt{{HTTPStatus: 429}, {HTTPStatus: 429}, {HTTPStatus: tc.http}}}}
+				runner.applyOutputContract(result, kind)
+				return result
+			})
+			ev := res.ExecutionInfo.Intelligence
+			require.Equal(t, tc.wantVerdict, ev.AutoVerdict)
+			require.Equal(t, tc.wantCandy, ev.Checks[0].Status)
+			require.Equal(t, tc.wantRate, ev.Checks[1].Status)
+			if tc.http == 429 {
+				require.Equal(t, tc.prior+1, ev.Consecutive429)
+				require.Contains(t, ev.Checks[1].Detail, fmt.Sprintf("%d/3", ev.Consecutive429))
+			} else {
+				require.Zero(t, ev.Consecutive429)
 			}
-			require.Equal(t, "number", kind, "no artwork is due")
-			status := "failed"
-			if tc.http == 200 {
-				status = "success"
-			}
-			return &ScheduledTestResult{Status: status, OutputNumeric: &tc.candy, ExecutionInfo: &ScheduledTestExecutionInfo{Attempts: []ScheduledTestRequestAttempt{{HTTPStatus: 429}, {HTTPStatus: 429}, {HTTPStatus: tc.http}}}}
+			require.Equal(t, "skipped", ev.Artwork)
 		})
-		ev := res.ExecutionInfo.Intelligence
-		require.Equal(t, tc.want, ev.AutoVerdict)
-		require.Equal(t, tc.rate, ev.Checks[3].Status)
-		if tc.marker == "" {
-			require.Equal(t, "pass", ev.Checks[1].Status, "successful continuation may omit a new marker")
-		}
-		require.Equal(t, "skipped", ev.Artwork)
 	}
 }
 
 func TestIntelligenceMissingArtworkRetriesOnlyOriginalWork(t *testing.T) {
 	p := &ScheduledTestPlan{Protection: ScheduledTestProtectionConfig{Intelligence: &IntelligencePolicy{Version: "v", ArtworkPrompt: "frozen art"}}}
-	ev := emptyIntelligenceEvidence("v")
+	ev := &IntelligenceEvidence{PolicyVersion: "v", Checks: []IntelligenceCheck{
+		{Key: "fingerprint"}, {Key: "codex_state"}, {Key: "candy"}, {Key: "http_429"},
+	}}
 	for i := range ev.Checks {
 		ev.Checks[i].Status = "pass"
 	}
@@ -177,18 +163,24 @@ func TestIntelligenceMissingArtworkRetriesOnlyOriginalWork(t *testing.T) {
 
 type intelligenceRetryQueueStub struct {
 	*retryResultRepoStub
+	deferred map[int64]time.Time
 }
 
 func (q intelligenceRetryQueueStub) DueIntelligenceArtwork(context.Context, time.Time) ([]int64, error) {
 	return []int64{q.previous.ID}, nil
 }
 
+func (q intelligenceRetryQueueStub) DeferIntelligenceArtwork(_ context.Context, id int64, _ time.Time, next time.Time) error {
+	q.deferred[id] = next
+	return nil
+}
+
 func TestIntelligenceDueArtworkRunsInOriginalRow(t *testing.T) {
 	id := int64(12)
-	account := &Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Concurrency: 1, Credentials: map[string]any{"access_token": "example"}}
+	account := &Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"access_token": "example"}}
 	start := time.Now().Add(-time.Hour)
 	old := &ScheduledTestResult{ID: 42, PlanID: 4, RunID: "original", ModelID: "gpt-6.2-astra", ReasoningEffort: "high", AccountID: &id, Status: "failed", TargetMode: "all_accounts", StartedAt: start, FinishedAt: start.Add(time.Minute), ExecutionInfo: &ScheduledTestExecutionInfo{Intelligence: &IntelligenceEvidence{PolicyVersion: "v", AutoVerdict: "pass", Artwork: "missing", ArtworkAttempts: 1}, Attempts: []ScheduledTestRequestAttempt{{HTTPStatus: 503}}}}
-	q := intelligenceRetryQueueStub{&retryResultRepoStub{previous: old, updated: make(chan *ScheduledTestResult, 1)}}
+	q := intelligenceRetryQueueStub{retryResultRepoStub: &retryResultRepoStub{previous: old, updated: make(chan *ScheduledTestResult, 1)}, deferred: map[int64]time.Time{}}
 	plan := &ScheduledTestPlan{ID: 4, ModelID: old.ModelID, ModelIDs: []string{old.ModelID}, Protection: ScheduledTestProtectionConfig{Intelligence: &IntelligencePolicy{Version: "v", ArtworkPrompt: "生成自行车上的鹈鹕"}}}
 	svc := NewScheduledTestService(retryPlanRepoStub{plan: plan}, q)
 	accounts := &modelIdentityAccountRepo{account: account}
@@ -201,6 +193,15 @@ func TestIntelligenceDueArtworkRunsInOriginalRow(t *testing.T) {
 	}}
 	runner := NewScheduledTestRunnerService(nil, svc, &AccountTestService{accountRepo: accounts, httpUpstream: up, qualityOperations: ops, cfg: &config.Config{}}, accounts, nil, nil)
 	svc.SetRetryFunc(runner.RetryAccount)
+	now := time.Now()
+	account.Credentials["model_mapping"] = map[string]any{"gpt-image-2": "gpt-image-2"}
+	_, err := svc.RetryResult(context.Background(), old.ID)
+	require.ErrorIs(t, err, errIntelligenceTargetUnavailable)
+	require.Empty(t, q.deferred, "manual validation leaves the queue untouched")
+	runner.retryDueIntelligenceArt(context.Background(), now)
+	require.True(t, q.deferred[old.ID].After(now))
+	require.Empty(t, up.requests)
+	delete(account.Credentials, "model_mapping")
 	runner.retryDueIntelligenceArt(context.Background(), time.Now())
 	select {
 	case completed := <-q.updated:
@@ -217,16 +218,11 @@ func TestIntelligenceDueArtworkRunsInOriginalRow(t *testing.T) {
 	}
 }
 
-func TestIntelligenceCancellationAndMissingContinuation(t *testing.T) {
+func TestIntelligenceCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	plan := &ScheduledTestPlan{Protection: ScheduledTestProtectionConfig{Intelligence: &IntelligencePolicy{Version: "v", CandyPrompt: "candy"}}, ModelID: "unregistered"}
 	runner := &ScheduledTestRunnerService{}
 	r := runner.runIntelligence(ctx, plan, nil, "art", func(c context.Context, _, kind string, _ int) *ScheduledTestResult {
-		if t, _ := c.Value(intelligenceTurnKey{}).(*intelligenceTurn); t != nil {
-			t.observed = true
-			t.received = ""
-			return &ScheduledTestResult{Status: "success"}
-		}
 		cancel()
 		wrong := 19.0
 		return &ScheduledTestResult{Status: "success", OutputNumeric: &wrong, ExecutionInfo: &ScheduledTestExecutionInfo{Attempts: []ScheduledTestRequestAttempt{{HTTPStatus: 200}}}}

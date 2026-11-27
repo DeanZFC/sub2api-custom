@@ -44,9 +44,6 @@ export async function reviewPolicyArtwork(id: number, verdict: 'pass' | 'fail', 
   await apiClient.post(`/admin/test-results/${id}/intelligence-review`, { verdict, reason })
 }
 
-export async function fingerprintModels(effort: string, signal?: AbortSignal) {
-  return (await apiClient.get<{ models: string[] }>('/admin/intelligence/models', { params: { effort }, signal })).data.models
-}
 export interface IntelligenceScope {
   targets: number
   account_ids: number[]

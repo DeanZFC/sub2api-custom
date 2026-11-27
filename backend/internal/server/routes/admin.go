@@ -855,7 +855,6 @@ func registerScheduledTestRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	admin.POST("/test-plans/:id/run", h.Admin.ScheduledTest.RunNow)
 	admin.DELETE("/test-results/:id", h.Admin.ScheduledTest.DeleteResult)
 	admin.POST("/test-results/:id/retry", h.Admin.ScheduledTest.RetryResult)
-	admin.GET("/intelligence/models", h.Admin.ScheduledTest.IntelligenceModels)
 	admin.POST("/intelligence/scope", h.Admin.Group.IntelligenceScope)
 	admin.POST("/test-plans/:id/intelligence-release", h.Admin.ScheduledTest.ReleaseIntelligenceHold)
 	admin.GET("/test-plans/:id/intelligence", h.Admin.ScheduledTest.IntelligenceOverview)

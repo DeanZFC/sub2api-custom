@@ -466,6 +466,9 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Account not found")
 	}
+	if isIntelligenceAccountTest(ctx) && (!account.IntelligenceMonitoringEligible(time.Now()) || !account.SupportsIntelligenceModel(modelID)) {
+		return s.sendErrorAndEnd(c, "Account is unavailable for intelligence monitoring on this text model")
+	}
 	bindAccountTestPlatform(c, account)
 	if usage, ok := ctx.Value(accountTestUsageKey{}).(*accountTestUsageCollector); ok {
 		usage.account = account
@@ -937,12 +940,8 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		}
 		return s.testExcelBPSToolRoundtrip(c, account, testModelID)
 	}
-	turn, _ := ctx.Value(intelligenceTurnKey{}).(*intelligenceTurn)
 	bpsEnabled := s.openaiGatewayService == nil || s.openaiGatewayService.excelBPSGloballyEnabled(ctx)
 	if bpsEnabled && account.IsExcelBPSEnabledForModel(testModelID) {
-		if turn != nil {
-			return s.sendErrorAndEnd(c, "Codex state unavailable on the selected transport")
-		}
 		return s.testExcelBPSAccountConnection(c, account, testModelID, prompt)
 	}
 
@@ -954,7 +953,12 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	// account model mapping. Native remote compaction v2 rides the ordinary
 	// /responses wire and does NOT apply the legacy compact-only mapping
 	// (post-#5641 semantics: compact_model_mapping is /responses/compact-only).
-	testModelID = account.GetMappedModel(testModelID)
+	intelligence := isIntelligenceAccountTest(ctx)
+	if intelligence {
+		testModelID = resolveOpenAIAccountUpstreamModelForRequest(account, testModelID, false)
+	} else {
+		testModelID = account.GetMappedModel(testModelID)
+	}
 	if mode == AccountTestModeCompact {
 		return s.testOpenAICompactConnection(c, account, testModelID)
 	}
@@ -998,9 +1002,6 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		// OAuth uses ChatGPT internal API
 		apiURL = chatgptCodexAPIURL
 	} else if credentialAccount.Type == "apikey" {
-		if turn != nil {
-			return s.sendErrorAndEnd(c, "Codex state unavailable on the selected transport")
-		}
 		// API Key - use Platform API
 		authToken = credentialAccount.GetOpenAIProtocolAPIKey()
 		if authToken == "" {
@@ -1033,13 +1034,10 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	// Create OpenAI Responses API payload. OAuth accounts use ChatGPT Codex
 	// upstream and must apply the same model normalization as real forwarding.
 	upstreamTestModelID := testModelID
-	if isOAuth {
+	if isOAuth && !intelligence {
 		upstreamTestModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
 	}
 	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth, prompt)
-	if turn != nil && isOAuth {
-		turn.continueInput(payload)
-	}
 	applyAccountTestOutputTokenLimit(ctx, payload, "max_output_tokens")
 	applyAccountTestReasoningEffort(payload, accountTestReasoningEffort(ctx))
 	applyScheduledTestContentInstructions(ctx, payload, APIProtocolResponses)
@@ -1096,9 +1094,6 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		enforceCodexIdentityHeadersWithUA(req.Header, credentialAccount.GetOpenAIUserAgent())
 	}
 
-	if turn != nil && isOAuth {
-		turn.prepare(req)
-	}
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	credentialAccount.ApplyHeaderOverrides(req.Context(), req.Header)
 
@@ -1155,9 +1150,6 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		}
 	}
 
-	if turn != nil && isOAuth {
-		turn.observe(req, resp)
-	}
 	if isOAuth && s.accountRepo != nil {
 		if updates, err := extractOpenAICodexProbeUpdates(resp); err == nil && len(updates) > 0 {
 			_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
@@ -3764,11 +3756,6 @@ func (s *AccountTestService) sendEvent(c *gin.Context, event TestEvent) {
 
 // sendErrorAndEnd sends an error event and ends the stream
 func (s *AccountTestService) sendErrorAndEnd(c *gin.Context, errorMsg string) error {
-	// Some upstream error bodies echo request headers. The state probe only
-	// needs completion and HTTP telemetry, never the echoed opaque value.
-	if turn, _ := c.Request.Context().Value(intelligenceTurnKey{}).(*intelligenceTurn); turn != nil {
-		errorMsg = "Codex state probe did not complete"
-	}
 	logAccountTestError(c, errorMsg)
 	s.sendEvent(c, TestEvent{Type: "error", Error: errorMsg})
 	return fmt.Errorf("%s", errorMsg)

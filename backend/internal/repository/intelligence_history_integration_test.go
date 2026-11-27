@@ -35,14 +35,18 @@ func TestIntelligenceIndependent429AndArtworkQueue(t *testing.T) {
 		exec(`DELETE FROM groups WHERE id=$1`, g)
 	})
 	exec(`INSERT INTO account_groups(account_id,group_id) VALUES($1,$2)`, a, g)
-	row := func(model, run, version string, status int) int64 {
-		ev, _ := json.Marshal(service.ScheduledTestExecutionInfo{Intelligence: &service.IntelligenceEvidence{PolicyVersion: version, CandyHTTPStatus: status}})
+	row := func(model, run, version string, status int, checks ...service.IntelligenceCheck) int64 {
+		ev, _ := json.Marshal(service.ScheduledTestExecutionInfo{Intelligence: &service.IntelligenceEvidence{PolicyVersion: version, CandyHTTPStatus: status, Checks: checks}})
 		return id(`INSERT INTO scheduled_test_results(plan_id,account_id,model_id,reasoning_effort,run_id,execution_info,status) VALUES($1,$2,$3,'high',$4,$5,'failed') RETURNING id`, p, a, model, run, ev)
 	}
-	row("m", "first", "v", 429)
+	// The same candy transport evidence across the four-check and two-check
+	// protocols still represents independently rate-limited rounds.
+	currentChecks := []service.IntelligenceCheck{{Key: "candy", Status: "unknown"}, {Key: "http_429", Status: "unknown"}}
+	legacyChecks := []service.IntelligenceCheck{{Key: "fingerprint", Status: "pass"}, {Key: "codex_state", Status: "unknown"}, currentChecks[0], currentChecks[1]}
+	row("m", "first", "v", 429, legacyChecks...)
 	row("n", "other", "v", 200)
-	row("m", "second", "v", 429)
-	third := row("m", "third", "v", 429)
+	row("m", "second", "v", 429, currentChecks...)
+	third := row("m", "third", "v", 429, currentChecks...)
 	prev := func(target int64, want int) {
 		n, err := r.PreviousIntelligence429(ctx, &service.ScheduledTestResult{ID: target, PlanID: p, AccountID: &a, ModelID: "m", ReasoningEffort: "high", RunID: "current"}, "v")
 		require.NoError(t, err)
@@ -60,6 +64,36 @@ func TestIntelligenceIndependent429AndArtworkQueue(t *testing.T) {
 	ev, _ := json.Marshal(service.ScheduledTestExecutionInfo{Intelligence: &service.IntelligenceEvidence{PolicyVersion: "v", AutoVerdict: "pass", Artwork: "missing", ArtworkRetryAt: &past}})
 	exec(`UPDATE scheduled_test_results SET execution_info=$2 WHERE id=$1`, last, ev)
 	due, err := r.DueIntelligenceArtwork(ctx, now)
+	require.NoError(t, err)
+	require.Contains(t, due, last)
+	// A page of older retries whose account lost text capability must leave
+	// room for the next eligible result without changing its original evidence.
+	older := past.Add(-time.Hour)
+	olderEvidence, err := json.Marshal(service.ScheduledTestExecutionInfo{Intelligence: &service.IntelligenceEvidence{
+		PolicyVersion: "v", AutoVerdict: "pass", Artwork: "missing", ArtworkRetryAt: &older, ArtworkAttempts: 1,
+		Checks: []service.IntelligenceCheck{{Key: "candy", Status: "pass", Detail: "21"}},
+	}})
+	require.NoError(t, err)
+	var parked []int64
+	for i := 0; i < 20; i++ {
+		rid := row("n", uuid.NewString(), "v", 200)
+		exec(`UPDATE scheduled_test_results SET execution_info=$2 WHERE id=$1`, rid, olderEvidence)
+		parked = append(parked, rid)
+	}
+	due, err = r.DueIntelligenceArtwork(ctx, now)
+	require.NoError(t, err)
+	require.ElementsMatch(t, parked, due)
+	nextTry := now.Add(15 * time.Minute)
+	for _, rid := range parked {
+		require.NoError(t, r.DeferIntelligenceArtwork(ctx, rid, now, nextTry))
+	}
+	require.NoError(t, r.DeferIntelligenceArtwork(ctx, parked[0], now, now.Add(time.Hour)))
+	var sameEvidence bool
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT (execution_info #- '{intelligence,artwork_retry_at}') = ($2::jsonb #- '{intelligence,artwork_retry_at}')
+ AND (execution_info->'intelligence'->>'artwork_retry_at')::timestamptz = $3
+ FROM scheduled_test_results WHERE id=$1`, parked[0], olderEvidence, nextTry).Scan(&sameEvidence))
+	require.True(t, sameEvidence)
+	due, err = r.DueIntelligenceArtwork(ctx, now)
 	require.NoError(t, err)
 	require.Contains(t, due, last)
 	eligible := func(version string, want bool) {

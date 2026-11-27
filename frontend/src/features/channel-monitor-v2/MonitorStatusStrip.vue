@@ -1,10 +1,10 @@
 <template>
-  <div class="monitor-status-strip flex min-w-0 items-end gap-1" :class="compact ? 'h-6' : 'h-9'" :aria-label="label">
+  <div class="monitor-status-strip" :class="compact ? 'monitor-status-strip-compact' : 'h-9'" :aria-label="label">
     <button
       v-for="(slot, index) in slots"
       :key="index"
       type="button"
-      class="flex h-full min-w-0 flex-1 cursor-pointer items-end rounded-[3px] border-0 bg-transparent p-0 outline-offset-2 transition-opacity hover:opacity-75 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500"
+      class="monitor-status-slot"
       :aria-label="slot.label"
       :aria-describedby="activeIndex === index ? tooltipId : undefined"
       :aria-pressed="activeIndex === index && pinned"
@@ -17,8 +17,8 @@
     >
       <span
         aria-hidden="true"
-        class="pointer-events-none block w-full rounded-[3px]"
-        :class="[slot.colorClass || colors[slot.state], slot.state === 'unknown' ? 'h-1.5' : 'h-full']"
+        class="monitor-status-mark"
+        :class="slot.colorClass || colors[slot.state]"
       />
     </button>
   </div>
@@ -49,6 +49,7 @@
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import type { HealthState } from '@/api/channelMonitorV2'
 import './monitorHealthColors.css'
+import './monitorStatusStrip.css'
 
 const props = defineProps<{ slots: Array<{ state: HealthState; label: string; colorClass?: string; actionLabel?: string }>; label: string; compact?: boolean }>()
 const emit = defineEmits<{ select: [index: number] }>()

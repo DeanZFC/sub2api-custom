@@ -1064,7 +1064,7 @@ func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *Sch
 		return nil, ErrScheduledTestResultNotFailed
 	}
 	if policy := plan.Protection.Intelligence; policy != nil && !retryableIntelligenceArtwork(previous, policy.Version) {
-		return nil, fmt.Errorf("仅可补测本策略版本缺失的鹈鹕作品；重新验证四项信号请发起新一轮检测")
+		return nil, fmt.Errorf("仅可补测本策略版本缺失的鹈鹕作品；重新验证监测结果请发起新一轮检测")
 	}
 	copyPlan := *plan
 	plan = &copyPlan
@@ -1137,6 +1137,9 @@ func (s *ScheduledTestRunnerService) RetryAccount(ctx context.Context, plan *Sch
 	}
 	if account == nil {
 		return nil, fmt.Errorf("test account unavailable")
+	}
+	if plan.Protection.Intelligence != nil && (!account.IntelligenceMonitoringEligible(time.Now()) || !account.SupportsIntelligenceModel(plan.ModelID)) {
+		return nil, errIntelligenceTargetUnavailable
 	}
 	if eligible, err := s.runAccountEligible(ctx, plan, previous, accountID); err != nil || !eligible {
 		return nil, fmt.Errorf("account is not enabled for detection")

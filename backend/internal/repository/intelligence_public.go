@@ -115,15 +115,19 @@ func publicChecks(raw []byte) ([]service.PublicIntelligenceCheck, error) {
 			return nil, err
 		}
 	}
-	keys := []string{"fingerprint", "codex_state", "candy", "http_429"}
-	out := make([]service.PublicIntelligenceCheck, 0, len(keys))
-	for _, k := range keys {
-		c := service.PublicIntelligenceCheck{Key: k, Status: "unknown"}
-		for _, found := range data.Checks {
-			if found.Key == k && (found.Status == "pass" || found.Status == "fail" || found.Status == "unknown") {
-				c = found
-				break
-			}
+	recorded := make(map[string]service.PublicIntelligenceCheck, len(data.Checks))
+	for _, check := range data.Checks {
+		recorded[check.Key] = check
+	}
+	out := make([]service.PublicIntelligenceCheck, 0, 4)
+	for _, k := range []string{"fingerprint", "codex_state", "candy", "http_429"} {
+		c, ok := recorded[k]
+		// Only historical rounds can have the two retired checks.
+		if !ok && (k == "fingerprint" || k == "codex_state") {
+			continue
+		}
+		if !ok || (c.Status != "pass" && c.Status != "fail" && c.Status != "unknown") {
+			c = service.PublicIntelligenceCheck{Key: k, Status: "unknown"}
 		}
 		if k == "http_429" {
 			c.Key = "rate_limit"

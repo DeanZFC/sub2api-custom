@@ -21,7 +21,7 @@ func testIntelligenceRouting(t *testing.T, ctx context.Context, db *sql.DB, plan
 	plan, err := plans.Create(ctx, p)
 	require.NoError(t, err)
 	start := time.Now().UTC().Add(-4 * time.Hour).Truncate(time.Microsecond)
-	finish := func(minutes int, model, verdict, art string) *service.ScheduledTestResult {
+	finish := func(minutes int, model, verdict, art string, checks ...service.IntelligenceCheck) *service.ScheduledTestResult {
 		t.Helper()
 		inputs := genericRoundInputs(plan, []int64{62}, start.Add(time.Duration(minutes)*time.Minute))
 		inputs[0].ModelID = model
@@ -36,7 +36,7 @@ func testIntelligenceRouting(t *testing.T, ctx context.Context, db *sql.DB, plan
 		if art == "missing" {
 			r.Status = "failed"
 		}
-		r.ExecutionInfo = &service.ScheduledTestExecutionInfo{Intelligence: &service.IntelligenceEvidence{PolicyVersion: plan.Protection.Intelligence.Version, AutoVerdict: verdict, Artwork: art}}
+		r.ExecutionInfo = &service.ScheduledTestExecutionInfo{Intelligence: &service.IntelligenceEvidence{PolicyVersion: plan.Protection.Intelligence.Version, AutoVerdict: verdict, Artwork: art, Checks: checks}}
 		require.NoError(t, results.Update(ctx, r))
 		return r
 	}
@@ -60,7 +60,13 @@ func testIntelligenceRouting(t *testing.T, ctx context.Context, db *sql.DB, plan
 		}
 		require.ElementsMatch(t, models, got)
 	}
-	finish(0, "model-a", "suspect", "skipped")
+	// Under the previous rule a wrong answer with all other checks passing was
+	// suspect. New rounds must not reinterpret this stored observation.
+	legacyWrong := finish(0, "model-a", "suspect", "skipped",
+		service.IntelligenceCheck{Key: "fingerprint", Status: "pass"},
+		service.IntelligenceCheck{Key: "codex_state", Status: "pass"},
+		service.IntelligenceCheck{Key: "candy", Status: "fail"},
+		service.IntelligenceCheck{Key: "http_429", Status: "pass"})
 	check("active", false, false)
 	due(4)
 	due(5, "model-a")
@@ -78,16 +84,25 @@ func testIntelligenceRouting(t *testing.T, ctx context.Context, db *sql.DB, plan
 	check("active", true, false)
 	finish(34, "model-a", "pass", "default")
 	due(35, "model-a")
-	first := finish(35, "model-a", "pass", "default")
+	// A completed four-check pass already satisfies the two-check rule.
+	// Confirm at the normal interval and keep both original check lists.
+	twoPass := []service.IntelligenceCheck{{Key: "candy", Status: "pass"}, {Key: "http_429", Status: "pass"}}
+	fourPass := []service.IntelligenceCheck{{Key: "fingerprint", Status: "pass"}, {Key: "codex_state", Status: "pass"}, twoPass[0], twoPass[1]}
+	first := finish(35, "model-a", "pass", "default", fourPass...)
 	require.NoError(t, results.Update(ctx, first))
 	check("active", true, false)
 	due(39)
 	due(40, "model-a")
-	missing := finish(40, "model-a", "pass", "missing")
+	missing := finish(40, "model-a", "pass", "missing", twoPass...)
 	check("active", true, false)
 	overview, e := results.IntelligenceOverview(ctx, plan.ID)
 	require.NoError(t, e)
 	require.True(t, overview.Results[0].RetryableArtwork)
+	require.Equal(t, twoPass, overview.Results[0].Evidence.Checks)
+	require.Equal(t, fourPass, overview.Results[1].Evidence.Checks)
+	stored, err := results.GetByID(ctx, legacyWrong.ID)
+	require.NoError(t, err)
+	require.Equal(t, "suspect", stored.ExecutionInfo.Intelligence.AutoVerdict)
 	missing.Status = "success"
 	missing.OutputHTML = "<svg/>"
 	missing.ExecutionInfo.Intelligence.Artwork = "default"
@@ -100,6 +115,9 @@ func testIntelligenceRouting(t *testing.T, ctx context.Context, db *sql.DB, plan
 	require.NoError(t, err)
 	require.NotEqual(t, old, plan.Protection.Intelligence.Version)
 	require.NoError(t, results.ReviewIntelligenceArt(ctx, good.ID, 1, "fail", "历史结论"))
+	finish(45, "model-b", "suspect", "skipped")
+	check("active", true, false)
+	due(50, "model-b")
 	finish(46, "model-b", "confirmed", "skipped")
 	check("active", true, false)
 	finish(75, "model-a", "pass", "default")
@@ -109,10 +127,12 @@ func testIntelligenceRouting(t *testing.T, ctx context.Context, db *sql.DB, plan
 	plan, err = plans.Update(ctx, plan)
 	require.NoError(t, err)
 	finish(85, "model-a", "confirmed", "skipped")
+	due(115, "model-a")
 	plan.ExcludedAccountIDs = []int64{62}
 	plan, err = plans.Update(ctx, plan)
 	require.NoError(t, err)
 	check("active", false, false)
+	due(115)
 	plan.ExcludedAccountIDs = nil
 	plan, err = plans.Update(ctx, plan)
 	require.NoError(t, err)

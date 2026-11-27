@@ -80,6 +80,48 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 describe('intelligence history', () => {
+  it.each([false, true])('shows the recorded check set for the selected round (historical: %s)', async historical => {
+    const checks: api.IntelligenceModel['checks'] = [
+      { key: 'candy', status: 'pass', detail: '21' },
+      { key: 'rate_limit', status: 'pass', detail: '0/3' },
+    ]
+    if (historical) checks.unshift(
+      { key: 'fingerprint', status: 'unknown', detail: '' },
+      { key: 'codex_state', status: 'unknown', detail: '' },
+    )
+    vi.mocked(api.intelligenceRound).mockResolvedValue({
+      ...detail, accounts: [{ ...account, models: [{ ...result, checks }] }],
+    })
+    const w = render()
+    await flushPromises()
+    await w.get('.round-cell').trigger('click')
+    await flushPromises()
+    const labels = w.get('[role="dialog"]').findAll('dt').map(item => item.text())
+    expect(labels).toEqual(historical
+      ? ['行为指纹', 'Codex 状态探针', '糖果题', '连续三轮 HTTP 429']
+      : ['糖果题', '连续三轮 HTTP 429'])
+    w.unmount()
+  })
+
+  it.each([0, 1, 20, 24])('renders twenty slots with the latest real rounds on the right (%i received)', async (count) => {
+    const rows = Array.from({ length: count }, (_, i) => ({ ...round, id: String(i + 1), verdict: 'unknown' as const }))
+    vi.mocked(api.intelligenceRounds).mockResolvedValue(rows)
+    const w = render()
+    await flushPromises()
+    const strip = w.get('.monitor-status-strip')
+    expect(strip.element.children).toHaveLength(20)
+    expect(strip.findAll(':scope > span[aria-hidden="true"]')).toHaveLength(Math.max(20 - count, 0))
+    const buttons = strip.findAll('button')
+    expect(buttons).toHaveLength(Math.min(count, 20))
+    if (buttons.length) {
+      expect(strip.element.lastElementChild).toBe(buttons[buttons.length - 1].element)
+      await buttons[0].trigger('click')
+      await flushPromises()
+      expect(api.intelligenceRound).toHaveBeenCalledWith(7, rows.slice(-20)[0].id, undefined, 1, expect.any(AbortSignal))
+    }
+    w.unmount()
+  })
+
   it('loads the selected artwork on demand and restores the same expanded detail and focus', async () => {
     const w = render()
     await flushPromises()

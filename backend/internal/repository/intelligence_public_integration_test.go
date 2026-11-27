@@ -65,7 +65,7 @@ func TestPublicIntelligenceFrozenRounds(t *testing.T) {
 	}
 	finish := func(row *service.ScheduledTestResult) {
 		t.Helper()
-		exec(`UPDATE scheduled_test_results SET status='success',finished_at=now(),output_html='<svg/>',execution_info='{"intelligence":{"auto_verdict":"pass","artwork":"default","checks":[{"key":"fingerprint","status":"pass","detail":"match"}]}}' WHERE id=$1`, row.ID)
+		exec(`UPDATE scheduled_test_results SET status='success',finished_at=now(),output_html='<svg/>',execution_info='{"intelligence":{"auto_verdict":"pass","artwork":"default","checks":[{"key":"candy","status":"pass","detail":"21"},{"key":"http_429","status":"pass"}]}}' WHERE id=$1`, row.ID)
 	}
 	recent := func(g int64) []service.PublicIntelligenceRound {
 		t.Helper()
@@ -92,7 +92,23 @@ func TestPublicIntelligenceFrozenRounds(t *testing.T) {
 	d, err := r.PublicIntelligenceRoundDetails(ctx, u, g1, "", run1, 1)
 	require.NoError(t, err)
 	require.Len(t, d.Accounts, 2)
-	require.Len(t, d.Accounts[0].Models[0].Checks, 4)
+	require.Equal(t, []service.PublicIntelligenceCheck{{Key: "candy", Status: "pass", Detail: "21"}, {Key: "rate_limit", Status: "pass"}}, d.Accounts[0].Models[0].Checks)
+	// Earlier rounds keep their recorded fingerprint and Codex checks.
+	exec(`UPDATE scheduled_test_results SET execution_info=jsonb_set(execution_info,'{intelligence,checks}',
+	 '[{"key":"fingerprint","status":"unknown","detail":"insufficient"},{"key":"codex_state","status":"pass"}]'::jsonb
+	 || (execution_info->'intelligence'->'checks')) WHERE id=$1`, rows[0].ID)
+	historical, err := r.PublicIntelligenceRoundDetails(ctx, u, g1, "", run1, 1)
+	require.NoError(t, err)
+	var checkCounts []int
+	for _, account := range historical.Accounts {
+		checks := account.Models[0].Checks
+		checkCounts = append(checkCounts, len(checks))
+		if len(checks) == 4 {
+			require.Equal(t, service.PublicIntelligenceCheck{Key: "fingerprint", Status: "unknown", Detail: "insufficient"}, checks[0])
+			require.Equal(t, service.PublicIntelligenceCheck{Key: "codex_state", Status: "pass"}, checks[1])
+		}
+	}
+	require.ElementsMatch(t, []int{4, 2}, checkCounts)
 	summary, err := r.PublicIntelligenceSummary(ctx, u, g1, "", 1)
 	require.NoError(t, err)
 	require.Equal(t, 2, summary.Participations)

@@ -146,6 +146,21 @@ func (s *ScheduledTestService) ReleaseIntelligenceHold(ctx context.Context, plan
 // expired accounts should never acquire an upstream monitoring request.
 func (a *Account) IntelligenceMonitoringEligible(now time.Time) bool {
 	return a != nil && a.Platform == PlatformOpenAI && a.Schedulable &&
+		a.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityChatCompletions) &&
 		(a.Status == StatusActive || a.Status == StatusQualityPaused) &&
 		(!a.AutoPauseOnExpired || a.ExpiresAt == nil || now.Before(*a.ExpiresAt))
+}
+
+// SupportsIntelligenceModel checks the upstream target that would receive the
+// text probe, including account aliases and native passthrough behavior.
+func (a *Account) SupportsIntelligenceModel(model string) bool {
+	if a == nil || !intelligenceTextModel(model) || !a.IsModelSupported(model) {
+		return false
+	}
+	return intelligenceTextModel(resolveOpenAIAccountUpstreamModelForRequest(a, model, false))
+}
+
+func intelligenceTextModel(model string) bool {
+	id := codexProviderQualifiedModelID(model)
+	return id != "" && !isCodexDedicatedMediaModel(model) && !isGeminiCompatibleImageModel(id)
 }

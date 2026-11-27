@@ -13,7 +13,10 @@ type intelligenceEligibleRepository interface {
 }
 type intelligenceArtworkQueue interface {
 	DueIntelligenceArtwork(context.Context, time.Time) ([]int64, error)
+	DeferIntelligenceArtwork(context.Context, int64, time.Time, time.Time) error
 }
+
+var errIntelligenceTargetUnavailable = errors.New("account no longer supports the selected text model")
 
 func (s *ScheduledTestRunnerService) retryDueIntelligenceArt(ctx context.Context, now time.Time) {
 	if s.scheduledSvc == nil {
@@ -35,7 +38,13 @@ func (s *ScheduledTestRunnerService) retryDueIntelligenceArt(ctx context.Context
 		if ctx.Err() != nil {
 			return
 		}
-		if _, err = s.scheduledSvc.RetryResult(ctx, id); err != nil && !errors.Is(err, ErrScheduledTestAccountRunning) && !errors.Is(err, ErrScheduledTestResultNotFailed) {
+		_, err = s.scheduledSvc.RetryResult(ctx, id)
+		if errors.Is(err, errIntelligenceTargetUnavailable) {
+			// Eligibility can change again. Keep the original evidence and let
+			// other due rows advance while this account has no matching text model.
+			err = repo.DeferIntelligenceArtwork(ctx, id, now, now.Add(15*time.Minute))
+		}
+		if err != nil && !errors.Is(err, ErrScheduledTestAccountRunning) && !errors.Is(err, ErrScheduledTestResultNotFailed) {
 			logger.LegacyPrintf("service.scheduled_test_runner", "retry intelligence artwork %d: %v", id, err)
 		}
 	}

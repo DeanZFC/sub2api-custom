@@ -23,35 +23,42 @@
         {{ tr('summary') }} ›
       </button>
     </div>
-    <p v-if="loadError" class="text-xs text-gray-500">
+    <div class="monitor-status-strip monitor-status-strip-compact" :aria-label="tr('title')">
+      <span
+        v-for="n in MONITOR_HISTORY_SLOTS - rounds.length"
+        :key="'blank' + n"
+        class="monitor-status-slot"
+        data-state="unknown"
+        aria-hidden="true"
+      >
+        <span class="monitor-status-mark bg-gray-300 dark:bg-dark-600" />
+      </span>
+      <button
+        v-for="r in rounds"
+        :key="r.id"
+        type="button"
+        class="monitor-status-slot round-cell"
+        :data-state="r.verdict"
+        :aria-label="time(r.finished_at) + ' · ' + tr('legend.' + r.verdict)"
+        :aria-expanded="active?.kind === 'round' && active.id === r.id"
+        aria-haspopup="dialog"
+        @focus="hover('round', r.id, $event)"
+        @pointerenter="hover('round', r.id, $event)"
+        @pointerleave="scheduleClose"
+        @click="pin('round', r.id, $event)"
+      >
+        <span class="monitor-status-mark" :class="colors[r.verdict]" aria-hidden="true" />
+      </button>
+    </div>
+    <p v-if="loadError" class="mt-1 text-xs text-gray-500">
       {{ tr('loadError') }} <button type="button" class="underline" @click="reload++">{{ t('common.retry') }}</button>
     </p>
-    <p v-else-if="!rounds.length" class="text-xs text-gray-400">{{ busy ? t('common.loading') : tr('noRounds') }}</p>
-    <template v-else>
-      <div class="round-strip" :aria-label="tr('title')">
-        <span v-for="n in Math.max(0, 20 - rounds.length)" :key="'blank' + n" class="round-filler" aria-hidden="true" />
-        <button
-          v-for="r in rounds"
-          :key="r.id"
-          type="button"
-          class="round-cell"
-          :aria-label="time(r.finished_at) + ' · ' + tr('legend.' + r.verdict)"
-          :aria-expanded="active?.kind === 'round' && active.id === r.id"
-          aria-haspopup="dialog"
-          @focus="hover('round', r.id, $event)"
-          @pointerenter="hover('round', r.id, $event)"
-          @pointerleave="scheduleClose"
-          @click="pin('round', r.id, $event)"
-        >
-          <i :class="colors[r.verdict]" aria-hidden="true" />
-        </button>
-      </div>
-      <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-500 dark:text-gray-400">
-        <span v-for="s in states" :key="s" class="inline-flex items-center gap-1"
-          ><i class="h-2 w-2 rounded-sm" :class="colors[s]" />{{ tr('legend.' + s) }}</span
-        >
-      </div>
-    </template>
+    <p v-else-if="!rounds.length" class="mt-1 text-xs text-gray-400">{{ busy ? t('common.loading') : tr('noRounds') }}</p>
+    <div v-else class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-500 dark:text-gray-400">
+      <span v-for="s in states" :key="s" class="inline-flex items-center gap-1">
+        <i class="h-2 w-2 rounded-sm" :class="colors[s]" />{{ tr('legend.' + s) }}
+      </span>
+    </div>
     <div
       v-if="active"
       role="dialog"
@@ -193,16 +200,19 @@ import {
   type RoundAccount,
 } from '@/api/intelligence'
 import IntelligenceArtworkDialog from './IntelligenceArtworkDialog.vue'
+import { MONITOR_HISTORY_SLOTS } from './monitorCards'
+import './monitorHealthColors.css'
+import './monitorStatusStrip.css'
 
 const props = defineProps<{ group: IntelligenceGroup; model?: string; refreshKey?: number }>()
 const { t, locale } = useI18n()
 const tr = (key: string, params: Record<string, unknown> = {}) => t('channelMonitorV2.intelligence.' + key, params)
 const states: IntelligenceVerdict[] = ['pass', 'suspect', 'degraded', 'unknown']
 const colors: Record<IntelligenceVerdict, string> = {
-  pass: 'bg-emerald-500',
-  suspect: 'bg-amber-400',
-  degraded: 'bg-red-500',
-  unknown: 'bg-gray-400',
+  pass: 'health-score10',
+  suspect: 'health-score5',
+  degraded: 'health-critical',
+  unknown: 'health-unknown',
 }
 const countLabel = (counts: IntelligenceCounts) => states.map((s) => tr('states.' + s) + ' ' + counts[s]).join(' · ')
 const time = (stamp: string | null) => (stamp ? new Date(stamp).toLocaleString(locale.value) : '—')
@@ -329,8 +339,8 @@ watch(
     try {
       const rows = await intelligenceRounds(id, model, request.signal)
       if (request.signal.aborted) return
-      rounds.value = rows
-      if (active.value?.kind === 'round' && !rows.some((r) => r.id === active.value?.id)) dismiss(false)
+      rounds.value = rows.slice(-MONITOR_HISTORY_SLOTS)
+      if (active.value?.kind === 'round' && !rounds.value.some((r) => r.id === active.value?.id)) dismiss(false)
       else if (active.value && !art.value) detailRetry.value++
     } catch {
       if (!request.signal.aborted) {
@@ -377,44 +387,11 @@ onBeforeUnmount(() => {
 })
 </script>
 <style scoped>
-.round-strip {
-  display: grid;
-  grid-template-columns: repeat(20, minmax(0, 1fr));
-  gap: 3px;
-}
-.round-cell,
-.round-filler {
-  min-width: 0;
-  display: grid;
-  align-items: center;
-  height: 24px;
-  border-radius: 3px;
-}
-.round-cell i,
-.round-filler::before {
-  content: '';
-  display: block;
-  height: 13px;
-  border-radius: 3px;
-}
-.round-filler::before {
-  background: rgb(148 163 184/0.14);
-}
-.round-cell[aria-expanded='true'] i,
-.round-cell:focus-visible i {
+.round-cell[aria-expanded='true'] .monitor-status-mark {
   outline: 2px solid currentColor;
   outline-offset: 1px;
 }
 .round-body {
   max-height: min(48vh, 23rem);
-}
-@media (pointer: coarse) {
-  .round-strip {
-    grid-template-columns: repeat(10, minmax(0, 1fr));
-  }
-  .round-cell,
-  .round-filler {
-    height: 32px;
-  }
 }
 </style>

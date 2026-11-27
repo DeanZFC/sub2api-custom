@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -27,47 +26,39 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type intelligenceTestReply struct {
+	status int
+	text   string
+}
+
 type intelligenceIntegrationUpstream struct {
-	mu              sync.Mutex
-	calls           map[int64]int
-	fingerprint     string
-	degradedAccount int64
+	mu      sync.Mutex
+	calls   map[int64]int
+	replies map[int64][]intelligenceTestReply
 }
 
 func (up *intelligenceIntegrationUpstream) Do(req *http.Request, _ string, account int64, _ int) (*http.Response, error) {
 	up.mu.Lock()
+	index := up.calls[account]
 	up.calls[account]++
-	stage := up.calls[account]
 	up.mu.Unlock()
+	if index >= len(up.replies[account]) {
+		return nil, fmt.Errorf("unexpected probe %d for account %d", index+1, account)
+	}
+	reply := up.replies[account][index]
 	header := make(http.Header)
-	header.Set("Content-Type", "text/event-stream")
-	var answer string
-	switch stage {
-	case 1:
-		answer = up.fingerprint
-	case 2, 3:
-		answer = "OK"
-		marker := "fixture-state"
-		if stage == 3 && account == up.degradedAccount {
-			marker = "changed-state"
+	body := reply.text
+	if reply.status == http.StatusOK {
+		header.Set("Content-Type", "text/event-stream")
+		data, err := json.Marshal(map[string]string{"type": "response.output_text.delta", "delta": reply.text})
+		if err != nil {
+			return nil, err
 		}
-		header.Set("X-Codex-Turn-State", marker)
-	case 4:
-		answer = "21"
-		if account == up.degradedAccount {
-			answer = "19"
-		}
-	case 5:
-		answer = "<html><body><svg><circle r=\"10\"/></svg></body></html>"
-	default:
-		return nil, fmt.Errorf("unexpected probe %d", stage)
+		body = fmt.Sprintf("data: %s\n\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":20,\"output_tokens\":10}}}\n\n", data)
+	} else {
+		header.Set("Content-Type", "application/json")
 	}
-	data, err := json.Marshal(map[string]string{"type": "response.output_text.delta", "delta": answer})
-	if err != nil {
-		return nil, err
-	}
-	events := fmt.Sprintf("data: %s\n\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":20,\"output_tokens\":10}}}\n\n", data)
-	return &http.Response{Request: req, StatusCode: 200, Header: header, Body: io.NopCloser(strings.NewReader(events))}, nil
+	return &http.Response{Request: req, StatusCode: reply.status, Header: header, Body: io.NopCloser(strings.NewReader(body))}, nil
 }
 func (up *intelligenceIntegrationUpstream) DoWithTLS(req *http.Request, proxy string, account int64, concurrent int, _ *tlsfingerprint.Profile) (*http.Response, error) {
 	return up.Do(req, proxy, account, concurrent)
@@ -96,10 +87,10 @@ func TestIntelligenceStandardAdminCreateAndRun(t *testing.T) {
 		return id(`INSERT INTO accounts(name,type,platform,credentials) VALUES($1,'oauth','openai','{"access_token":"fixture-only"}') RETURNING id`, uuid.NewString())
 	}
 	g1, g2 := group(false), group(true)
-	both, private := account(), account()
+	both, private, imageOnly := account(), account(), account()
 	user := id(`INSERT INTO users(email,password_hash) VALUES($1,'test') RETURNING id`, uuid.NewString()+"@example.invalid")
 	t.Cleanup(func() {
-		accounts := pq.Array([]int64{both, private})
+		accounts := pq.Array([]int64{both, private, imageOnly})
 		exec(`WITH used AS (
  DELETE FROM quality_budget_days WHERE account_id=ANY($1) RETURNING day,requests,tokens,unknown_requests
 ), totals AS (SELECT day,sum(requests) requests,sum(tokens) tokens,sum(unknown_requests) unknown_requests FROM used GROUP BY day)
@@ -110,7 +101,10 @@ func TestIntelligenceStandardAdminCreateAndRun(t *testing.T) {
 		exec(`DELETE FROM accounts WHERE id=ANY($1)`, accounts)
 		exec(`DELETE FROM groups WHERE id=ANY($1)`, pq.Array([]int64{g1, g2}))
 	})
-	exec(`INSERT INTO account_groups(account_id,group_id) VALUES($1,$3),($1,$4),($2,$4)`, both, private, g1, g2)
+	exec(`INSERT INTO account_groups(account_id,group_id) VALUES($1,$4),($1,$5),($2,$5),($3,$4),($3,$5)`, both, private, imageOnly, g1, g2)
+	// Shared API-key accounts must pass the same two checks as direct OAuth accounts.
+	exec(`UPDATE accounts SET type='apikey', credentials='{"api_key":"fixture-only"}' WHERE id=$1`, both)
+	exec(`UPDATE accounts SET credentials = credentials || '{"model_mapping":{"gpt-image-1":"gpt-image-1"}}'::jsonb WHERE id=$1`, imageOnly)
 	exec(`UPDATE groups SET model_allowlist='{"enabled":true,"models":["gpt-6.2-astra","gpt-6.2-sol"]}' WHERE id=$1`, g1)
 	exec(`UPDATE groups SET model_allowlist='{"enabled":true,"models":["gpt-6.2-astra"]}' WHERE id=$1`, g2)
 	plans := repository.NewScheduledTestPlanRepository(db)
@@ -118,9 +112,14 @@ func TestIntelligenceStandardAdminCreateAndRun(t *testing.T) {
 	svc := service.ProvideScheduledTestService(plans, results, repository.NewScheduledTestDefinitionRepository(db))
 	cfg := &config.Config{}
 	accounts := repository.NewAccountRepository(client, db, nil)
-	fp, err := os.ReadFile("../pkg/modelfingerprint/testdata/astra-high.txt")
-	require.NoError(t, err)
-	up := &intelligenceIntegrationUpstream{calls: map[int64]int{}, fingerprint: string(fp), degradedAccount: private}
+	correct := intelligenceTestReply{http.StatusOK, "21"}
+	wrong := intelligenceTestReply{http.StatusOK, "19"}
+	art := intelligenceTestReply{http.StatusOK, `<html><body><svg><circle r="10"/></svg></body></html>`}
+	limited := intelligenceTestReply{http.StatusTooManyRequests, `{"error":{"message":"rate limited"}}`}
+	up := &intelligenceIntegrationUpstream{calls: map[int64]int{}, replies: map[int64][]intelligenceTestReply{
+		both:    {correct, art, limited, limited, limited},
+		private: {wrong, correct, art, correct, art},
+	}}
 	at := service.ProvideAccountTestService(accounts, repository.NewQualityOperationsRepository(db), nil, nil, nil, nil, up, cfg, nil, nil, service.NewSettingService(repository.NewSettingRepository(client), cfg), nil)
 	t.Cleanup(at.StopAstraScheduling)
 	runner := service.NewScheduledTestRunnerService(plans, svc, at, accounts, nil, cfg)
@@ -162,10 +161,16 @@ func TestIntelligenceStandardAdminCreateAndRun(t *testing.T) {
 	require.Len(t, overview.States, 1, "%+v", overview)
 	require.Equal(t, private, overview.States[0].AccountID)
 	require.True(t, overview.States[0].Blocked)
+	for _, row := range overview.Results {
+		require.NotNil(t, row.Evidence)
+		require.Len(t, row.Evidence.Checks, 2)
+		require.Equal(t, "candy", row.Evidence.Checks[0].Key)
+		require.Equal(t, "http_429", row.Evidence.Checks[1].Key)
+	}
 	up.mu.Lock()
-	counts := map[int64]int{both: up.calls[both], private: up.calls[private]}
+	counts := map[int64]int{both: up.calls[both], private: up.calls[private], imageOnly: up.calls[imageOnly]}
 	up.mu.Unlock()
-	require.Equal(t, map[int64]int{both: 5, private: 4}, counts, "%+v", overview)
+	require.Equal(t, map[int64]int{both: 2, private: 1, imageOnly: 0}, counts, "%+v", overview)
 	pub, err := svc.PublicIntelligence()
 	require.NoError(t, err)
 	publicRound, err := pub.PublicIntelligenceRounds(ctx, user, g1, "")
@@ -208,5 +213,54 @@ func TestIntelligenceStandardAdminCreateAndRun(t *testing.T) {
 	require.Equal(t, "pass", corrected[0].Verdict)
 	require.EqualValues(t, 1, id(`SELECT count(*) FROM accounts WHERE id=$1 AND status='active'`, both))
 	require.EqualValues(t, 1, id(`SELECT count(*) FROM accounts WHERE id=$1 AND status='quality_paused'`, private))
-	require.EqualValues(t, 9, id(`SELECT count(*) FROM quality_probe_attempts WHERE intelligence_probe AND account_id=ANY($1)`, pq.Array([]int64{both, private})))
+	require.EqualValues(t, 3, id(`SELECT count(*) FROM quality_probe_attempts WHERE intelligence_probe AND account_id=ANY($1)`, pq.Array([]int64{both, private, imageOnly})))
+
+	// Advance only the persisted due time to exercise the real runner without
+	// a 30-minute wait. Both the delay and account status are verified first.
+	checkState := func(account int64, verdict string, passes, minutes int, status string) {
+		t.Helper()
+		var actualVerdict, actualStatus string
+		var actualPasses int
+		var delay sql.NullFloat64
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT s.verdict,s.passes,a.status,extract(epoch FROM s.next_check-o.finished_at)
+ FROM intelligence_model_states s JOIN accounts a ON a.id=s.account_id JOIN intelligence_observations o ON o.result_id=s.last_result_id
+ WHERE s.plan_id=$1 AND s.account_id=$2 AND s.model_key=$3`, plan.ID, account, plan.ModelID).Scan(&actualVerdict, &actualPasses, &actualStatus, &delay))
+		require.Equal(t, verdict, actualVerdict)
+		require.Equal(t, passes, actualPasses)
+		require.Equal(t, status, actualStatus)
+		require.Equal(t, minutes > 0, delay.Valid)
+		if delay.Valid {
+			require.InDelta(t, minutes*60, delay.Float64, 0.01)
+		}
+	}
+	advance := func() {
+		exec(`UPDATE intelligence_model_states SET next_check=clock_timestamp() WHERE plan_id=$1 AND next_check IS NOT NULL`, plan.ID)
+	}
+	run := func(retest bool, want ...service.IntelligenceTarget) {
+		t.Helper()
+		current, err := svc.GetPlan(ctx, plan.ID)
+		require.NoError(t, err)
+		if retest {
+			current.IntelligenceRetest = true
+			current.IntelligenceTargets, err = plans.(service.IntelligenceRetestRepository).DueIntelligenceTargets(ctx, plan.ID, time.Now())
+			require.NoError(t, err)
+			require.ElementsMatch(t, want, current.IntelligenceTargets)
+		}
+		runner.RunPlanNow(ctx, current)
+	}
+
+	checkState(private, "confirmed", 0, 30, "quality_paused")
+	advance()
+	run(false)
+	checkState(private, "pass", 1, 5, "quality_paused")
+	checkState(both, "suspect", 0, 5, "active")
+	advance()
+	run(true, service.IntelligenceTarget{AccountID: private, Model: plan.ModelID}, service.IntelligenceTarget{AccountID: both, Model: plan.ModelID})
+	checkState(private, "pass", 2, 0, "active")
+	checkState(both, "suspect", 0, 5, "active")
+	advance()
+	run(true, service.IntelligenceTarget{AccountID: both, Model: plan.ModelID})
+	checkState(both, "confirmed", 0, 30, "quality_paused")
+	require.EqualValues(t, 3, id(`SELECT count(DISTINCT run_id) FROM scheduled_test_results
+ WHERE plan_id=$1 AND account_id=$2 AND execution_info->'intelligence'->>'candy_http_status'='429'`, plan.ID, both))
 }

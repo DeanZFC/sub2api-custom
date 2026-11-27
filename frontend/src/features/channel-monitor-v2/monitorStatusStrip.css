@@ -1,0 +1,18 @@
+.monitor-status-strip {
+  @apply flex min-w-0 items-end gap-1;
+}
+.monitor-status-strip-compact {
+  @apply h-6;
+}
+.monitor-status-slot {
+  @apply flex h-full min-w-0 flex-1 items-end rounded-[3px];
+}
+button.monitor-status-slot {
+  @apply cursor-pointer border-0 bg-transparent p-0 outline-offset-2 transition-opacity hover:opacity-75 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500;
+}
+.monitor-status-mark {
+  @apply pointer-events-none block h-full w-full rounded-[3px];
+}
+.monitor-status-slot[data-state='unknown'] .monitor-status-mark {
+  @apply h-1.5;
+}

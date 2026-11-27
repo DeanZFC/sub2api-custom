@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/modelfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -80,14 +79,6 @@ func (h *ScheduledTestHandler) ReviewIntelligenceArt(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"verdict": req.Verdict})
 }
 
-func (h *ScheduledTestHandler) IntelligenceModels(c *gin.Context) {
-	effort := c.DefaultQuery("effort", "high")
-	if effort == "default" {
-		effort = ""
-	}
-	c.JSON(http.StatusOK, gin.H{"models": modelfingerprint.Models(effort)})
-}
-
 // Count the same account/model pairs as the execution snapshot. The response
 // contains only IDs and counts; account configuration stays with the service.
 func (h *GroupHandler) IntelligenceScope(c *gin.Context) {
@@ -127,7 +118,7 @@ func (h *GroupHandler) IntelligenceScope(c *gin.Context) {
 			n, ok := seen[a.ID]
 			if !ok {
 				for _, model := range req.Models {
-					if a.IsModelSupported(model) {
+					if a.SupportsIntelligenceModel(model) {
 						n++
 					}
 				}

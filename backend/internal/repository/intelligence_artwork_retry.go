@@ -30,7 +30,7 @@ func (r *scheduledTestResultRepository) DueIntelligenceArtwork(ctx context.Conte
  AND (r.execution_info->'intelligence'->>'artwork_retry_at')::timestamptz <= $1
  AND NOT EXISTS(SELECT 1 FROM scheduled_test_execution_leases l WHERE l.plan_id=p.id AND l.expires_at>$1
  AND (l.scope='plan' OR l.scope='retry:'||a.id::text||':'||COALESCE(r.test_definition_id,0)::text||':'||r.model_id))
- ORDER BY r.finished_at,r.id LIMIT 20`, now)
+ ORDER BY (r.execution_info->'intelligence'->>'artwork_retry_at')::timestamptz,r.finished_at,r.id LIMIT 20`, now)
 	if err != nil {
 		return nil, err
 	}
@@ -44,4 +44,13 @@ func (r *scheduledTestResultRepository) DueIntelligenceArtwork(ctx context.Conte
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+func (r *scheduledTestResultRepository) DeferIntelligenceArtwork(ctx context.Context, id int64, due, next time.Time) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE scheduled_test_results
+ SET execution_info=jsonb_set(execution_info, '{intelligence,artwork_retry_at}', to_jsonb($3::timestamptz), false)
+ WHERE id=$1 AND status='failed'
+ AND execution_info->'intelligence'->>'artwork'='missing' AND execution_info->'intelligence'->>'auto_verdict'='pass'
+ AND (execution_info->'intelligence'->>'artwork_retry_at')::timestamptz<=$2`, id, due, next)
+	return err
 }
