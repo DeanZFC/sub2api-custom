@@ -103,6 +103,31 @@ describe('intelligence history', () => {
     w.unmount()
   })
 
+  it.each([
+    { counts: [3, 0, 1, 0], verdict: 'degraded', color: 'health-score3', label: '3/4 个账号通过 · 1/4 个账号确认降智' },
+    { counts: [0, 0, 1, 3], verdict: 'degraded', color: 'health-score3', label: '1/4 个账号确认降智 · 3/4 个账号未能判定' },
+    { counts: [2, 0, 2, 0], verdict: 'degraded', color: 'health-critical', label: '2/4 个账号确认降智' },
+    { counts: [0, 0, 1, 0], verdict: 'degraded', color: 'health-critical', label: '1/1 个账号确认降智' },
+    { counts: [2, 1, 0, 1], verdict: 'suspect', color: 'health-score5', label: '1/4 个账号疑似降智' },
+    { counts: [3, 0, 0, 1], verdict: 'unknown', color: 'health-unknown', label: '1/4 个账号未能判定' },
+    { counts: [4, 0, 0, 0], verdict: 'pass', color: 'health-score10', label: '4/4 个账号通过' },
+  ] as const)('colors the round by distinct accounts ($counts)', async ({ counts, verdict, color, label }) => {
+    const [pass, suspect, degraded, unknown] = counts
+    // Several model checks per account must not change the denominator.
+    vi.mocked(api.intelligenceRounds).mockResolvedValue([{
+      ...round, accounts: pass + suspect + degraded + unknown, counts: { pass, suspect, degraded, unknown },
+      targets: 12, passed_targets: 6, verdict,
+    }])
+    const w = render()
+    await flushPromises()
+    const cell = w.get('.round-cell')
+    expect(cell.get('.monitor-status-mark').classes()).toContain(color)
+    expect(cell.attributes('aria-label')).toContain(label)
+    await cell.trigger('focus')
+    expect(w.get('[role="dialog"]').text()).toContain(label)
+    w.unmount()
+  })
+
   it.each([0, 1, 20, 24])('renders twenty slots with the latest real rounds on the right (%i received)', async (count) => {
     const rows = Array.from({ length: count }, (_, i) => ({ ...round, id: String(i + 1), verdict: 'unknown' as const }))
     vi.mocked(api.intelligenceRounds).mockResolvedValue(rows)

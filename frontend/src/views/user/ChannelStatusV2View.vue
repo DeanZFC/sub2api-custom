@@ -269,6 +269,7 @@
           :group-by="matrixGroupBy"
           :health-mode="healthMode"
           :intelligence-groups="intelligence.groups"
+          :intelligence-directory-message="intelligenceDirectoryMessage"
           :scope-model="filter.models.length === 1 ? filter.models[0] : undefined"
           :refresh-key="intelligence.refreshed"
         />
@@ -577,6 +578,11 @@ const healthMode = ref<HealthMode>(parseHealthMode(route.query.health_mode))
 const trendView = ref<TrendView>(parseTrendView(route.query.trend_view))
 const dimensions = ref<MonitorDimensions>({ platforms: [], groups: [], models: [] })
 const intelligence = useIntelligenceGroupsStore()
+const intelligenceDirectoryMessage = computed(() => {
+  if (intelligence.loading) return t('common.loading')
+  if (intelligence.failed) return t('channelMonitorV2.intelligence.loadError')
+  return undefined
+})
 const snapshot = ref<MonitorSnapshot | null>(null)
 const matrix = ref<MonitorMatrixResponse | null>(null)
 const cardModelMatrix = ref<MonitorMatrixResponse | null>(null)

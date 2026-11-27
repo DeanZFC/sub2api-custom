@@ -3,19 +3,7 @@
     <p v-if="error" role="alert" class="text-sm text-red-600">{{ error }}</p>
     <p v-if="notice" role="status" class="text-sm text-gray-600 dark:text-dark-300">{{ notice }}</p>
 
-    <IntelligencePolicyEditor
-      v-if="view === 'editor'"
-      :key="editingPlan?.id ?? 'new'"
-      ref="editor"
-      :plan="editingPlan"
-      :groups="groups"
-      :accounts="accounts"
-      :plans="policies"
-      :catalog-ready="catalogReady"
-      @saved="finishEditing"
-      @cancel="showList"
-    />
-    <template v-else-if="view === 'results' && resultPlan">
+    <template v-if="resultPlan">
       <header class="flex flex-wrap items-center gap-3">
         <button type="button" class="btn btn-secondary btn-sm" data-back-to-policies @click="showList">
           <Icon name="arrowLeft" size="sm" />{{ tr('backToPolicies') }}
@@ -26,18 +14,18 @@
     </template>
 
     <div v-else class="card overflow-hidden">
-      <header class="flex flex-wrap items-center justify-between gap-3 px-4 py-4">
+      <header class="card-header flex flex-wrap items-center justify-between gap-3">
         <h3 class="font-semibold">{{ tr('policy') }}</h3>
         <button type="button" class="btn btn-primary btn-sm" data-new-policy :disabled="busy || !catalogReady" @click="edit()">
           <Icon name="plus" size="sm" />{{ tr('newPolicy') }}
         </button>
       </header>
-      <p v-if="!policies.length" class="border-t px-4 py-8 text-center text-sm text-gray-500 dark:border-dark-700">
+      <p v-if="!policies.length" class="px-4 py-8 text-center text-sm text-gray-500 dark:text-dark-400">
         {{ catalogReady ? tr('emptyPolicies') : t('common.loading') }}
       </p>
       <div v-else class="overflow-x-auto">
-        <table class="w-full text-left text-sm" :aria-label="tr('policy')">
-          <thead class="border-y bg-gray-50 text-xs text-gray-500 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-300">
+        <table class="table" :aria-label="tr('policy')">
+          <thead>
             <tr>
               <th scope="col">{{ t('common.name') }}</th>
               <th scope="col">{{ tr('group') }}</th>
@@ -46,15 +34,15 @@
               <th scope="col">{{ t('common.actions') }}</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
+          <tbody>
             <tr v-for="p in policies" :key="p.id" :data-policy-id="p.id">
-              <th scope="row" class="min-w-36 align-top font-medium text-gray-900 dark:text-white">
-                {{ p.name || '#' + p.id }}
+              <td class="min-w-36">
+                <span class="font-medium text-gray-900 dark:text-white">{{ p.name || '#' + p.id }}</span>
                 <span v-if="p.name" class="ml-1 text-xs font-normal text-gray-500">#{{ p.id }}</span>
                 <span v-if="p.protection?.intelligence?.interval_minutes" class="mt-1 block text-xs font-normal text-gray-500">
                   {{ t('admin.tests.timing.everyMinutes', { count: p.protection.intelligence.interval_minutes }) }}
                 </span>
-              </th>
+              </td>
               <td>{{ p.group_ids?.map(groupName).join(' / ') || '—' }}</td>
               <td>{{ p.model_ids?.join(' / ') || p.model_id || '—' }}</td>
               <td>
@@ -63,18 +51,18 @@
                 </span>
               </td>
               <td>
-                <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <div class="flex items-center gap-1">
                   <button type="button" class="row-action" data-edit-policy :disabled="busy" @click="edit(p)">
-                    {{ t('common.edit') }}
+                    <Icon name="edit" size="sm" />{{ t('common.edit') }}
                   </button>
                   <button type="button" class="row-action" data-run-policy :disabled="busy" @click="run(p)">
-                    {{ t('admin.tests.run') }}
+                    <Icon name="play" size="sm" />{{ t('admin.tests.run') }}
                   </button>
                   <button type="button" class="row-action" data-policy-results :disabled="busy" @click="showResults(p.id)">
-                    {{ tr('viewPolicyResults') }}
+                    <Icon name="eye" size="sm" />{{ tr('viewPolicyResults') }}
                   </button>
                   <button type="button" class="row-action" data-toggle-policy :disabled="busy" @click="toggle(p)">
-                    {{ t(p.enabled ? 'admin.tests.disablePlan' : 'admin.tests.enablePlan') }}
+                    <Icon :name="p.enabled ? 'ban' : 'checkCircle'" size="sm" />{{ t(p.enabled ? 'admin.tests.disablePlan' : 'admin.tests.enablePlan') }}
                   </button>
                 </div>
               </td>
@@ -83,6 +71,34 @@
         </table>
       </div>
     </div>
+
+    <BaseDialog
+      :show="editorOpen"
+      :title="editingPlan ? tr('editPolicy', { name: editingPlan.name || '#' + editingPlan.id }) : tr('newPolicy')"
+      width="wide"
+      :show-close-button="!editor?.busy"
+      :close-on-escape="!editor?.busy"
+      @close="editorOpen = false"
+    >
+      <IntelligencePolicyEditor
+        v-if="editorOpen"
+        ref="editor"
+        :plan="editingPlan"
+        :groups="groups"
+        :accounts="accounts"
+        :plans="policies"
+        :catalog-ready="catalogReady"
+        @saved="finishEditing"
+      />
+      <template #footer>
+        <button type="button" class="btn btn-secondary" data-cancel-policy :disabled="editor?.busy" @click="editorOpen = false">
+          {{ t('common.cancel') }}
+        </button>
+        <button type="submit" form="intelligence-policy-form" class="btn btn-primary" data-save-policy :disabled="!editor?.canSave || editor.busy">
+          {{ t(editor?.busy ? 'common.saving' : 'common.save') }}
+        </button>
+      </template>
+    </BaseDialog>
   </section>
 </template>
 
@@ -90,6 +106,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import type { AccountListItem, AdminGroup, TestPlan } from '@/types'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -111,7 +128,7 @@ watch(() => props.plans, (plans) => {
   policies.value = plans.filter((p) => p.protection?.intelligence)
 }, { immediate: true })
 
-const view = ref<'list' | 'editor' | 'results'>('list')
+const editorOpen = ref(false)
 const editingPlan = ref<TestPlan>()
 const resultPlanId = ref<number>()
 const resultPlan = computed(() => policies.value.find((p) => p.id === resultPlanId.value))
@@ -123,8 +140,7 @@ const busy = ref(false)
 const groupName = (id: number) => props.groups.find((group) => group.id === id)?.name || '#' + id
 
 function showList() {
-  view.value = 'list'
-  editingPlan.value = undefined
+  editorOpen.value = false
   resultPlanId.value = undefined
   error.value = ''
   notice.value = ''
@@ -132,12 +148,11 @@ function showList() {
 function edit(plan?: TestPlan) {
   showList()
   editingPlan.value = plan
-  view.value = 'editor'
+  editorOpen.value = true
 }
 function showResults(id: number) {
   showList()
   resultPlanId.value = id
-  view.value = 'results'
 }
 watch(
   () => props.catalogReady && policies.value.some((p) => p.id === props.initialPlanId) ? props.initialPlanId : undefined,
@@ -191,13 +206,7 @@ defineExpose({ refresh })
 </script>
 
 <style scoped>
-th, td {
-  @apply px-4 py-3;
-}
-td {
-  @apply align-top;
-}
 .row-action {
-  @apply whitespace-nowrap text-sm font-medium text-primary-700 hover:underline disabled:opacity-50 dark:text-primary-300;
+  @apply flex flex-col items-center gap-0.5 whitespace-nowrap rounded-lg p-1.5 text-xs text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-50 dark:text-dark-300 dark:hover:bg-dark-700 dark:hover:text-primary-400;
 }
 </style>

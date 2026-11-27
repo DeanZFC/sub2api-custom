@@ -85,8 +85,18 @@ const defaults = {
 }
 function mountPanel(plans: TestPlan[] = [], initialPlanId?: number, catalogReady = true) {
   return mount(IntelligencePolicyPanel, {
+    attachTo: document.body,
     props: { groups, accounts, plans, initialPlanId, catalogReady },
-    global: { plugins: [i18n()], stubs: { IntelligencePolicyResults: true } },
+    global: {
+      plugins: [i18n()],
+      stubs: {
+        IntelligencePolicyResults: true,
+        BaseDialog: {
+          props: ['show', 'title'],
+          template: '<div v-if="show" role="dialog"><h3>{{ title }}</h3><slot/><slot name="footer"/></div>',
+        },
+      },
+    },
   })
 }
 beforeEach(() => {
@@ -126,7 +136,7 @@ describe('intelligence monitoring policy', () => {
     expect(w.text()).toContain('答错一次或连续三轮返回 HTTP 429')
     expect(w.text()).not.toContain('行为指纹')
     expect(w.text()).not.toContain('Codex 状态')
-    await w.get('[role="switch"]').setValue(true)
+    await w.get('[role="switch"]').trigger('click')
     expect(w.text()).toContain('也会影响 Other')
     expect(w.get<HTMLInputElement>('[data-pause-on-any]').element.checked).toBe(false)
     await w.get('[data-pause-on-any]').setValue(true)
@@ -161,6 +171,26 @@ describe('intelligence monitoring policy', () => {
     )
     expect(api.create.mock.calls[0][0]).not.toHaveProperty('excluded_account_ids')
     expect(w.emitted('changed')).toHaveLength(1)
+    expect(w.find('[role="dialog"]').exists()).toBe(false)
+    w.unmount()
+  })
+  it('keeps a failed edit in the dialog and updates the list only after a successful retry', async () => {
+    const w = mountPanel([plan])
+    await w.get('[data-edit-policy]').trigger('click')
+    await flushPromises()
+    await w.get('[data-policy-name]').setValue('Nightly')
+    api.update.mockRejectedValueOnce(new Error('Save failed'))
+    await w.get('[data-save-policy]').trigger('click')
+    await flushPromises()
+    expect(w.get('[role="dialog"] [role="alert"]').text()).toBe('Save failed')
+    expect(w.get<HTMLInputElement>('[data-policy-name]').element.value).toBe('Nightly')
+    expect(w.get('[data-policy-id="9"]').text()).toContain('OpenAI')
+
+    api.update.mockResolvedValueOnce({ ...plan, name: 'Nightly' })
+    await w.get('[data-save-policy]').trigger('click')
+    await flushPromises()
+    expect(w.find('[role="dialog"]').exists()).toBe(false)
+    expect(w.get('[data-policy-id="9"]').text()).toContain('Nightly')
     w.unmount()
   })
   it('restores and submits an explicitly selected model-default effort', async () => {
@@ -171,6 +201,7 @@ describe('intelligence monitoring policy', () => {
     }
     const w = mountPanel([existing])
     await w.get('[data-policy-id="9"] [data-edit-policy]').trigger('click')
+    expect(w.get('[role="dialog"] h3').text()).toContain('OpenAI')
     await flushPromises()
     expect(w.get<HTMLSelectElement>('[data-intelligence-effort]').element.value).toBe('default')
     api.update.mockResolvedValue(existing)
@@ -189,6 +220,8 @@ describe('intelligence monitoring policy', () => {
     const existing = { ...plan, excluded_account_ids: [1] }
     const w = mountPanel([existing])
     await w.get('[data-new-policy]').trigger('click')
+    expect(w.get('[role="dialog"] h3').text()).toBe('新增策略')
+    expect(w.get('[data-policy-id="9"]').isVisible()).toBe(true)
     await w.get('input[value="1"]').setValue(true)
     await flushPromises()
     let finishCancelled!: () => void

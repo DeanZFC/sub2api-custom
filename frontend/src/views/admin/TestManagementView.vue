@@ -1,15 +1,30 @@
 <template>
   <AppLayout>
-    <div class="space-y-5">
-      <header class="flex flex-wrap items-center justify-between gap-3">
-        <h2 class="text-xl font-semibold text-gray-900 dark:text-white">{{ t('admin.tests.title') }}</h2>
-        <button type="button" class="btn btn-secondary" :disabled="loading" @click="refresh">
-          <Icon name="refresh" size="sm" />{{ t('common.refresh') }}
-        </button>
+    <div class="min-w-0 space-y-6">
+      <header class="card p-4 sm:p-6">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h1 class="page-title flex items-center gap-2">
+            <Icon name="beaker" size="md" class="text-primary-600 dark:text-primary-400" />
+            {{ t('admin.tests.title') }}
+          </h1>
+          <button type="button" class="btn btn-secondary" :disabled="loading" @click="refresh">
+            <Icon name="refresh" size="sm" :class="{ 'animate-spin': loading }" />{{ t('common.refresh') }}
+          </button>
+        </div>
+        <nav class="tabs mt-4 inline-flex" role="tablist" :aria-label="t('admin.tests.title')">
+          <button
+            v-for="tab in tabs"
+            :key="tab.key"
+            type="button"
+            role="tab"
+            class="tab"
+            :class="{ 'tab-active': activeTab === tab.key }"
+            :data-quality-section="tab.key"
+            :aria-selected="activeTab === tab.key"
+            @click="navigate(tab.key)"
+          >{{ t(tab.label) }}</button>
+        </nav>
       </header>
-      <nav class="flex gap-1 overflow-x-auto border-b border-gray-200 pb-2 dark:border-dark-700" role="tablist" :aria-label="t('admin.tests.title')">
-        <button v-for="tab in tabs" :key="tab.key" type="button" role="tab" :data-quality-section="tab.key" :aria-selected="activeTab === tab.key" class="shrink-0 rounded-lg px-4 py-2 text-sm font-medium" :class="activeTab === tab.key ? 'bg-primary-50 text-primary-700 dark:bg-primary-950/30 dark:text-primary-300' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-dark-800'" @click="navigate(tab.key)">{{ t(tab.label) }}</button>
-      </nav>
       <p v-if="catalogError" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ catalogError }}</p>
       <QualityOperationsPanel v-if="activeTab === 'operations'" ref="operations" :visible="true" :accounts="accounts" />
       <IntelligencePolicyPanel

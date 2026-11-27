@@ -1,10 +1,12 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import ChannelHealthCards from '../ChannelHealthCards.vue'
 import { cardHealth, hasMonitorTraffic, historyBucketsForCard } from '../monitorCards'
 import zh from '@/i18n/locales/zh/channelMonitorV2'
+import zhCommon from '@/i18n/locales/zh/common'
 import type { MonitorCoverage, MonitorHealth, MonitorMatrixRow, MonitorMetric } from '@/api/channelMonitorV2'
+import * as intelligence from '@/api/intelligence'
 
 const metrics: MonitorMetric = {
   success_requests: 0, error_requests: 0, request_count: 0, token_count: 0, rpm: 0, tpm: 0,
@@ -149,7 +151,7 @@ describe('channel health cards', () => {
     expect(historyBucketsForCard([], { ...coverage, requested_end: undefined })[19]?.end).toBe(Date.parse(coverage.data_through))
   })
 
-  it('shows interval history as the only status strip even when the response includes recent requests', () => {
+  it('shows passive interval history even when the response includes recent requests', () => {
     const wrapper = mount(ChannelHealthCards, {
       props: { rows: [{ ...row, recent_requests: [{ model: 'gpt-test', status: 'error', occurred_at: coverage.data_through }] }],
         coverage, groupBy: 'platform_group', healthMode: 'overall' },
@@ -216,18 +218,44 @@ describe('channel health cards', () => {
     expect(wrapper.get('[data-testid=channel-section-title]').text()).toContain('OpenAI')
     wrapper.unmount()
   })
-  it('places model-scoped intelligence before passive history and only for entitled groups', () => {
+  it('shows intelligence history on every group card and only requests rounds for monitored groups', async () => {
+    const fetchRounds = vi.spyOn(intelligence, 'intelligenceRounds').mockResolvedValue([])
     const wrapper = mount(ChannelHealthCards, {
-      props: { coverage, rows: [{ ...row, model: 'model-a' }, { ...row, group_id: 8, model: 'model-a' }], groupBy: 'platform_group_model', healthMode: 'overall',
-        intelligenceGroups: [{ id: 7, name: 'GPT Plus', models: ['model-a'] }] },
-      global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh } })], stubs: { ProviderIcon: true, IntelligenceRounds: true } }
+      props: {
+        coverage, groupBy: 'platform_group_model', healthMode: 'overall',
+        rows: [7, 8, 9].map(group_id => ({ ...row, group_id, model: 'model-a' })),
+        intelligenceDirectoryMessage: zhCommon.common.loading,
+      },
+      global: {
+        plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh: { ...zh, ...zhCommon } } })],
+        stubs: { ProviderIcon: true },
+      },
     })
-    const strips = wrapper.findAllComponents({name:'IntelligenceRounds'})
-    expect(strips).toHaveLength(1)
-    expect(strips[0].props('model')).toBe('model-a')
-    const card=wrapper.get('[data-testid=channel-health-card]')
-    expect(card.get('intelligence-rounds-stub').element.nextElementSibling).toBe(card.get('[data-testid=health-history]').element)
+    expect(wrapper.get('[data-testid=intelligence-rounds]').text()).toContain(zhCommon.common.loading)
+    expect(fetchRounds).not.toHaveBeenCalled()
+    await wrapper.setProps({
+      intelligenceDirectoryMessage: undefined,
+      intelligenceGroups: [
+        { id: 7, name: 'GPT Plus', models: ['model-a'] },
+        { id: 8, name: 'Legacy', models: [] },
+      ],
+    })
+    await flushPromises()
+    const cards = wrapper.findAll('[data-testid=channel-health-card]')
+    expect(cards).toHaveLength(3)
+    for (const card of cards) {
+      const strip = card.get('[data-testid=intelligence-rounds]')
+      expect(strip.element.nextElementSibling).toBe(card.get('[data-testid=health-history]').element)
+      expect(strip.get('h4').text()).toBe('智商监测 · 近 20 轮分组检测')
+      expect(strip.text()).toContain('暂无已完成的分组巡检')
+      expect(strip.findAll('[data-state=unknown]')).toHaveLength(20)
+      expect(strip.find('button').exists()).toBe(false)
+    }
+    expect(fetchRounds).toHaveBeenCalledTimes(1)
+    expect(fetchRounds).toHaveBeenCalledWith(7, 'model-a', expect.any(AbortSignal))
     expect(wrapper.find('[data-testid=pelican-gallery-open]').exists()).toBe(false)
+    wrapper.unmount()
+    fetchRounds.mockRestore()
   })
 
 })

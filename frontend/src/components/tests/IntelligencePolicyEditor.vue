@@ -1,9 +1,8 @@
 <template>
-  <section class="space-y-4">
-    <h3 class="font-semibold">{{ plan ? tr('editPolicy', { name: plan.name || '#' + plan.id }) : tr('newPolicy') }}</h3>
-    <p v-if="error" role="alert" class="text-sm text-red-600">{{ error }}</p>
-    <div class="grid items-start gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-      <div class="card min-w-0 space-y-4 p-4">
+  <form id="intelligence-policy-form" class="space-y-4" @submit.prevent="save">
+    <p v-if="error" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
+    <div class="grid items-start gap-5 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+      <div class="min-w-0 space-y-4">
         <label class="input-label block">
           {{ tr('policyName') }}
           <input
@@ -18,24 +17,24 @@
         </label>
         <fieldset>
           <legend class="input-label">{{ tr('group') }}</legend>
-          <p class="mb-2 text-xs text-gray-500">{{ tr('groupHint') }}</p>
+          <p class="input-hint mb-2">{{ tr('groupHint') }}</p>
           <div class="flex flex-wrap gap-2">
             <label v-for="g in choices" :key="g.id" class="chip"
               ><input v-model="groupIds" type="checkbox" :value="g.id" :disabled="busy" /> {{ g.name }}</label
             >
           </div>
-          <label v-for="id in unavailableGroups" :key="id" class="chip text-amber-700">
+          <label v-for="id in unavailableGroups" :key="id" class="chip text-amber-700 dark:text-amber-300">
             <input v-model="groupIds" type="checkbox" :value="id" :disabled="busy" />{{ groupName(id) }} ·
             {{ tr('groupUnavailable') }}
           </label>
-          <p v-if="!choices.length" class="text-sm text-gray-500">
+          <p v-if="!choices.length" class="text-sm text-gray-500 dark:text-dark-400">
             {{ catalogReady ? tr('noActiveGroups') : t('common.loading') }}
           </p>
         </fieldset>
         <fieldset>
           <legend class="input-label">{{ tr('modelScope') }}</legend>
-          <p class="mb-2 text-xs text-gray-500">{{ tr('automaticScope') }}</p>
-          <p v-if="!groupIds.length || catalogsLoading || !availableModels.length" class="text-xs text-gray-500">
+          <p class="input-hint mb-2">{{ tr('automaticScope') }}</p>
+          <p v-if="!groupIds.length || catalogsLoading || !availableModels.length" class="input-hint">
             {{ !groupIds.length ? tr('chooseGroups') : catalogsLoading ? t('common.loading') : tr('noSharedModel') }}
           </p>
           <div class="flex flex-wrap gap-2">
@@ -48,21 +47,22 @@
           </button>
         </fieldset>
         <div v-if="plan?.excluded_account_ids?.length" class="space-y-1 text-sm">
-          <p class="text-xs text-gray-500">{{ tr('legacyExclusions', { count: plan.excluded_account_ids.length }) }}</p>
+          <p class="input-hint">{{ tr('legacyExclusions', { count: plan.excluded_account_ids.length }) }}</p>
           <label class="flex items-center gap-2">
             <input v-model="clearLegacyExclusions" type="checkbox" data-clear-legacy-exclusions :disabled="busy" />
             {{ tr('includeLegacyAccounts') }}
           </label>
         </div>
-        <label class="flex items-center justify-between gap-3 border-t pt-3 font-semibold dark:border-dark-700"
-          >{{ tr('autoIsolate') }} <input v-model="settings.auto_isolate" type="checkbox" role="switch" :disabled="busy"
-        /></label>
-        <p class="text-xs text-gray-500">
-          {{ tr(isolationDescription) }}
-        </p>
-        <details>
+        <div class="border-t border-gray-100 pt-4 dark:border-dark-700">
+          <div class="flex items-center justify-between gap-3">
+            <label for="intelligence-auto-isolate" class="input-label mb-0">{{ tr('autoIsolate') }}</label>
+            <Toggle id="intelligence-auto-isolate" v-model="settings.auto_isolate" :disabled="busy" />
+          </div>
+          <p class="input-hint">{{ tr(isolationDescription) }}</p>
+        </div>
+        <details class="rounded-xl border border-gray-200 p-3 dark:border-dark-700">
           <summary class="cursor-pointer text-sm font-medium">{{ tr('advanced') }}</summary>
-          <p class="mt-2 text-xs text-gray-500">{{ tr('rules') }}</p>
+          <p class="input-hint mt-2">{{ tr('rules') }}</p>
           <label v-if="settings.auto_isolate && modelIds.length > 1" class="mt-3 flex items-center gap-2 text-sm">
             <input v-model="settings.pause_on_any" type="checkbox" data-pause-on-any :disabled="busy" />{{ tr('pauseOnAny') }}
           </label>
@@ -87,16 +87,8 @@
             /></label>
           </div>
         </details>
-        <div class="flex items-center gap-3">
-          <button class="btn btn-primary" type="button" data-save-policy :disabled="busy || !canSave" @click="save">
-            {{ t('common.save') }}
-          </button>
-          <button class="btn btn-secondary" type="button" data-cancel-policy :disabled="busy" @click="emit('cancel')">
-            {{ t('common.cancel') }}
-          </button>
-        </div>
       </div>
-      <aside class="card min-w-0 space-y-2 p-4 text-sm">
+      <aside class="min-w-0 space-y-2 rounded-xl bg-gray-50 p-4 text-sm text-gray-700 dark:bg-dark-900/50 dark:text-dark-200">
         <h3 class="font-semibold">{{ tr('scope') }}</h3>
         <p v-if="coverage">
           {{ tr('scopeSize', { accounts: coverage.account_ids.length, models: modelIds.length, total: coverage.targets }) }}
@@ -113,7 +105,7 @@
             <dd>{{ tr('nAccounts', { count: coverage.group_counts[String(g.id)] || 0 }) }}</dd>
           </div>
         </dl>
-        <p v-if="shared.length" class="text-xs text-gray-500">
+        <p v-if="shared.length" class="input-hint">
           {{ tr('shared', { count: shared.length }) }} {{ tr('groupStats') }}
         </p>
         <details v-if="eligible.length">
@@ -142,10 +134,10 @@
             })
           }}
         </p>
-        <p v-else class="text-xs text-gray-500">{{ tr('budgetUnavailable') }}</p>
+        <p v-else class="input-hint">{{ tr('budgetUnavailable') }}</p>
       </aside>
     </div>
-  </section>
+  </form>
 </template>
 <script setup lang="ts">
 import { computed, ref, watch, onMounted } from 'vue'
@@ -153,6 +145,7 @@ import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import { intelligenceScope, type IntelligenceScope } from '@/api/admin/intelligence'
 import { qualityOperationsAPI } from '@/api/admin/qualityOperations'
+import Toggle from '@/components/common/Toggle.vue'
 import type { AdminGroup, AccountListItem, IntelligencePolicy, TestPlan, CreateTestPlanRequest } from '@/types'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
@@ -163,7 +156,7 @@ const props = defineProps<{
   catalogReady: boolean
   plan?: TestPlan
 }>()
-const emit = defineEmits<{ saved: [plan: TestPlan]; cancel: [] }>()
+const emit = defineEmits<{ saved: [plan: TestPlan] }>()
 const { t, locale } = useI18n()
 const tr = (s: string, params: Record<string, unknown> = {}) => t('channelMonitorV2.intelligence.' + s, params)
 const settings = ref<IntelligencePolicy>({
@@ -363,13 +356,13 @@ function refresh() {
   void loadBudget()
 }
 onMounted(loadBudget)
-defineExpose({ refresh })
+defineExpose({ refresh, busy, canSave })
 </script>
 <style scoped>
 .chip {
-  @apply inline-flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 px-2 py-1.5 text-sm dark:border-dark-700;
+  @apply inline-flex max-w-full cursor-pointer items-center gap-2 break-all rounded-lg border border-gray-200 px-2 py-1.5 text-sm accent-primary-600 dark:border-dark-700;
 }
 .chip:has(:checked) {
-  @apply border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300;
+  @apply border-primary-500 bg-primary-50 text-primary-800 dark:bg-primary-900/30 dark:text-primary-300;
 }
 </style>

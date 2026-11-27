@@ -52,6 +52,7 @@ export default {
         }
 },
       operations: {
+  "settings": "Operations settings",
   "title": "Test operations",
   "budgetTitle": "Test budgets",
   "budgetHint": "Covers manual quality runs, scheduled tests, retries, capability questions and visual reviews. Resets at 00:00 UTC. A limit of 0 means unlimited. Customer traffic and standalone account-page connection debugging are excluded.",

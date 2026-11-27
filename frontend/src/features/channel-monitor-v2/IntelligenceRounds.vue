@@ -34,12 +34,12 @@
         <span class="monitor-status-mark bg-gray-300 dark:bg-dark-600" />
       </span>
       <button
-        v-for="r in rounds"
+        v-for="r in roundCells"
         :key="r.id"
         type="button"
         class="monitor-status-slot round-cell"
-        :data-state="r.verdict"
-        :aria-label="time(r.finished_at) + ' · ' + tr('legend.' + r.verdict)"
+        :data-state="r.state"
+        :aria-label="time(r.finished_at) + ' · ' + tr('legend.' + r.state) + ' · ' + roundAccountLabel(r)"
         :aria-expanded="active?.kind === 'round' && active.id === r.id"
         aria-haspopup="dialog"
         @focus="hover('round', r.id, $event)"
@@ -47,20 +47,20 @@
         @pointerleave="scheduleClose"
         @click="pin('round', r.id, $event)"
       >
-        <span class="monitor-status-mark" :class="colors[r.verdict]" aria-hidden="true" />
+        <span class="monitor-status-mark" :class="colors[r.state]" aria-hidden="true" />
       </button>
     </div>
     <p v-if="loadError" class="mt-1 text-xs text-gray-500">
       {{ tr('loadError') }} <button type="button" class="underline" @click="reload++">{{ t('common.retry') }}</button>
     </p>
-    <p v-else-if="!rounds.length" class="mt-1 text-xs text-gray-400">{{ busy ? t('common.loading') : tr('noRounds') }}</p>
+    <p v-else-if="!rounds.length" class="mt-1 text-xs text-gray-400">{{ emptyMessage }}</p>
     <div v-else class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-500 dark:text-gray-400">
-      <span v-for="s in states" :key="s" class="inline-flex items-center gap-1">
-        <i class="h-2 w-2 rounded-sm" :class="colors[s]" />{{ tr('legend.' + s) }}
+      <span v-for="(color, s) in colors" :key="s" class="inline-flex items-center gap-1">
+        <i class="h-2 w-2 rounded-sm" :class="color" />{{ tr('legend.' + s) }}
       </span>
     </div>
     <div
-      v-if="active"
+      v-if="active && group"
       role="dialog"
       :aria-label="active.kind === 'round' ? tr('round') : tr('summary')"
       :class="panelBelow ? 'top-full mt-1' : 'bottom-full mb-1'"
@@ -83,15 +83,15 @@
           <p>
             {{
               header
-                ? tr('accountRate', { pass: header.counts.pass, total: header.accounts })
+                ? roundAccountLabel(header)
                 : tr('windowSize', { rounds: totals!.rounds, accounts: totals!.accounts, participations: totals!.participations })
             }}
             · {{ tr('modelRate', { pass: (header || totals)!.passed_targets, total: (header || totals)!.targets }) }}
           </p>
-          <p class="flex flex-wrap gap-x-3 gap-y-1">
+          <p v-if="totals && !header" class="flex flex-wrap gap-x-3 gap-y-1">
             <span v-for="s in states" :key="s"
               ><i class="mr-1 inline-block h-2 w-2 rounded-sm" :class="colors[s]" />{{ tr('states.' + s) }}
-              {{ (header || totals)!.counts[s] }}</span
+              {{ totals.counts[s] }}</span
             >
           </p>
         </template>
@@ -172,7 +172,7 @@
       </div>
     </div>
     <IntelligenceArtworkDialog
-      v-if="art && detail"
+      v-if="art && detail && group"
       :group="group"
       :round="detail.round"
       :accounts="detail.accounts"
@@ -204,15 +204,22 @@ import { MONITOR_HISTORY_SLOTS } from './monitorCards'
 import './monitorHealthColors.css'
 import './monitorStatusStrip.css'
 
-const props = defineProps<{ group: IntelligenceGroup; model?: string; refreshKey?: number }>()
+const props = defineProps<{ group?: IntelligenceGroup; directoryMessage?: string; model?: string; refreshKey?: number }>()
 const { t, locale } = useI18n()
 const tr = (key: string, params: Record<string, unknown> = {}) => t('channelMonitorV2.intelligence.' + key, params)
 const states: IntelligenceVerdict[] = ['pass', 'suspect', 'degraded', 'unknown']
-const colors: Record<IntelligenceVerdict, string> = {
+const colors = {
   pass: 'health-score10',
   suspect: 'health-score5',
+  partial: 'health-score3',
   degraded: 'health-critical',
   unknown: 'health-unknown',
+}
+function roundAccountLabel(round: IntelligenceRound) {
+  return states
+    .filter((state) => round.counts[state] > 0)
+    .map((state) => tr('accountRate', { count: round.counts[state], total: round.accounts, state: tr('states.' + state) }))
+    .join(' · ')
 }
 const countLabel = (counts: IntelligenceCounts) => states.map((s) => tr('states.' + s) + ' ' + counts[s]).join(' · ')
 const time = (stamp: string | null) => (stamp ? new Date(stamp).toLocaleString(locale.value) : '—')
@@ -225,6 +232,14 @@ const rounds = ref<IntelligenceRound[]>([]),
   busy = ref(false),
   loadError = ref(false),
   reload = ref(0)
+const roundCells = computed(() => rounds.value.map((round) => ({
+  ...round,
+  state: round.verdict === 'degraded' && round.counts.degraded * 2 < round.accounts ? 'partial' as const : round.verdict,
+})))
+const emptyMessage = computed(() => {
+  if (!props.group && props.directoryMessage) return props.directoryMessage
+  return busy.value ? t('common.loading') : tr('noRounds')
+})
 const active = ref<{ kind: 'summary' | 'round'; id: string } | null>(null),
   page = ref(1),
   detailRetry = ref(0)
@@ -326,16 +341,17 @@ function closeArtwork() {
   })
 }
 watch(
-  [() => props.group.id, () => props.model, () => props.refreshKey, reload],
+  [() => props.group?.id, () => props.model, () => props.refreshKey, reload],
   async ([id, model], old, cleanup) => {
-    const request = new AbortController()
-    cleanup(() => request.abort())
     if (!old || old[0] !== id || old[1] !== model) {
       rounds.value = []
       dismiss(false)
     }
-    busy.value = true
     loadError.value = false
+    busy.value = id !== undefined
+    if (id === undefined) return
+    const request = new AbortController()
+    cleanup(() => request.abort())
     try {
       const rows = await intelligenceRounds(id, model, request.signal)
       if (request.signal.aborted) return
@@ -363,7 +379,7 @@ watch([active, page, detailRetry], async ([scope, pageNumber], old, cleanup) => 
     totals.value = undefined
   }
   detailError.value = false
-  if (!scope) return
+  if (!scope || !props.group) return
   detailBusy.value = !detail.value && !totals.value
   try {
     if (scope.kind === 'summary') {
