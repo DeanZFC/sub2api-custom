@@ -51,7 +51,7 @@ func TestScheduledTestDurationAndReviewConditions(t *testing.T) {
 	for _, tc := range []struct {
 		name, status, want string
 		ms                 int64
-	}{{"under", "success", "pass", 59999}, {"equal", "success", "pass", 60000}, {"over", "success", "fail", 60001}, {"missing", "success", "pending", -1}, {"unfinished", "running", "pending", 60001}, {"fast failure", "failed", "fail", 100}} {
+	}{{"under", "success", "pass", 59999}, {"equal", "success", "pass", 60000}, {"over", "success", "fail", 60001}, {"missing", "success", "pending", -1}, {"unfinished", "running", "pending", 60001}, {"fast execution failure", "failed", "pending", 100}} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := &ScheduledTestResult{Status: tc.status, OutputKind: "html", LatencyMs: tc.ms}
 			verdict, _ := EvaluateScheduledTestDuration(rule, result)

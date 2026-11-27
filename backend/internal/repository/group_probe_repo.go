@@ -153,7 +153,7 @@ func (r *groupProbeRepository) Claim(ctx context.Context) (*service.GroupProbeJo
 	if err != nil {
 		return nil, 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var job service.GroupProbeJob
 	var manual bool
 	var failures, windowMinutes, minRequests, durationMinutes int
@@ -234,7 +234,7 @@ func (r *groupProbeRepository) Finish(ctx context.Context, job *service.GroupPro
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var previous int
 	err = tx.QueryRowContext(ctx, `SELECT failures FROM group_probes WHERE group_id=$1 AND lease_owner=$2 AND lease_until>now() FOR UPDATE`, job.GroupID, job.Owner).Scan(&previous)
 	if errors.Is(err, sql.ErrNoRows) {

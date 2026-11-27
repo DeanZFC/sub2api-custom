@@ -233,7 +233,7 @@ func TestScheduledTestModelCheckManualRunRetriesOverloadBeforeApplyingActions(t 
 				require.Equal(t, "failed", repo.completed.Status)
 				require.Equal(t, "unknown", repo.completed.OutputModelCheck.Verdict)
 				require.Equal(t, "upstream_error", repo.completed.OutputModelCheck.Reason)
-				require.Equal(t, "fail", repo.verdict, "configured failure actions run only after all attempts fail")
+				require.Equal(t, "pending", repo.verdict, "an exhausted transport retry cannot establish a model mismatch")
 				require.Contains(t, repo.completed.ErrorMessage, "overloaded")
 			}
 		})

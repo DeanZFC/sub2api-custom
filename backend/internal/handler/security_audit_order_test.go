@@ -21,13 +21,13 @@ type promptAuditOrderCase struct {
 func TestPromptAuditGatePrecedesAccountBillingAndUpstreamSideEffects(t *testing.T) {
 	tests := []promptAuditOrderCase{
 		{file: "gateway_handler.go", function: "Messages", auditToken: "checkSecurityAudit"},
-		{file: "gateway_handler_chat_completions.go", function: "ChatCompletions", auditToken: "checkSecurityAudit"},
+		{file: "gateway_handler_chat_completions.go", function: "chatCompletions", auditToken: "checkSecurityAudit"},
 		{file: "gateway_handler_responses.go", function: "Responses", auditToken: "checkSecurityAudit"},
 		{file: "gemini_v1beta_handler.go", function: "GeminiV1BetaModels", auditToken: "checkSecurityAudit"},
 		{file: "gemini_cached_contents_handler.go", function: "GeminiCachedContentsCreate", auditToken: "checkSecurityAudit"},
 		{file: "openai_gateway_handler.go", function: "Responses", auditToken: "checkSecurityAudit"},
 		{file: "openai_gateway_handler.go", function: "Messages", auditToken: "checkSecurityAudit"},
-		{file: "openai_chat_completions.go", function: "ChatCompletions", auditToken: "checkSecurityAudit"},
+		{file: "openai_chat_completions.go", function: "chatCompletions", auditToken: "checkSecurityAudit"},
 		{file: "openai_images.go", function: "Images", auditToken: "checkSecurityAudit"},
 		{file: "grok_media.go", function: "handleGrokMedia", auditToken: "checkSecurityAudit"},
 		{file: "openai_embeddings.go", function: "Embeddings", auditToken: "checkSecurityAudit"},
@@ -56,6 +56,24 @@ func TestPromptAuditGatePrecedesAccountBillingAndUpstreamSideEffects(t *testing.
 			}
 			require.True(t, foundSideEffect, "coverage case must contain a downstream side effect")
 		})
+	}
+}
+
+// Both entry points must delegate directly to the audited implementation. In
+// particular, a public request must never receive the private probe meter.
+func TestChatCompletionsEntryPointsUseAuditedHandler(t *testing.T) {
+	for _, file := range []string{"gateway_handler_chat_completions.go", "openai_chat_completions.go"} {
+		for name, call := range map[string]string{
+			"ChatCompletions":      "h.chatCompletions(c, nil)",
+			"ProbeChatCompletions": "h.chatCompletions(c, meter)",
+		} {
+			t.Run(file+"/"+name, func(t *testing.T) {
+				source := stripGoComments(goFunctionSource(t, file, name))
+				_, body, ok := strings.Cut(source, "{")
+				require.True(t, ok)
+				require.Equal(t, call, strings.TrimSpace(strings.TrimSuffix(body, "}")))
+			})
+		}
 	}
 }
 
