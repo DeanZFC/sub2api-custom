@@ -66,8 +66,7 @@ func visualPassRateFixture(t *testing.T) *passRateFixture {
 		t.Setenv("MIGRATION_TEST_DATABASE_URL", integrationDatabaseDSN)
 	}
 	f := newPassRateFixture(t, 2)
-	f.exec(`CREATE TABLE quality_operations_config(id INT PRIMARY KEY,version BIGINT,config JSONB);
- INSERT INTO quality_operations_config VALUES(1,1,'{"pelican_review":{"enabled":true,"judge_account_id":63,"judge_model":"vision","daily_requests":100}}');`)
+	f.exec(`UPDATE quality_operations_config SET config = config || '{"pelican_review":{"enabled":true,"judge_account_id":63,"judge_model":"vision","daily_requests":100}}'::jsonb WHERE id = 1`)
 	f.exec(`UPDATE scheduled_test_definitions SET output_kind='html' WHERE id=$1`, f.definitionID)
 	rule := &f.plan.Protection.Rules[0]
 	rule.ExpectedAnswer = ""
