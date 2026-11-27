@@ -1,6 +1,19 @@
 /** Channel Monitor V2 (user + admin passive monitor UI) */
 export default {
   channelMonitorV2: {
+    probes: {
+      title: '分组主动探测',
+      hint: '选择支持 Chat Completions 的文本模型。同组、同模型在观察窗口内的成功和失败请求都计入。低于阈值时立即探测，并按设定间隔持续到本轮结束。之后再观察一个完整窗口，仍低于阈值就启动下一轮。',
+      windowMinutes: '观察窗口（分钟）',
+      minRequests: '请求少于（笔）',
+      duration: '持续探测（分钟）',
+      interval: '探测间隔（秒）',
+      rule: '{minutes} 分钟内少于 {count} 笔时，每 {seconds} 秒探测一次，持续 {duration} 分钟',
+      roundUntil: '本轮持续至 {time}',
+      group: '分组', select: '选择分组', model: '公开模型名', save: '保存并启用', empty: '尚未配置分组探测', target: '分组 / 模型', lastUser: '最近观测到的用户请求', result: '最近探测', ttft: '首字耗时', cost: '本次预估上游成本', actions: '操作', pending: '等待或执行中', switched: '已切换上游账号', partial: '用量或价格不完整', run: '立即探测', pause: '暂停', resume: '启用',
+      states: { unknown: '等待首次探测', disabled: '已停用', healthy: '正常', confirming: '失败待确认', failed: '探测异常', recovered: '已恢复', stale: '结果已过期' },
+      reasons: { timeout: '探测超时', empty_response: '未收到有效文本', incomplete_stream: '响应流未正常完成', budget_unavailable: '暂时无法检查检测预算', group_unavailable: '暂时无法读取分组', budget_exhausted: '今日检测预算不足' },
+    },
     title: '渠道监控',
     updating: '正在更新数据',
     updatedTo: '更新至 {time}',

@@ -976,6 +976,9 @@ func registerChannelMonitorV2Routes(admin *gin.RouterGroup, h *handler.Handlers,
 		config := monitor.Group("")
 		config.Use(featureGuard)
 		{
+			config.GET("/group-probes", h.Admin.GroupProbe.List)
+			config.PUT("/group-probes/:id", h.Admin.GroupProbe.Configure)
+			config.POST("/group-probes/:id/run", h.Admin.GroupProbe.Run)
 			config.GET("/config", h.ChannelMonitorV2.GetConfig)
 			config.PUT("/config", h.ChannelMonitorV2.UpdateConfig)
 		}

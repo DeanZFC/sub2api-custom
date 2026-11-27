@@ -75,7 +75,7 @@ func validateScheduledTestAllPass(plan *ScheduledTestPlan) error {
 	automatic := 0
 	for i := range c.Rules {
 		r := &c.Rules[i]
-		r.Priority, r.RequiredPass, r.PauseOnFailure = 0, false, true
+		r.Priority, r.RequiredPass = 0, false
 		r.OnPass = &ScheduledTestOutcomeAction{Scheduling: pass.Scheduling, GroupMode: "keep"}
 		r.OnFail = &ScheduledTestOutcomeAction{Scheduling: fail.Scheduling, GroupMode: "keep"}
 		if r.Vote == nil || !r.Vote.Enabled || r.HasDurationThreshold() || r.UsesAutoReview() {

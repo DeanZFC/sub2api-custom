@@ -182,26 +182,20 @@ describe('quality protection settings', () => {
     wrapper.unmount()
   })
 
-  it('shows execution failure as mandatory when a fail action is configured', async () => {
+  it('keeps execution errors pending regardless of configured quality actions', async () => {
     const wrapper = mountEditor({ enabled: true, rules: [{
       test_definition_id: 3, priority: 0, required_pass: false, pause_on_failure: false,
       expected_answer: '7', on_fail: { scheduling: 'pause', group_mode: 'keep' },
     }] })
     const numeric = wrapper.get('[data-protection-type="3"]')
-    const failure = numeric.get('[data-rule-failure]')
-    expect((failure.element as HTMLInputElement).checked).toBe(true)
-    expect(failure.attributes('disabled')).toBeDefined()
+    expect(numeric.find('[data-rule-failure]').exists()).toBe(false)
     expect(numeric.find('[data-rule-failure-action-hint]').exists()).toBe(true)
-    expect(wrapper.props('modelValue').rules[0].pause_on_failure).toBe(false)
+    expect(numeric.find('[data-rule-failure-action-hint]').text()).toContain('Execution errors remain pending')
 
     await wrapper.setProps({ modelValue: { enabled: true, rules: [{
       test_definition_id: 3, priority: 0, required_pass: false, pause_on_failure: false, expected_answer: '7',
     }] } })
-    expect((failure.element as HTMLInputElement).checked).toBe(false)
-    expect(failure.attributes('disabled')).toBeUndefined()
     expect(numeric.find('[data-rule-failure-action-hint]').exists()).toBe(false)
-    await failure.setValue(true)
-    expect(wrapper.props('modelValue').rules[0].pause_on_failure).toBe(true)
     wrapper.unmount()
   })
 
@@ -218,7 +212,7 @@ describe('quality protection settings', () => {
     const metadataOnly = copyTestProtection(wrapper.props('modelValue'))
     delete metadataOnly.rules[0].on_fail
     await wrapper.setProps({ modelValue: metadataOnly })
-    await section.get('[data-rule-failure]').setValue(false)
+    expect(section.find('[data-rule-failure]').exists()).toBe(false)
     expect(validTestProtection(wrapper.props('modelValue'), [modelType], groups)).toBe(true)
     await section.get('[data-rule-model-match]').setValue('snapshot')
     expect(wrapper.props('modelValue').rules[0].model_match).toBe('snapshot')
@@ -239,7 +233,7 @@ describe('quality protection settings', () => {
     await wrapper.get('[data-protection-enabled]').setValue(true)
     expect(wrapper.findAll('[data-protection-type]')).toHaveLength(3)
     expect(wrapper.props('modelValue').rules.map(rule => rule.test_definition_id)).toEqual([1, 2, 3])
-    expect(wrapper.props('modelValue').rules.every(rule => rule.pause_on_failure)).toBe(true)
+    expect(wrapper.props('modelValue').rules.every(rule => !rule.pause_on_failure)).toBe(true)
     expect(wrapper.props('modelValue').rules.every(rule => rule.on_pass?.scheduling === 'resume' && rule.on_fail?.scheduling === 'pause')).toBe(true)
   })
 
@@ -270,7 +264,7 @@ describe('quality protection settings', () => {
     expect(validTestProtection(wrapper.props('modelValue'), types)).toBe(false)
     await wrapper.get('[data-protection-type="1"] [data-rule-enabled]').setValue(true)
     const stats = wrapper.get('[data-protection-type="1"]')
-    expect(stats.get('[data-rule-failure]').attributes('disabled')).toBeDefined()
+    expect(stats.find('[data-rule-failure]').exists()).toBe(false)
     expect(validTestProtection(wrapper.props('modelValue'), types)).toBe(true)
     const legacy = copyTestProtection(wrapper.props('modelValue'))
     delete legacy.rules[0].on_fail

@@ -38,6 +38,16 @@
               type="button"
               role="tab"
               class="tab flex-1 sm:flex-none"
+              :class="adminMonitorTab === 'probes' ? 'tab-active' : ''"
+              :aria-selected="adminMonitorTab === 'probes'"
+              @click="adminMonitorTab = 'probes'"
+            >
+              {{ t('channelMonitorV2.probes.title') }}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              class="tab flex-1 sm:flex-none"
               :class="adminMonitorTab === 'legacy' ? 'tab-active' : ''"
               :aria-selected="adminMonitorTab === 'legacy'"
               @click="adminMonitorTab = 'legacy'"
@@ -50,6 +60,7 @@
 
       <MonitorSettingsPanel v-if="adminMonitorTab === 'v2'" />
 
+      <GroupProbePanel v-else-if="adminMonitorTab === 'probes'" />
       <TablePageLayout v-else>
       <template #filters>
         <MonitorFiltersBar
@@ -200,13 +211,14 @@ import MonitorPrimaryModelCell from '@/components/admin/monitor/MonitorPrimaryMo
 import MonitorActionsCell from '@/components/admin/monitor/MonitorActionsCell.vue'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useChannelMonitorFormat } from '@/composables/useChannelMonitorFormat'
+import GroupProbePanel from '@/features/channel-monitor-v2/GroupProbePanel.vue'
 import MonitorSettingsPanel from '@/features/channel-monitor-v2/MonitorSettingsPanel.vue'
 import { isChannelMonitorV1Mode } from '@/utils/featureFlags'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 const isV1Mode = computed(() => isChannelMonitorV1Mode())
-const adminMonitorTab = ref<'v2' | 'legacy'>(isChannelMonitorV1Mode() ? 'legacy' : 'v2')
+const adminMonitorTab = ref<'v2' | 'legacy' | 'probes'>(isChannelMonitorV1Mode() ? 'legacy' : 'v2')
 const {
   providerLabel,
   providerBadgeClass,

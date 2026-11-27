@@ -44,6 +44,36 @@ func TestScheduledTestAdminApprovalRetainsDurationCondition(t *testing.T) {
 	}
 }
 
+func TestScheduledTestExecutionFailureWithDurationRemainsPending(t *testing.T) {
+	state := &protectionState{
+		completed:    true,
+		automated:    "pending",
+		resultStatus: sql.NullString{String: "failed", Valid: true},
+		latencyMs:    sql.NullInt64{Int64: 500, Valid: true},
+		rule: service.ScheduledTestProtectionRule{Thresholds: []service.ScheduledTestThreshold{{
+			Metric: "latency_ms", Operator: "gt", Value: 100,
+		}}},
+	}
+	verdict, blocked, _ := combineProtectionVerdict(state, 0, 0)
+	require.Equal(t, "pending", verdict)
+	require.False(t, blocked)
+}
+
+func TestScheduledTestOutputContractFailureWithDurationRemainsQualityFailure(t *testing.T) {
+	state := &protectionState{
+		completed:    true,
+		automated:    "fail",
+		resultStatus: sql.NullString{String: "failed", Valid: true},
+		latencyMs:    sql.NullInt64{Int64: 500, Valid: true},
+		rule: service.ScheduledTestProtectionRule{Thresholds: []service.ScheduledTestThreshold{{
+			Metric: "latency_ms", Operator: "gt", Value: 100,
+		}}},
+	}
+	verdict, blocked, _ := combineProtectionVerdict(state, 0, 0)
+	require.Equal(t, "fail", verdict)
+	require.True(t, blocked)
+}
+
 func TestScheduledTestHTMLReviewDefaultsToPassUntilRejected(t *testing.T) {
 	for _, tc := range []struct {
 		name, kind, status, automatic, admin, want string

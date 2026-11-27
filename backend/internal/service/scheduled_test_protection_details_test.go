@@ -50,10 +50,11 @@ func TestProtectionDetailsMissingRuleDoesNotInventConditions(t *testing.T) {
 
 func TestProtectionDetailsFailedExecutionHasNoSyntheticMetrics(t *testing.T) {
 	hold := buildScheduledTestProtectionHold(ScheduledTestProtectionHoldSource{DefinitionID: 2, States: []ScheduledTestProtectionStateSource{{
-		DefinitionID: 2, Current: true, Automated: "fail", Verdict: "fail",
+		DefinitionID: 2, Current: true, Automated: "pending", Verdict: "pending",
 		Rule:   ScheduledTestProtectionRule{PauseOnFailure: true, Thresholds: []ScheduledTestThreshold{{Metric: "latency_ms", Operator: "lt", Value: 100}}},
 		Result: &ScheduledTestResult{Status: "failed"},
 	}}})
-	require.Equal(t, "检测执行失败", hold.Tests[0].AutomaticReason)
+	require.Equal(t, "检测执行失败，等待下一轮", hold.Tests[0].AutomaticReason)
+	require.Equal(t, "pending", hold.Tests[0].Verdict)
 	require.Nil(t, hold.Tests[0].Thresholds[0].Observed)
 }

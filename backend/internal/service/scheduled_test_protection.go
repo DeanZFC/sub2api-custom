@@ -34,13 +34,15 @@ type ScheduledTestProtectionRule struct {
 	TestDefinitionID int64                          `json:"test_definition_id"`
 	Thresholds       []ScheduledTestThreshold       `json:"thresholds,omitempty"`
 	MinSamples       int64                          `json:"min_samples,omitempty"`
-	PauseOnFailure   bool                           `json:"pause_on_failure,omitempty"`
-	ExpectedAnswer   string                         `json:"expected_answer,omitempty"`
-	AnswerMatch      string                         `json:"answer_match,omitempty"`
-	ModelMatch       string                         `json:"model_match,omitempty"`
-	Vote             *ScheduledTestVoteConfig       `json:"vote,omitempty"`
-	OnPass           *ScheduledTestOutcomeAction    `json:"on_pass,omitempty"`
-	OnFail           *ScheduledTestOutcomeAction    `json:"on_fail,omitempty"`
+	// PauseOnFailure is retained for compatibility with saved policies. An
+	// execution error is inconclusive and this legacy setting has no effect.
+	PauseOnFailure bool                        `json:"pause_on_failure,omitempty"`
+	ExpectedAnswer string                      `json:"expected_answer,omitempty"`
+	AnswerMatch    string                      `json:"answer_match,omitempty"`
+	ModelMatch     string                      `json:"model_match,omitempty"`
+	Vote           *ScheduledTestVoteConfig    `json:"vote,omitempty"`
+	OnPass         *ScheduledTestOutcomeAction `json:"on_pass,omitempty"`
+	OnFail         *ScheduledTestOutcomeAction `json:"on_fail,omitempty"`
 }
 
 type ScheduledTestThreshold struct {
@@ -281,15 +283,10 @@ func evaluateScheduledTestProtection(rule ScheduledTestProtectionRule, result *S
 		return verdict, reason
 	}
 	if result.Status != "success" && result.Status != "passed" {
-		// A configured failure action is an explicit request to resolve an
-		// unsuccessful execution as a failed quality check.  This lets rules
-		// such as Candy immediately run their on_fail group/scheduling action
-		// after the final retry, while preserving the legacy pending behavior
-		// for rules that have neither an action nor pause_on_failure enabled.
-		if rule.PauseOnFailure || rule.OnFail != nil {
-			return "fail", "检测执行失败"
+		if result.ExecutionInfo != nil && result.ExecutionInfo.OutputContractFailed {
+			return "fail", "检测回答格式不符合要求"
 		}
-		return "pending", "检测未完成，等待下一轮"
+		return "pending", "检测执行失败，等待下一轮"
 	}
 	if rule.UsesAutoReview() {
 		if result.ExecutionInfo == nil || result.ExecutionInfo.AutoReview == nil {
@@ -383,7 +380,9 @@ func EvaluateScheduledTestDuration(rule ScheduledTestProtectionRule, result *Sch
 		return "pending", "等待完整检测耗时"
 	}
 	if result.Status != "success" && result.Status != "passed" {
-		return "fail", "检测执行失败"
+		if result.ExecutionInfo == nil || !result.ExecutionInfo.OutputContractFailed {
+			return "pending", "检测执行失败，等待下一轮"
+		}
 	}
 	for _, threshold := range rule.Thresholds {
 		if threshold.Metric != "latency_ms" {

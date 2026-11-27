@@ -131,8 +131,8 @@ func TestScheduledTestActionsPreserveVerdictGates(t *testing.T) {
 	verdict, _ = evaluateScheduledTestProtection(rule, &ScheduledTestResult{Status: "success", ResponseText: "<svg>...</svg>"})
 	require.Equal(t, "pass", verdict, "the repository must still wait for votes before resolving the final verdict")
 	verdict, _ = evaluateScheduledTestProtection(rule, &ScheduledTestResult{Status: "failed"})
-	require.Equal(t, "fail", verdict, "an explicit failure action resolves a failed execution immediately")
-	require.Equal(t, []int64{4}, rule.OutcomeAction(verdict).GroupIDs)
+	require.Equal(t, "pending", verdict, "an explicit failure action does not turn an execution error into a quality failure")
+	require.Empty(t, rule.OutcomeAction(verdict).GroupIDs)
 }
 
 func TestScheduledTestPlanHasGroupActions(t *testing.T) {

@@ -27,7 +27,7 @@ func TestScheduledTestProtectionAnswersAndExecutionFailure(t *testing.T) {
 	for _, tc := range []struct {
 		name, match, expected, actual, status, want string
 		number                                      *float64
-		voting, pause                               bool
+		voting, pause, outputContractFailed         bool
 		onFailAction                                bool
 	}{
 		{name: "exact trims outer whitespace", match: "exact", expected: "PASS", actual: " \nPASS\n ", status: "success", want: "pass"},
@@ -42,9 +42,10 @@ func TestScheduledTestProtectionAnswersAndExecutionFailure(t *testing.T) {
 		{name: "numeric unmarked reasoning rejected", match: "numeric", expected: "1", actual: "step 1: inspect the input\nrow 2 contains 7 values", status: "success", want: "fail"},
 		{name: "vote reference is not auto compared", match: "exact", expected: "reference picture", actual: "different model output", status: "success", voting: true, want: "pass"},
 		{name: "vote numeric reference is not auto parsed", match: "numeric", expected: "for humans only", actual: "no number", status: "success", voting: true, want: "pass"},
-		{name: "execution failure pauses when configured", status: "failed", pause: true, want: "fail"},
-		{name: "execution failure runs explicit failure action", status: "failed", onFailAction: true, want: "fail"},
+		{name: "execution failure stays inconclusive when configured", status: "failed", pause: true, want: "pending"},
+		{name: "execution failure does not run explicit failure action", status: "failed", onFailAction: true, want: "pending"},
 		{name: "execution failure is inconclusive otherwise", status: "failed", want: "pending"},
+		{name: "invalid output format remains a quality failure", status: "failed", outputContractFailed: true, want: "fail"},
 		{name: "not completed does not recover", status: "running", want: "pending"},
 		{name: "configured failure action waits for completion", status: "running", onFailAction: true, want: "pending"},
 		{name: "queued protection waits for completion", status: "pending", pause: true, want: "pending"},
@@ -54,12 +55,27 @@ func TestScheduledTestProtectionAnswersAndExecutionFailure(t *testing.T) {
 			if tc.onFailAction {
 				rule.OnFail = &ScheduledTestOutcomeAction{Scheduling: "keep", GroupMode: "assign", GroupIDs: []int64{8}}
 			}
-			verdict, reason := evaluateScheduledTestProtection(rule, &ScheduledTestResult{Status: tc.status, ResponseText: tc.actual, OutputNumeric: tc.number})
+			result := &ScheduledTestResult{Status: tc.status, ResponseText: tc.actual, OutputNumeric: tc.number}
+			if tc.outputContractFailed {
+				result.ExecutionInfo = &ScheduledTestExecutionInfo{OutputContractFailed: true}
+			}
+			verdict, reason := evaluateScheduledTestProtection(rule, result)
 			require.Equal(t, tc.want, verdict, reason)
 		})
 	}
 	verdict, _ := evaluateScheduledTestProtection(ScheduledTestProtectionRule{}, nil)
 	require.Equal(t, "pending", verdict)
+}
+
+func TestScheduledTestDurationDoesNotTreatExecutionFailureAsQualityFailure(t *testing.T) {
+	rule := ScheduledTestProtectionRule{Thresholds: []ScheduledTestThreshold{{Metric: "latency_ms", Operator: "gt", Value: 100}}}
+	verdict, _ := EvaluateScheduledTestDuration(rule, &ScheduledTestResult{Status: "failed", LatencyMs: 500})
+	require.Equal(t, "pending", verdict)
+
+	verdict, _ = EvaluateScheduledTestDuration(rule, &ScheduledTestResult{
+		Status: "failed", LatencyMs: 500, ExecutionInfo: &ScheduledTestExecutionInfo{OutputContractFailed: true},
+	})
+	require.Equal(t, "fail", verdict, "a completed response that violates the output contract remains a quality failure")
 }
 
 func TestScheduledTestProtectionValidation(t *testing.T) {

@@ -345,6 +345,11 @@ func doUpstreamRequest(client *http.Client, req *http.Request, drainTimeouts ...
 		drainTimeout = drainTimeouts[0]
 	}
 	ctx, cancel := pkghttputil.NewUpstreamAttemptContext(req.Context(), drainTimeout)
+	cancel, err := service.PrepareGroupProbeTransport(req, cancel)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
 	resp, err := servertiming.Do(client, req.WithContext(ctx))
 	if err != nil {
 		cancel()

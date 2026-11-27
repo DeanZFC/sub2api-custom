@@ -210,7 +210,8 @@ func protectionVoteCounts(ctx context.Context, tx *sql.Tx, state *protectionStat
 }
 
 func combineProtectionVerdict(state *protectionState, pass, fail int) (string, bool, string) {
-	if state.completed && state.rule.HasDurationThreshold() {
+	if state.completed && state.rule.HasDurationThreshold() &&
+		(state.resultStatus.String == "success" || state.resultStatus.String == "passed") {
 		latency := int64(-1)
 		if state.latencyMs.Valid {
 			latency = state.latencyMs.Int64

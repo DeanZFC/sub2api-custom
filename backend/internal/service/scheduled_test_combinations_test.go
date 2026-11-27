@@ -366,7 +366,7 @@ func TestScheduledTestCombinationsValidationDepthAndNodeLimits(t *testing.T) {
 	}
 }
 
-func TestScheduledTestCombinationsSourceExecutionFailureCanRemainPending(t *testing.T) {
+func TestScheduledTestCombinationsExecutionFailureAlwaysRemainsPending(t *testing.T) {
 	plan := combinationTestPlan()
 	plan.Protection.Rules[0].PauseOnFailure = false
 	plan.Protection.Rules[0].OnFail = nil
@@ -376,8 +376,11 @@ func TestScheduledTestCombinationsSourceExecutionFailureCanRemainPending(t *test
 	require.Nil(t, decision.Action)
 
 	plan.Protection.Rules[0].PauseOnFailure = true
+	plan.Protection.Rules[0].OnFail = &ScheduledTestOutcomeAction{Scheduling: "pause", GroupMode: "keep"}
 	verdict, _ = evaluateScheduledTestProtection(plan.Protection.Rules[0], &ScheduledTestResult{Status: "failed"})
-	require.Equal(t, "fail", verdict)
+	require.Equal(t, "pending", verdict)
+	decision = EvaluateScheduledTestCombinations(plan.Protection, map[int64]string{1: verdict, 2: "pass"})
+	require.Nil(t, decision.Action)
 }
 
 func TestScheduledTestCombinationsRequireEnabledCombinedMode(t *testing.T) {

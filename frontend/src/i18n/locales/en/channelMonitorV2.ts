@@ -1,6 +1,19 @@
 /** Channel Monitor V2 (user + admin passive monitor UI) */
 export default {
   channelMonitorV2: {
+    probes: {
+      title: 'Group probes',
+      hint: 'Choose a Chat Completions text model. Successful and failed user requests for this group and model both count. Below the threshold, probes start immediately and repeat at the chosen interval for the full duration. After another observation window, a new round starts if traffic is still low.',
+      windowMinutes: 'Observation window (minutes)',
+      minRequests: 'Probe below (requests)',
+      duration: 'Probe duration (minutes)',
+      interval: 'Probe interval (seconds)',
+      rule: 'Below {count} requests in {minutes} min, probe every {seconds}s for {duration} min',
+      roundUntil: 'Round ends at {time}',
+      group: 'Group', select: 'Select a group', model: 'Public model name', save: 'Save and enable', empty: 'No group probes configured', target: 'Group / model', lastUser: 'Last observed user request', result: 'Last probe', ttft: 'Time to first text', cost: 'Estimated upstream cost', actions: 'Actions', pending: 'Queued or running', switched: 'Switched upstream account', partial: 'Incomplete usage or pricing', run: 'Probe now', pause: 'Pause', resume: 'Enable',
+      states: { unknown: 'Awaiting first probe', disabled: 'Disabled', healthy: 'Healthy', confirming: 'Awaiting confirmation', failed: 'Failed', recovered: 'Recovered', stale: 'Stale' },
+      reasons: { timeout: 'Probe timed out', empty_response: 'No text returned', incomplete_stream: 'Response stream did not finish normally', budget_unavailable: 'Budget check unavailable', group_unavailable: 'Group unavailable', budget_exhausted: 'Daily probe budget exhausted' },
+    },
     title: 'Channel Monitor',
     updating: 'Updating data',
     updatedTo: 'Updated to {time}',
