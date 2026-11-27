@@ -1,5 +1,5 @@
 <template>
-  <AppLayout>
+  <div>
     <div class="space-y-6">
       <section class="card p-5 sm:p-6">
         <div class="flex flex-wrap items-start justify-between gap-5">
@@ -95,7 +95,7 @@
     </BaseDialog>
 
     <BaseDialog :show="!!selectedRequest" :title="t('invoice.detail')" width="wide" @close="selectedRequest = null"><InvoiceRequestDetails v-if="selectedRequest" :request="selectedRequest" /><template #footer><div class="flex justify-end"><button v-if="selectedRequest?.status === 'issued'" class="btn btn-primary" :disabled="downloadingIds.has(selectedRequest.id)" @click="download(selectedRequest)"><Icon name="download" />{{ t('invoice.download') }}</button></div></template></BaseDialog>
-  </AppLayout>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -107,7 +107,6 @@ import { useAuthStore } from '@/stores/auth'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import { formatOrderDateTime } from '@/components/payment/orderUtils'
 import type { InvoiceConfig, InvoiceOrder, InvoiceRequest } from '@/types/invoice'
-import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Icon from '@/components/icons/Icon.vue'

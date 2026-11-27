@@ -440,7 +440,7 @@ func createTestPayload(modelID string, customPrompt ...string) (map[string]any, 
 }
 
 func (s *AccountTestService) setAccountTestError(ctx context.Context, accountID int64, message string) error {
-	if s.accountRepo == nil {
+	if s.accountRepo == nil || isIntelligenceAccountTest(ctx) {
 		return nil
 	}
 	// A scheduled check must be able to retry authentication failures before
@@ -937,8 +937,12 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		}
 		return s.testExcelBPSToolRoundtrip(c, account, testModelID)
 	}
+	turn, _ := ctx.Value(intelligenceTurnKey{}).(*intelligenceTurn)
 	bpsEnabled := s.openaiGatewayService == nil || s.openaiGatewayService.excelBPSGloballyEnabled(ctx)
 	if bpsEnabled && account.IsExcelBPSEnabledForModel(testModelID) {
+		if turn != nil {
+			return s.sendErrorAndEnd(c, "Codex state unavailable on the selected transport")
+		}
 		return s.testExcelBPSAccountConnection(c, account, testModelID, prompt)
 	}
 
@@ -994,6 +998,9 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		// OAuth uses ChatGPT internal API
 		apiURL = chatgptCodexAPIURL
 	} else if credentialAccount.Type == "apikey" {
+		if turn != nil {
+			return s.sendErrorAndEnd(c, "Codex state unavailable on the selected transport")
+		}
 		// API Key - use Platform API
 		authToken = credentialAccount.GetOpenAIProtocolAPIKey()
 		if authToken == "" {
@@ -1030,6 +1037,9 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		upstreamTestModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
 	}
 	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth, prompt)
+	if turn != nil && isOAuth {
+		turn.continueInput(payload)
+	}
 	applyAccountTestOutputTokenLimit(ctx, payload, "max_output_tokens")
 	applyAccountTestReasoningEffort(payload, accountTestReasoningEffort(ctx))
 	applyScheduledTestContentInstructions(ctx, payload, APIProtocolResponses)
@@ -1086,6 +1096,9 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		enforceCodexIdentityHeadersWithUA(req.Header, credentialAccount.GetOpenAIUserAgent())
 	}
 
+	if turn != nil && isOAuth {
+		turn.prepare(req)
+	}
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	credentialAccount.ApplyHeaderOverrides(req.Context(), req.Header)
 
@@ -1126,7 +1139,8 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 					}
 					retryReq.Host = req.Host
 					beginAccountTestModelAttempt(c, upstreamTestModelID)
-					resp, err = s.doOpenAIAccountTestUpstream(retryReq, proxyURL, account, true)
+					req = retryReq
+					resp, err = s.doOpenAIAccountTestUpstream(req, proxyURL, account, true)
 					if err != nil {
 						return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
 					}
@@ -1141,6 +1155,9 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		}
 	}
 
+	if turn != nil && isOAuth {
+		turn.observe(req, resp)
+	}
 	if isOAuth && s.accountRepo != nil {
 		if updates, err := extractOpenAICodexProbeUpdates(resp); err == nil && len(updates) > 0 {
 			_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
@@ -2588,7 +2605,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 }
 
 func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, account *Account, headers http.Header, body []byte) {
-	if s == nil || s.accountRepo == nil || account == nil {
+	if s == nil || s.accountRepo == nil || account == nil || isIntelligenceAccountTest(ctx) {
 		return
 	}
 
@@ -3747,6 +3764,11 @@ func (s *AccountTestService) sendEvent(c *gin.Context, event TestEvent) {
 
 // sendErrorAndEnd sends an error event and ends the stream
 func (s *AccountTestService) sendErrorAndEnd(c *gin.Context, errorMsg string) error {
+	// Some upstream error bodies echo request headers. The state probe only
+	// needs completion and HTTP telemetry, never the echoed opaque value.
+	if turn, _ := c.Request.Context().Value(intelligenceTurnKey{}).(*intelligenceTurn); turn != nil {
+		errorMsg = "Codex state probe did not complete"
+	}
 	logAccountTestError(c, errorMsg)
 	s.sendEvent(c, TestEvent{Type: "error", Error: errorMsg})
 	return fmt.Errorf("%s", errorMsg)

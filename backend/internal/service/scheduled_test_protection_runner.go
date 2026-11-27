@@ -15,6 +15,14 @@ func (s *ScheduledTestRunnerService) runAccountEligible(ctx context.Context, pla
 		return false, nil
 	}
 	if s.scheduledSvc != nil {
+		if policy := plan.Protection.Intelligence; policy != nil {
+			if repo, ok := s.scheduledSvc.resultRepo.(intelligenceEligibleRepository); ok {
+				if result == nil || result.ID == 0 {
+					return false, fmt.Errorf("intelligence result snapshot required")
+				}
+				return repo.IntelligenceTargetEligible(ctx, result.ID, plan.ID, accountID, policy.Version)
+			}
+		}
 		if repo, ok := s.scheduledSvc.resultRepo.(ScheduledTestRunEligibilityRepository); ok {
 			if result == nil || result.RunID == "" {
 				return false, fmt.Errorf("test run snapshot is required")

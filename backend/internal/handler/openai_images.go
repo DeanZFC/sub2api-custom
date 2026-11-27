@@ -168,17 +168,23 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	jsonKeepaliveStarted := false
 	defer func() { stopJSONKeepalive() }()
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
+	recovery := newHTTPOpenAI429Recovery(c, &streamStarted, h.handleFailoverExhausted)
 
 	for {
 		reqLog.Debug("openai.images.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
+		selectionCtx, cancelSelection := recovery.waitContext(requestCtx)
 		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForImages(
-			requestCtx,
+			selectionCtx,
 			apiKey.GroupID,
 			sessionHash,
 			routingModel,
 			failedAccountIDs,
 			parsed.RequiredCapabilityForModel(channelMapping.MappedModel),
 		)
+		cancelSelection()
+		if recovery.stopAfterSelection(selection) {
+			return
+		}
 		if err != nil {
 			if handleAPIKeyFallbackAdmissionError(c, err, c.Writer.Written()) {
 				return
@@ -246,7 +252,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		reqLog.Debug("openai.images.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, slotResult := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, parsed.Stream, &streamStarted, reqLog)
+		accountReleaseFunc, slotResult := h.acquireOpenAIAccountSlot(c, apiKey.GroupID, sessionHash, selection, parsed.Stream, &streamStarted, reqLog, nil, recovery)
 		if slotResult == openAISlotAcquireVetoed {
 			if !recordOpenAIAdmissionVeto(failedAccountIDs, account.ID, &admissionVetoCount, c.Request.Context()) {
 				h.handleOpenAIAdmissionVetoExhausted(c, streamStarted, reqLog, admissionVetoCount)
@@ -265,6 +271,9 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		}
 		forwardStart := time.Now()
 		writerSizeBeforeForward := service.OpenAIImagesJSONKeepaliveAdjustedWrittenSize(c)
+		if recovery.stopIfExpired(accountReleaseFunc) {
+			return
+		}
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {
@@ -330,31 +339,11 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 						)
 						return
 					}
-					if claimed, retryErr := service.TryConfiguredUpstreamErrorRetry(c.Request.Context(), failoverErr); claimed {
-						if retryErr != nil {
-							return
-						}
+					switch recovery.afterFailure(c.Request.Context(), account, failoverErr, sameAccountRetryCount, true, reqLog, "openai.images.pool_mode_same_account_retry") {
+					case openAIStopRetry:
+						return
+					case openAIRetrySameAccount:
 						continue
-					}
-					if failoverErr.RetryableOnSameAccount {
-						retryLimit := effectiveSameAccountRetryLimit(failoverErr, account)
-						if sameAccountRetryAllowed(failoverErr, sameAccountRetryCount[account.ID], retryLimit) {
-							sameAccountRetryCount[account.ID]++
-							retryDelay := sameAccountRetryDelayFor(failoverErr, sameAccountRetryCount[account.ID])
-							reqLog.Warn("openai.images.pool_mode_same_account_retry",
-								zap.Int64("account_id", account.ID),
-								zap.Int("upstream_status", failoverErr.StatusCode),
-								zap.Int("retry_limit", retryLimit),
-								zap.Int("retry_count", sameAccountRetryCount[account.ID]),
-								zap.Duration("retry_delay", retryDelay),
-							)
-							select {
-							case <-requestCtx.Done():
-								return
-							case <-time.After(retryDelay):
-							}
-							continue
-						}
 					}
 					h.gatewayService.RecordOpenAIAccountSwitch()
 					service.RecordStrictFailoverFailure(c.Request.Context(), account.ID, failoverErr)

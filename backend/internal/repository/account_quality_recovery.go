@@ -33,10 +33,13 @@ func (r *accountRepository) ClearAccountQualityProtection(ctx context.Context, a
 	}
 	if _, err := client.ExecContext(ctx, `UPDATE scheduled_test_results r SET protection_revoked=TRUE
  FROM scheduled_test_plans p WHERE r.plan_id=p.id AND p.id=ANY($2) AND r.account_id=$1
- AND r.run_id=p.latest_run_id AND r.run_id<>'' AND NOT r.protection_revoked`, accountID, pq.Array(plans)); err != nil {
+ AND (r.run_id=p.latest_run_id OR r.run_id LIKE 'intel-retest:%') AND r.run_id<>'' AND NOT r.protection_revoked`, accountID, pq.Array(plans)); err != nil {
 		return err
 	}
-	for _, table := range []string{"scheduled_test_protection_states", "scheduled_test_combination_states", "scheduled_test_pass_rate_states", "scheduled_test_all_pass_rounds"} {
+	if _, err := client.ExecContext(ctx, `UPDATE intelligence_observations SET released=true WHERE account_id=$1 AND NOT released`, accountID); err != nil {
+		return err
+	}
+	for _, table := range []string{"intelligence_model_states", "scheduled_test_protection_states", "scheduled_test_combination_states", "scheduled_test_pass_rate_states", "scheduled_test_all_pass_rounds"} {
 		if _, err := client.ExecContext(ctx, `DELETE FROM `+table+` WHERE account_id=$1`, accountID); err != nil {
 			return err
 		}

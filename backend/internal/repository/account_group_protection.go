@@ -14,11 +14,12 @@ func lockAccountMembershipProtection(ctx context.Context, tx sqlExecutor, accoun
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT p.id FROM scheduled_test_plans p
  WHERE EXISTS (SELECT 1 FROM scheduled_test_protection_states s WHERE s.plan_id=p.id AND s.account_id=$1)
+ OR EXISTS (SELECT 1 FROM intelligence_model_states s WHERE s.plan_id=p.id AND s.account_id=$1)
  OR EXISTS (SELECT 1 FROM scheduled_test_combination_states s WHERE s.plan_id=p.id AND s.account_id=$1)
  OR EXISTS (SELECT 1 FROM scheduled_test_pass_rate_states s WHERE s.plan_id=p.id AND s.account_id=$1)
  OR EXISTS (SELECT 1 FROM scheduled_test_all_pass_rounds s WHERE s.plan_id=p.id AND s.account_id=$1)
  OR EXISTS (SELECT 1 FROM scheduled_test_results r WHERE r.plan_id=p.id AND r.account_id=$1
-            AND r.run_id=p.latest_run_id AND r.run_id<>'' AND NOT r.protection_revoked)
+            AND (r.run_id=p.latest_run_id OR r.run_id LIKE 'intel-retest:%') AND r.run_id<>'' AND NOT r.protection_revoked)
  ORDER BY p.id FOR NO KEY UPDATE`, accountID)
 	if err != nil {
 		return nil, err
@@ -77,10 +78,13 @@ func releaseDetachedAccountProtection(ctx context.Context, tx sqlExecutor, accou
 	// moving the account back; only a newly frozen round may act again.
 	if _, err := tx.ExecContext(ctx, `UPDATE scheduled_test_results r SET protection_revoked=TRUE
  FROM scheduled_test_plans p WHERE r.plan_id=p.id AND p.id=ANY($2) AND r.account_id=$1
- AND r.run_id=p.latest_run_id AND r.run_id<>'' AND NOT r.protection_revoked`, accountID, pq.Array(detached)); err != nil {
+ AND (r.run_id=p.latest_run_id OR r.run_id LIKE 'intel-retest:%') AND r.run_id<>'' AND NOT r.protection_revoked`, accountID, pq.Array(detached)); err != nil {
 		return err
 	}
-	for _, table := range []string{"scheduled_test_protection_states", "scheduled_test_combination_states", "scheduled_test_pass_rate_states", "scheduled_test_all_pass_rounds"} {
+	if _, err := tx.ExecContext(ctx, `UPDATE intelligence_observations SET released=true WHERE account_id=$1 AND plan_id=ANY($2) AND NOT released`, accountID, pq.Array(detached)); err != nil {
+		return err
+	}
+	for _, table := range []string{"intelligence_model_states", "scheduled_test_protection_states", "scheduled_test_combination_states", "scheduled_test_pass_rate_states", "scheduled_test_all_pass_rounds"} {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE account_id=$1 AND plan_id=ANY($2)`, accountID, pq.Array(detached)); err != nil {
 			return err
 		}

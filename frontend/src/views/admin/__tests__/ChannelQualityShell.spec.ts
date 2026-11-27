@@ -11,7 +11,7 @@ describe('active intelligence management navigation', () => {
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/admin/tests', component: TestManagementView }] })
     await router.push('/admin/tests?plan_id=5&account_id=62'); await router.isReady()
     const wrapper = mount(TestManagementView, { global: { plugins: [router, createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false, messages: {} })], stubs: { AppLayout: { template: '<main><slot/></main>' }, Icon: true } } })
-    expect(wrapper.findAll('[role="tab"]')).toHaveLength(3)
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(4)
     expect(wrapper.get('[data-active]').isVisible()).toBe(true)
     expect(wrapper.get('[data-quality-section="plans"]').attributes('aria-selected')).toBe('true')
     expect(router.currentRoute.value.query).toEqual({ plan_id: '5', account_id: '62' })

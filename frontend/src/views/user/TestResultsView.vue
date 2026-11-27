@@ -1,13 +1,13 @@
 <template>
-  <AppLayout>
+  <component :is="embedded ? 'div' : AppLayout">
     <div class="space-y-5">
       <header class="flex flex-wrap items-center justify-between gap-3">
         <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('tests.title') }}</h2>
         <button class="btn btn-secondary" :disabled="loading" @click="load(true)"><Icon name="refresh" size="sm" />{{ t('common.refresh') }}</button>
       </header>
 
-      <p v-if="auth.isAdmin && reviewError" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ reviewError }}</p>
-      <div v-if="auth.isAdmin && hasAutomaticReviews" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 p-3 dark:border-dark-700" data-review-filter>
+      <p v-if="canReview && reviewError" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ reviewError }}</p>
+      <div v-if="canReview && hasAutomaticReviews" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 p-3 dark:border-dark-700" data-review-filter>
         <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.tests.autoReview.filterHint') }}</p>
         <label class="flex items-center gap-2 text-sm"><input v-model="showAllReviewResults" type="checkbox" data-show-all-reviews />{{ t('admin.tests.autoReview.showAllResults') }}</label>
       </div>
@@ -102,7 +102,7 @@
         <AdminTestDecision v-if="reviewFor(previewTarget)" :review="reviewFor(previewTarget)!" @decided="refreshAfterDecision" />
       </template>
     </BaseDialog>
-  </AppLayout>
+  </component>
 </template>
 
 <script setup lang="ts">
@@ -134,6 +134,9 @@ interface TestSeries {
 const { t } = useI18n()
 const app = useAppStore()
 const auth = useAuthStore()
+const props = defineProps<{ embedded?: boolean }>()
+const canReview = computed(() => auth.isAdmin && !props.embedded)
+
 const loading = ref(false)
 const allResults = ref<TestResult[]>([])
 const voteResults = ref<TestVoteResult[]>([])
@@ -145,13 +148,13 @@ let unmounted = false
 let loadPromise: Promise<void> | undefined
 const adminReviews = ref<TestAdminReview[]>([])
 const reviewError = ref('')
-const reviewIndex = computed(() => new Map(auth.isAdmin ? adminReviews.value.map(review => [review.result.id, review]) : []))
+const reviewIndex = computed(() => new Map(canReview.value ? adminReviews.value.map(review => [review.result.id, review]) : []))
 const reviewFor = (result: TestResult) => reviewIndex.value.get(result.id)
 const resultState = (result: TestResult) => testResultState(result, reviewFor(result)?.verdict)
 const showAllReviewResults = ref(true)
-const hasAutomaticReviews = computed(() => auth.isAdmin && regularResults.value.some(result => !!result.execution_info?.auto_review))
+const hasAutomaticReviews = computed(() => canReview.value && regularResults.value.some(result => !!result.execution_info?.auto_review))
 const reviewNeedsAttention = (result: TestResult) => {
-  if (!auth.isAdmin || showAllReviewResults.value) return true
+  if (!canReview.value || showAllReviewResults.value) return true
   const review = reviewFor(result)
   const automatic = result.execution_info?.auto_review
   return !automatic || (automatic.verdict === 'pending' && !review?.admin_verdict)
@@ -176,7 +179,7 @@ const regularResults = computed(() => {
   // review records are merged only when that result is unavailable; an older
   // review payload must not move a freshly re-routed account back to its
   // source group until the next poll.
-  if (auth.isAdmin) for (const review of adminReviews.value) {
+  if (canReview.value) for (const review of adminReviews.value) {
     const current = records.get(review.result.id)
     records.set(review.result.id, current ? { ...review.result, ...current, account_name: current.account_name || review.result.account_name, ...(review.result.execution_info ? { execution_info: { ...current.execution_info, ...review.result.execution_info } } : {}) } : review.result)
   }
@@ -214,7 +217,7 @@ const exposesAccount = (result: TestResult) => result.target_mode !== 'group' &&
 const targetKey = (result: TestResult) => exposesAccount(result) ? `account:${result.account_id}` : 'group'
 const groupKey = (result: TestResult) => result.group_id != null ? `group:${result.group_id}` : result.group_name ? `name:${result.group_name}` : 'ungrouped'
 const groupName = (result: TestResult) => result.group_name || (result.group_id != null ? `${t('tests.group')} #${result.group_id}` : t('tests.ungrouped'))
-const targetName = (result: TestResult) => exposesAccount(result) ? `${t('tests.account')} #${result.account_id}${auth.isAdmin && result.account_name ? ` · ${result.account_name}` : ''}` : t('tests.groupCheck')
+const targetName = (result: TestResult) => exposesAccount(result) ? `${t('tests.account')} #${result.account_id}${canReview.value && result.account_name ? ` · ${result.account_name}` : ''}` : t('tests.groupCheck')
 const testKey = (result: TestResult) => `${result.test_definition_id ?? result.test_definition?.id ?? testName(result)}:${result.model_id || ''}:${result.reasoning_effort || ''}`
 const tabId = (key: string) => `quality-group-${encodeURIComponent(key)}`
 
@@ -324,7 +327,7 @@ const loadHistory = async () => {
   try {
     // Administrator history can include results from before a group move.
     const planID = anchor.plan_id
-    const page = auth.isAdmin && planID != null ? await (async () => {
+    const page = canReview.value && planID != null ? await (async () => {
       const rows = await listAdminResults(planID, adminHistoryLimit + 1)
       const items = sortResults(rows.filter(result => isSuccessful(result) && (exposesAccount(anchor) || groupKey(result) === groupKey(anchor))
         && targetKey(result) === targetKey(anchor) && testKey(result) === testKey(anchor)))
@@ -335,7 +338,7 @@ const loadHistory = async () => {
     for (const result of page.items.filter(isSuccessful)) records.set(result.id, result)
     historyResults.value = sortResults([...records.values()])
     historyBeforeId.value = page.next_before_id
-    if (auth.isAdmin) adminHistoryLimit += 20
+    if (canReview.value) adminHistoryLimit += 20
   } catch (error) {
     if (request !== historyRequest) return
     const failure = error as { status?: number; response?: { status?: number } }
@@ -434,7 +437,7 @@ const load = (force = false): Promise<void> => {
   if (loadPromise && !force) return loadPromise
   loading.value = true
   const revision = ++dataRevision
-  const administrator = auth.isAdmin
+  const administrator = canReview.value
   const request = Promise.allSettled([
     testResultsAPI.list(3, 4),
     testResultsAPI.votes(),
@@ -446,7 +449,7 @@ const load = (force = false): Promise<void> => {
     allResults.value = results.status === 'fulfilled'
       ? sortResults(results.value.filter(result => result.output_kind !== 'statistics' && ['success', 'passed', 'failed', 'error', 'pending', 'running'].includes(result.status))) : []
     voteResults.value = votes.status === 'fulfilled' ? votes.value.filter(visibleVote) : []
-    adminReviews.value = administrator && auth.isAdmin && reviews.status === 'fulfilled' ? reviews.value : []
+    adminReviews.value = administrator && canReview.value && reviews.status === 'fulfilled' ? reviews.value : []
     votesLoadError.value = votes.status === 'rejected' ? extractApiErrorMessage(votes.reason, t('tests.voting.loadFailed')) : ''
     reviewError.value = administrator && reviews.status === 'rejected' ? extractApiErrorMessage(reviews.reason, t('tests.adminReview.loadFailed')) : ''
     if (results.status === 'rejected') app.showError(extractApiErrorMessage(results.reason, t('tests.loadFailed')))

@@ -16,6 +16,7 @@ var (
 )
 
 type ScheduledTestProtectionConfig struct {
+	Intelligence              *IntelligencePolicy            `json:"intelligence,omitempty"`
 	RequiredConsecutivePasses int                            `json:"required_consecutive_passes,omitempty"`
 	Enabled                   bool                           `json:"enabled"`
 	Rules                     []ScheduledTestProtectionRule  `json:"rules"`

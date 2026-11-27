@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"time"
 )
 
 func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
@@ -125,6 +124,12 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 	if request == nil || account == nil {
 		return nil, errors.New("OpenAI request or account is missing")
 	}
+	return executeQualityTestHTTP(request, account.ID, func(r *http.Request) (*http.Response, error) {
+		return s.sendOpenAIAccountTestUpstream(r, proxyURL, account, useTLSFallback)
+	})
+}
+
+func (s *AccountTestService) sendOpenAIAccountTestUpstream(request *http.Request, proxyURL string, account *Account, useTLSFallback bool) (*http.Response, error) {
 	if err := rejectRetiredVMAccount(request.Context(), s.accountRepo, account); err != nil {
 		return nil, err
 	}
@@ -140,9 +145,7 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 				return nil, err
 			}
 			request = request.WithContext(context.WithValue(request.Context(), astraCandySkipObservationKey{}, true))
-			started := time.Now().UTC()
-			response, sendErr := gateway.doOpenAIUpstream(request, proxyURL, account)
-			return observeAccountTestResponse(request.Context(), started, response, sendErr)
+			return gateway.doOpenAIUpstream(request, proxyURL, account)
 		}
 	}
 	if s.openaiGatewayService != nil && s.openaiGatewayService.openaiIPv6 != nil {
@@ -158,14 +161,13 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 		return nil, err
 	}
 	if s.pluginManager != nil && !account.IsManagedIPv6Bound() {
-		started := time.Now().UTC()
 		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
 		if handled {
-			return observeAccountTestResponse(request.Context(), started, response, err)
+			return response, err
 		}
 	}
 	if useTLSFallback {
-		return s.doAccountTestHTTPWithTLS(
+		return s.httpUpstream.DoWithTLS(
 			request,
 			proxyURL,
 			account.ID,
@@ -174,5 +176,5 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 		)
 	}
 
-	return s.doAccountTestHTTP(request, proxyURL, account.ID, account.Concurrency)
+	return s.httpUpstream.Do(request, proxyURL, account.ID, account.Concurrency)
 }

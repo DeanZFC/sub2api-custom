@@ -1,6 +1,6 @@
 <template>
   <section class="card space-y-3 p-5" data-testid="recharge-coupon-picker">
-    <div class="flex items-center justify-between gap-3"><label for="recharge-coupon" class="font-medium">{{ t('coupon.select') }}</label><RouterLink to="/coupons" class="text-sm text-primary-600">{{ t('coupon.title') }}</RouterLink></div>
+    <label for="recharge-coupon" class="block font-medium">{{ t('coupon.select') }}</label>
     <select id="recharge-coupon" v-model.number="selected" class="input" :disabled="disabled || loading"><option :value="0">{{ t('coupon.none') }}</option><option v-if="selected && !chosen" :value="selected" disabled>{{ t('coupon.unavailableSelected') }}</option><option v-for="c in coupons" :key="c.id" :value="c.id" :disabled="c.snapshot.currency !== currency || amount < c.snapshot.min_amount">{{ c.snapshot.name }} · {{ c.snapshot.currency }} ≥ {{ c.snapshot.min_amount }}</option></select>
     <p v-if="chosen" class="text-sm text-gray-500">{{ t(chosen.snapshot.stackable ? 'coupon.stackYes' : 'coupon.stackNo') }} · {{ t('coupon.expires') }} {{ new Date(chosen.expires_at).toLocaleString() }}</p>
     <p v-if="quoting" role="status" class="text-sm text-gray-500">{{ t('coupon.quoteLoading') }}</p><p v-if="error" role="alert" class="text-sm text-red-600">{{ error }} <button type="button" class="underline" @click="retry">{{ t('common.refresh') }}</button></p>

@@ -158,7 +158,7 @@ type createScheduledTestPlanRequest struct {
 	SortOrder          *int                                  `json:"sort_order"`
 	GroupIDs           []int64                               `json:"group_ids" binding:"required"`
 	ExcludedAccountIDs []int64                               `json:"excluded_account_ids"`
-	TestDefinitionIDs  []int64                               `json:"test_definition_ids" binding:"required"`
+	TestDefinitionIDs  []int64                               `json:"test_definition_ids"`
 	ModelID            string                                `json:"model_id"`
 	ModelIDs           []string                              `json:"model_ids"`
 	ReasoningEffort    string                                `json:"reasoning_effort"`

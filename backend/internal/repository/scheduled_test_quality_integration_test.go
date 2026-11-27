@@ -107,6 +107,9 @@ func TestScheduledTestQualityIntegration(t *testing.T) {
 	applyMigration("315_scheduled_test_multi_model.sql")
 	applyMigration("326_scheduled_test_all_pass_rounds.sql")
 	applyMigration("332_archive_scheduled_test_definitions.sql")
+	applyMigration("294_quality_operations.sql")
+	applyMigration("368_intelligence_policy.sql")
+	applyMigration("369_scheduled_intelligence_rounds.sql")
 	var statisticsCount int
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM scheduled_test_definitions WHERE key='hourly_stats' AND output_kind='statistics' AND prompt='' AND enabled AND sort_order=2`).Scan(&statisticsCount))
 	require.Equal(t, 1, statisticsCount, "the local statistics definition is seeded idempotently")

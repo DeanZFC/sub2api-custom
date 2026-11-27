@@ -256,7 +256,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/test-results',
     name: 'TestResults',
-    component: () => import('@/views/user/TestResultsView.vue'),
+    redirect: to => ({ path: '/monitor', query: { ...to.query, section: 'intelligence' } }),
     meta: { requiresAuth: true, requiresAdmin: false, title: 'Channel Quality Checks', titleKey: 'tests.title', descriptionKey: 'tests.description' }
   },
   {
@@ -358,29 +358,21 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/orders',
-    name: 'OrderList',
-    component: () => import('@/views/user/UserOrdersView.vue'),
+    component: () => import('@/views/user/UserOrdersLayout.vue'),
     meta: {
       requiresAuth: true,
       requiresAdmin: false,
       title: 'My Orders',
       titleKey: 'nav.myOrders',
       requiresPayment: true
-    }
+    },
+    children: [
+      { path: '', name: 'OrderList', component: () => import('@/views/user/UserOrdersView.vue') },
+      { path: 'invoices', name: 'UserInvoices', component: () => import('@/views/user/UserInvoicesView.vue') }
+    ]
   },
-  { path: '/coupons', name: 'UserCoupons', component: () => import('@/views/user/UserCouponsView.vue'), meta: { requiresAuth: true, requiresAdmin: false, title: 'My coupons', titleKey: 'coupon.title' } },
-  {
-    path: '/invoices',
-    name: 'UserInvoices',
-    component: () => import('@/views/user/UserInvoicesView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: false,
-      title: 'Self-service invoicing',
-      titleKey: 'invoice.title',
-      requiresPayment: true
-    }
-  },
+  { path: '/invoices', redirect: { name: 'UserInvoices' } },
+  { path: '/coupons', redirect: '/purchase' },
   {
     path: '/payment/qrcode',
     name: 'PaymentQRCode',

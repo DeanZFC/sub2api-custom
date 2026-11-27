@@ -44,6 +44,11 @@ var (
 	redisNamespaceSeq uint64
 )
 
+// IntegrationTestDatabase exposes the testcontainer to external package integration tests.
+func IntegrationTestDatabase() (*sql.DB, *dbent.Client) {
+	return integrationDB, integrationEntClient
+}
+
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 

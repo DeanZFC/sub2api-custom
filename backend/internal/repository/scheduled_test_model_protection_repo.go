@@ -12,7 +12,15 @@ import (
 // The model set comes from the configured policy, not only completed results:
 // the first failing model in a new round must not pause healthy/pending peers.
 // Existing pass-rate holds survive disabling the schedule, as before.
-const activeTestProtectionProjectionSQL = `WITH all_holds AS (
+const activeTestProtectionProjectionSQL = `WITH intelligence_holds AS (
+ SELECT s.model_key,
+ ((p.protection->'intelligence'->>'pause_on_any'='true' AND s.hold_version=p.protection->'intelligence'->>'version')
+  OR count(*) OVER(PARTITION BY s.plan_id,s.hold_version)=cardinality(p.model_ids)) AS whole_account
+ FROM intelligence_model_states s JOIN scheduled_test_plans p ON p.id=s.plan_id
+ WHERE s.account_id=$1 AND s.blocked AND p.enabled AND jsonb_typeof(p.protection->'intelligence')='object'
+ AND s.model_key=ANY(p.model_ids) AND NOT($1=ANY(p.excluded_account_ids))
+ AND EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=$1 AND ag.group_id=ANY(p.group_ids))
+), all_holds AS (
  SELECT s.model_key,s.reason,s.updated_at,
         (s.model_key='') AS account_wide
  FROM scheduled_test_protection_states s
@@ -65,13 +73,13 @@ const activeTestProtectionProjectionSQL = `WITH all_holds AS (
  'reason',(SELECT h.reason FROM all_holds h WHERE h.account_wide OR h.model_key=m.model_key ORDER BY h.updated_at DESC LIMIT 1))) AS state
  FROM (SELECT model_key FROM monitored_models UNION SELECT model_key FROM model_holds) m
 )
-SELECT COALESCE((SELECT jsonb_object_agg(model_key,reason) FROM model_holds),'{}'::jsonb),
- EXISTS(SELECT 1 FROM monitored_models) AND NOT EXISTS(
+SELECT COALESCE((SELECT jsonb_object_agg(model_key,'智商监测确认降智'::text) FROM intelligence_holds),'{}'::jsonb) || COALESCE((SELECT jsonb_object_agg(model_key,reason) FROM model_holds),'{}'::jsonb),
+ EXISTS(SELECT 1 FROM intelligence_holds WHERE whole_account) OR EXISTS(SELECT 1 FROM monitored_models) AND NOT EXISTS(
    SELECT 1 FROM monitored_models m WHERE NOT EXISTS(SELECT 1 FROM model_holds h WHERE h.model_key=m.model_key OR h.model_key='')),
  EXISTS(SELECT 1 FROM all_holds WHERE account_wide),
  COALESCE((SELECT reason FROM all_holds WHERE account_wide ORDER BY updated_at DESC LIMIT 1),
           (SELECT reason FROM model_holds ORDER BY model_key LIMIT 1),'渠道质量检测保护'),
- COALESCE((SELECT jsonb_object_agg(model_key,state) FROM model_states),'{}'::jsonb)`
+ COALESCE((SELECT jsonb_object_agg(model_key,state) FROM model_states),'{}'::jsonb) || COALESCE((SELECT jsonb_object_agg(model_key,jsonb_build_object('status','blocked','reason','智商监测确认降智')) FROM intelligence_holds),'{}'::jsonb)`
 
 type activeTestProtectionProjection struct {
 	modelHolds       json.RawMessage
@@ -136,6 +144,7 @@ func scheduledTestProjectionAccountIDs(ctx context.Context, tx *sql.Tx, plans ..
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT a.id FROM accounts a WHERE a.deleted_at IS NULL AND (
  EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=a.id AND ag.group_id=ANY($1))
+ OR EXISTS(SELECT 1 FROM intelligence_model_states s WHERE s.account_id=a.id AND s.plan_id=ANY($2))
  OR EXISTS(SELECT 1 FROM scheduled_test_protection_states s WHERE s.account_id=a.id AND s.plan_id=ANY($2))
  OR EXISTS(SELECT 1 FROM scheduled_test_combination_states s WHERE s.account_id=a.id AND s.plan_id=ANY($2))
  OR EXISTS(SELECT 1 FROM scheduled_test_pass_rate_states s WHERE s.account_id=a.id AND s.plan_id=ANY($2)))

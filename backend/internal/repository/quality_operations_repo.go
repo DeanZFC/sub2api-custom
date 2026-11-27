@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -97,6 +98,7 @@ func (r *qualityOperationsRepository) ReserveQualityProbe(ctx context.Context, a
 	if err != nil {
 		return nil, err
 	}
+	standard := strings.HasPrefix(session, "intelligence:") || strings.HasPrefix(session, "intelligence-retest:")
 	now := time.Now().UTC()
 	day := now.Format("2006-01-02")
 	if tokens < c.TokenReservation {
@@ -114,7 +116,31 @@ func (r *qualityOperationsRepository) ReserveQualityProbe(ctx context.Context, a
 		if id != 0 {
 			maxRequests, maxTokens = c.AccountDailyRequests, c.AccountDailyTokens
 		}
-		if c.BudgetEnabled && ((maxRequests > 0 && requests >= maxRequests) || (maxTokens > 0 && (tokens > maxTokens || spent > maxTokens-tokens))) {
+		enforce := c.BudgetEnabled
+		if standard && !enforce {
+			// The same global/day row lock serializes admission. With site limits
+			// disabled only this preset shares a finite allowance across its plans.
+			defaults := service.DefaultQualityOperationsConfig()
+			maxRequests, maxTokens = defaults.DailyRequests, defaults.DailyTokens
+			if id != 0 {
+				maxRequests, maxTokens = defaults.AccountDailyRequests, defaults.AccountDailyTokens
+			}
+			err = tx.QueryRowContext(ctx, `SELECT count(*),coalesce(sum(coalesce(actual_tokens,reserved_tokens)),0) FROM quality_probe_attempts WHERE day=$1 AND intelligence_probe AND ($2::bigint=0 OR account_id=$2)`, day, id).Scan(&requests, &spent)
+			if err != nil {
+				return nil, err
+			}
+			enforce = true
+		}
+		if standard && !strings.HasPrefix(session, "intelligence-retest:") {
+			// Leave headroom for due recovery checks inside the effective limit.
+			if maxRequests > 1 {
+				maxRequests -= maxRequests / 10
+			}
+			if maxTokens > 1 {
+				maxTokens -= maxTokens / 10
+			}
+		}
+		if enforce && ((maxRequests > 0 && requests >= maxRequests) || (maxTokens > 0 && (tokens > maxTokens || spent > maxTokens-tokens))) {
 			return nil, &service.QualityDeferredError{Reason: "今日检测预算不足", Until: now.Truncate(24 * time.Hour).Add(24 * time.Hour)}
 		}
 		if _, err = tx.ExecContext(ctx, `UPDATE quality_budget_days SET requests=requests+1,tokens=tokens+$3,unknown_requests=unknown_requests+1 WHERE day=$1 AND account_id=$2`, day, id, tokens); err != nil {
@@ -123,7 +149,11 @@ func (r *qualityOperationsRepository) ReserveQualityProbe(ctx context.Context, a
 	}
 	res := &service.QualityProbeReservation{AccountID: account}
 	// Persist each reservation before an upstream request starts.
-	if err = tx.QueryRowContext(ctx, `INSERT INTO quality_probe_attempts(account_id,day,reserved_tokens,started_at) VALUES($1,$2,$3,clock_timestamp()) RETURNING id`, account, day, tokens).Scan(&res.ID); err != nil {
+	insert := `INSERT INTO quality_probe_attempts(account_id,day,reserved_tokens,started_at) VALUES($1,$2,$3,clock_timestamp()) RETURNING id`
+	if standard {
+		insert = `INSERT INTO quality_probe_attempts(account_id,day,reserved_tokens,started_at,intelligence_probe) VALUES($1,$2,$3,clock_timestamp(),true) RETURNING id`
+	}
+	if err = tx.QueryRowContext(ctx, insert, account, day, tokens).Scan(&res.ID); err != nil {
 		return nil, err
 	}
 	return res, tx.Commit()

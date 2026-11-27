@@ -140,7 +140,27 @@ func (s *ScheduledTestRunnerService) executePlanSnapshot(ctx context.Context, pl
 	// Freeze and deduplicate before building any per-type rows. Repositories
 	// already use DISTINCT; keeping this boundary explicit protects adapters.
 	accountIDs = scheduledTestUniqueAccountIDs(accountIDs)
+	var catalog map[int64]*Account
+	if plan.Protection.Intelligence != nil && targetErr == nil && len(accountIDs) > 0 && s.accountRepo != nil {
+		readCtx, stop := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
+		accounts, err := s.accountRepo.GetByIDs(readCtx, accountIDs)
+		stop()
+		if err != nil {
+			logger.LegacyPrintf("service.scheduled_test_runner", "plan=%d intelligence target model discovery: %v", plan.ID, err)
+			return
+		}
+		catalog = make(map[int64]*Account, len(accounts))
+		for _, a := range accounts {
+			if a != nil && a.IntelligenceMonitoringEligible(started) {
+				catalog[a.ID] = a
+			}
+		}
+	}
 	var targets []*scheduledTestExecutionTarget
+	due := make(map[IntelligenceTarget]bool, len(plan.IntelligenceTargets))
+	for _, t := range plan.IntelligenceTargets {
+		due[t] = true
+	}
 	for _, execution := range scheduledTestExecutionPlans(plan) {
 		queryCtx, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
 		prompt, kind, maxOutputTokens, definitionErr := s.resolveDefinition(queryCtx, execution)
@@ -151,6 +171,12 @@ func (s *ScheduledTestRunnerService) executePlanSnapshot(ctx context.Context, pl
 		var accountTargets []*int64
 		if len(accountIDs) > 0 && targetErr == nil {
 			for _, id := range accountIDs {
+				if catalog != nil && (catalog[id] == nil || !catalog[id].IsModelSupported(execution.ModelID)) {
+					continue
+				}
+				if plan.IntelligenceRetest && !due[IntelligenceTarget{AccountID: id, Model: execution.ModelID}] {
+					continue
+				}
 				accountTargets = append(accountTargets, &id)
 			}
 		} else {
@@ -172,12 +198,22 @@ func (s *ScheduledTestRunnerService) executePlanSnapshot(ctx context.Context, pl
 			targets = append(targets, target)
 		}
 	}
+	if len(targets) == 0 {
+		return
+	}
 	inputs := make([]*ScheduledTestResult, 0, len(targets))
 	for _, target := range targets {
+		if cfg := plan.Protection.Intelligence; cfg != nil {
+			target.pending.ExecutionInfo = &ScheduledTestExecutionInfo{Intelligence: emptyIntelligenceEvidence(cfg.Version)}
+		}
 		inputs = append(inputs, target.pending)
 	}
 	persistCtx, cancel := context.WithTimeout(ctx, scheduledTestPersistenceTimeout)
-	results, err := repo.BeginRun(persistCtx, plan, uuid.NewString(), inputs)
+	runID := uuid.NewString()
+	if plan.IntelligenceRetest {
+		runID = "intel-retest:" + runID
+	}
+	results, err := repo.BeginRun(persistCtx, plan, runID, inputs)
 	cancel()
 	if err != nil || len(results) != len(targets) {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d execution snapshot error: %v", plan.ID, err)
@@ -244,7 +280,15 @@ func (s *ScheduledTestRunnerService) runExecutionTargetQueues(ctx context.Contex
 		}
 		wg.Add(1)
 		go func(queue []*scheduledTestExecutionTarget) {
-			ctx := context.WithValue(ctx, qualityRunKey{}, uuid.NewString())
+			session := uuid.NewString()
+			if len(queue) > 0 && queue[0].plan.Protection.Intelligence != nil {
+				if queue[0].plan.IntelligenceRetest {
+					session = "intelligence-retest:" + session
+				} else {
+					session = "intelligence:" + session
+				}
+			}
+			ctx := context.WithValue(ctx, qualityRunKey{}, session)
 			defer wg.Done()
 			defer func() { <-sem }()
 			var accountID int64
@@ -337,6 +381,9 @@ func (s *ScheduledTestRunnerService) failExecutionTarget(target *scheduledTestEx
 		result.ExecutionInfo = newScheduledTestExecutionInfo()
 		result.ExecutionInfo.summarize()
 	}
+	if standard := target.plan.Protection.Intelligence; standard != nil {
+		result.ExecutionInfo.Intelligence = emptyIntelligenceEvidence(standard.Version)
+	}
 	result.Status, result.ErrorMessage, result.FinishedAt = "failed", err.Error(), time.Now()
 	result.LatencyMs = result.FinishedAt.Sub(result.StartedAt).Milliseconds()
 	persistCtx, cancel := scheduledTestPersistenceContext()
@@ -345,7 +392,9 @@ func (s *ScheduledTestRunnerService) failExecutionTarget(target *scheduledTestEx
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d result=%d failed result persistence error: %v", target.plan.ID, result.ID, err)
 		return
 	}
-	s.recordResultDecision(persistCtx, result, ScheduledTestProtectionDecision{Status: "skipped", Reason: result.ErrorMessage})
+	if target.plan.Protection.Intelligence == nil {
+		s.recordResultDecision(persistCtx, result, ScheduledTestProtectionDecision{Status: "skipped", Reason: result.ErrorMessage})
+	}
 }
 
 func (s *ScheduledTestRunnerService) runExecutionTarget(ctx context.Context, target *scheduledTestExecutionTarget, windowEnd time.Time) (*ScheduledTestResult, bool) {

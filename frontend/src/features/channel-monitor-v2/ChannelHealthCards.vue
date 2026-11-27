@@ -45,6 +45,12 @@
               :selected-model="row.detail.model"
               @select-model="selectedModels[cardKey(row)] = $event"
             />
+            <IntelligenceRounds
+              v-if="row.group_id && intelligenceByGroup.has(row.group_id)"
+              :group="intelligenceByGroup.get(row.group_id)!"
+              :model="row.detail.model || scopeModel"
+              :refresh-key="refreshKey"
+            />
             <div class="border-t border-gray-100 pt-3 dark:border-dark-700" data-testid="health-history">
               <div v-if="showModelBreakdown && row.detail.model" class="mb-2 flex min-w-0 items-center justify-between gap-2 text-[11px] text-gray-500 dark:text-gray-400" data-testid="card-detail-scope">
                 <span class="truncate" :title="row.detail.model">{{ t('channelMonitorV2.cards.currentScope', { model: row.detail.model }) }}</span>
@@ -60,13 +66,7 @@
               </div>
               <p class="mt-1 text-[10px] leading-4 text-gray-400">{{ t('channelMonitorV2.cards.historyLegend') }}</p>
             </div>
-            <GroupTestFooter
-              v-if="row.group_id"
-              :results="testsByGroup.get(row.group_id) || emptyGroupTests"
-              :state="testResultsState"
-              :group-name="cardTitle(row)"
-              @open="previewGroup = { id: row.group_id, name: cardTitle(row) }"
-            />
+
           </article>
         </div>
       </section>
@@ -79,12 +79,7 @@
         <i class="h-2 w-2 rounded-full" :class="dotClass[state]" />{{ t(`channelMonitorV2.cards.legend.${state}`) }}
       </span>
     </div>
-    <GroupPelicanGallery
-      :show="previewGroup != null"
-      :group-name="previewGroup?.name || ''"
-      :results="previewGroup ? testsByGroup.get(previewGroup.id)?.pelican || [] : []"
-      @close="previewGroup = null"
-    />
+
   </section>
 </template>
 
@@ -98,10 +93,8 @@ import ProviderIcon from '@/components/user/monitor/ProviderIcon.vue'
 import { platformDisplayName } from '@/constants/platformCatalog'
 import MonitorStatusStrip from './MonitorStatusStrip.vue'
 import ChannelCardMetrics from './ChannelCardMetrics.vue'
-import GroupTestFooter from './GroupTestFooter.vue'
-import GroupPelicanGallery from './GroupPelicanGallery.vue'
-import { emptyGroupTests, indexGroupTestResults, type TestResultsState } from './monitorTestResults'
-import type { TestResult } from '@/types'
+import IntelligenceRounds from './IntelligenceRounds.vue'
+import type { IntelligenceGroup } from '@/api/intelligence'
 import { cardHealth, hasMonitorTraffic, historyBucketsForCard } from './monitorCards'
 import { compareMonitorModels } from './monitorModels'
 import { formatLatencyPrivacy, formatMonitorSuccessRateFromError, healthModeScore, healthScoreClass, type HealthDisplayMode } from './monitorFormat'
@@ -109,10 +102,9 @@ import { formatLatencyPrivacy, formatMonitorSuccessRateFromError, healthModeScor
 const props = withDefaults(defineProps<{
   rows: MonitorMatrixRow[]; coverage: MonitorCoverage; groupBy: MonitorMatrixGroupBy; healthMode: HealthDisplayMode
   modelRows?: MonitorMatrixRow[]; modelCoverage?: MonitorCoverage
-  testResults?: TestResult[]; testResultsState?: TestResultsState
-}>(), { modelRows: () => [], testResults: () => [], testResultsState: 'ready' })
-const testsByGroup = computed(() => indexGroupTestResults(props.testResults))
-const previewGroup = ref<{ id: number; name: string } | null>(null)
+  intelligenceGroups?: IntelligenceGroup[]; refreshKey?: number; scopeModel?: string
+}>(), { modelRows: () => [], intelligenceGroups: () => [] })
+const intelligenceByGroup = computed(() => new Map(props.intelligenceGroups.filter(g => g.models.length).map(g => [g.id,g])))
 const { t, locale } = useI18n()
 const historyIntervalLabel = computed(() => {
   const minutes = props.coverage.bucket_seconds / 60

@@ -96,6 +96,20 @@ func TestScheduledTestResultRepositoryRestartFailedCASFailure(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestIntelligenceRestartRequiresOriginalFinish(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	repo := &scheduledTestResultRepository{db: db}
+	old := time.Now().UTC()
+	now := old.Add(time.Minute)
+	account := int64(12)
+	row := &service.ScheduledTestResult{ID: 9, PlanID: 3, AccountID: &account, StartedAt: old, FinishedAt: now, RetryExpectedFinish: &old}
+	mock.ExpectExec(`(?s)UPDATE scheduled_test_results.*AND finished_at=\$12`).WithArgs(int64(9), "", "", "", nil, old, now, int64(3), account, nil, "", old).WillReturnResult(sqlmock.NewResult(0, 0))
+	require.ErrorIs(t, repo.RestartFailed(context.Background(), row), service.ErrScheduledTestResultNotFailed)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestScheduledTestResultRepositoryRestartFailedValidatesOwnershipIDs(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)

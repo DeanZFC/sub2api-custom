@@ -54,8 +54,10 @@ func (r *scheduledTestResultRepository) BeginRun(ctx context.Context, plan *serv
 	if err := validateScheduledTestPlanConflicts(ctx, tx, current); err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE scheduled_test_plans SET latest_run_id=$2 WHERE id=$1`, plan.ID, runID); err != nil {
-		return nil, err
+	if !plan.IntelligenceRetest {
+		if _, err := tx.ExecContext(ctx, `UPDATE scheduled_test_plans SET latest_run_id=$2 WHERE id=$1`, plan.ID, runID); err != nil {
+			return nil, err
+		}
 	}
 	planID := plan.ID
 	accountIDs := map[int64]bool{}
@@ -98,6 +100,11 @@ func (r *scheduledTestResultRepository) BeginRun(ctx context.Context, plan *serv
 			return nil, err
 		}
 		results = append(results, result)
+	}
+	if current.Protection.Intelligence != nil && !plan.IntelligenceRetest {
+		if err := snapshotIntelligenceRound(ctx, tx, current, runID); err != nil {
+			return nil, err
+		}
 	}
 	if current.Protection.Enabled {
 		if err := reconcileScheduledTestProjectionAccounts(ctx, tx, sortedProtectionIDs(accountIDs)); err != nil {

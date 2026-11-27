@@ -637,7 +637,8 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 
 const proxies = ref<AccountProxy[]>([])
-const groups = ref<AdminGroup[]>([])
+const groupCatalog = ref<AdminGroup[] | null>(null)
+const groups = computed(() => groupCatalog.value ?? [])
 const groupsByID = computed(() => new Map(groups.value.map(group => [group.id, group])))
 const accountGroupsForRow = (account: Pick<AccountListItem, 'group_ids'>): AdminGroup[] => {
   const groupIDs = account.group_ids ?? []
@@ -775,12 +776,14 @@ const HIDDEN_COLUMNS_CURRENT_VERSION = 'scheduler-score-hidden-by-default'
 
 // Account filter settings
 const ACCOUNT_FILTER_STORAGE_KEY = 'account-filter-values'
+const ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE = 'ungrouped'
 type AccountFilterValues = {
   platform: string
   status: string
+  group: string
 }
 const loadInitialAccountFilterValues = (): AccountFilterValues => {
-  const fallback: AccountFilterValues = { platform: '', status: '' }
+  const fallback: AccountFilterValues = { platform: '', status: '', group: '' }
   try {
     const raw = localStorage.getItem(ACCOUNT_FILTER_STORAGE_KEY)
     if (!raw) return fallback
@@ -791,7 +794,9 @@ const loadInitialAccountFilterValues = (): AccountFilterValues => {
       platform: typeof values.platform === 'string' && CONCRETE_PLATFORM_OPTIONS.some(option => option.value === values.platform)
         ? values.platform : '',
       status: typeof values.status === 'string' && ['active', 'inactive', 'error', 'rate_limited', 'temp_unschedulable', 'unschedulable'].includes(values.status)
-        ? values.status : ''
+        ? values.status : '',
+      group: typeof values.group === 'string' && (values.group === ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE || /^[1-9]\d*$/.test(values.group))
+        ? values.group : ''
     }
   } catch {
     return fallback
@@ -1247,7 +1252,6 @@ const {
     ...loadInitialAccountFilterValues(),
     type: '',
     privacy_mode: '',
-    group: '',
     search: '',
     lite: '1',
     include_scheduler_score: shouldIncludeSchedulerScore() ? '1' : '0',
@@ -1594,7 +1598,8 @@ const saveAccountFilterValues = () => {
   try {
     localStorage.setItem(ACCOUNT_FILTER_STORAGE_KEY, JSON.stringify({
       platform: params.platform,
-      status: params.status
+      status: params.status,
+      group: params.group
     }))
   } catch {
     // Filtering must remain available when browser storage is unavailable.
@@ -1619,14 +1624,17 @@ const filterGroups = computed(() => groups.value
   .slice()
   .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.id - b.id))
 
+const selectedGroupUnavailable = () =>
+  groupCatalog.value !== null &&
+  params.group !== '' &&
+  params.group !== ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE &&
+  !filterGroups.value.some(group => String(group.id) === params.group)
+
 const handlePlatformChange = async (platform: string) => {
   if (params.platform === platform) return
   params.platform = platform
+  if (selectedGroupUnavailable()) params.group = ''
   saveAccountFilterValues()
-  if (params.group && params.group !== 'ungrouped' &&
-      !filterGroups.value.some(group => String(group.id) === params.group)) {
-    params.group = ''
-  }
   pagination.page = 1
   clearSelection()
   menu.show = false
@@ -1636,11 +1644,16 @@ const handlePlatformChange = async (platform: string) => {
 const handleGroupChange = async (group: string) => {
   if (params.group === group) return
   params.group = group
+  saveAccountFilterValues()
   pagination.page = 1
   clearSelection()
   menu.show = false
   await load()
 }
+
+watch(groupCatalog, async () => {
+  if (selectedGroupUnavailable()) await handleGroupChange('')
+})
 
 const handlePageChange = (page: number) => {
   syncAccountListDerivedParams()
@@ -2556,7 +2569,6 @@ const handleBulkUpdated = () => {
   reload()
 }
 const handleDataImported = () => { showImportData.value = false; reload() }
-const ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE = 'ungrouped'
 const ACCOUNT_PRIVACY_MODE_UNSET_QUERY_VALUE = '__unset__'
 const buildAccountQueryFilters = () => ({
   platform: params.platform || '',
@@ -3048,7 +3060,7 @@ onMounted(async () => {
     console.error('Failed to load proxies:', proxiesResult.reason)
   }
   if (groupsResult.status === 'fulfilled') {
-    groups.value = groupsResult.value
+    groupCatalog.value = groupsResult.value
   } else {
     console.error('Failed to load groups:', groupsResult.reason)
   }

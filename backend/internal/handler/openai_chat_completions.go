@@ -180,6 +180,7 @@ func (h *OpenAIGatewayHandler) chatCompletions(c *gin.Context, probe *service.Gr
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
+	recovery := newHTTPOpenAI429Recovery(c, &streamStarted, h.handleFailoverExhausted)
 
 	// 分组利润控制：chat completions 文本入口请求级装门并固定 pricingAt。
 	ccPricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
@@ -190,8 +191,9 @@ func (h *OpenAIGatewayHandler) chatCompletions(c *gin.Context, probe *service.Gr
 			return
 		}
 		reqLog.Debug("openai_chat_completions.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
+		selectionCtx, cancelSelection := recovery.waitContext(c.Request.Context())
 		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
-			c.Request.Context(),
+			selectionCtx,
 			apiKey.GroupID,
 			"",
 			sessionHash,
@@ -204,6 +206,10 @@ func (h *OpenAIGatewayHandler) chatCompletions(c *gin.Context, probe *service.Gr
 			true,
 			requestPlatform,
 		)
+		cancelSelection()
+		if recovery.stopAfterSelection(selection) {
+			return
+		}
 		if err != nil {
 			if failoverClientGone(c) {
 				reqLog.Info("openai_chat_completions.account_select_aborted_client_disconnected", zap.Error(err))
@@ -247,7 +253,7 @@ func (h *OpenAIGatewayHandler) chatCompletions(c *gin.Context, probe *service.Gr
 		_ = scheduleDecision
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, slotResult := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
+		accountReleaseFunc, slotResult := h.acquireOpenAIAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog, nil, recovery)
 		if slotResult == openAISlotAcquireVetoed {
 			// 转发准入否决：排除该账号重新选号；否决次数达上限则按无可用账号终止。
 			if !recordOpenAIAdmissionVeto(failedAccountIDs, account.ID, &admissionVetoCount, c.Request.Context()) {
@@ -269,6 +275,9 @@ func (h *OpenAIGatewayHandler) chatCompletions(c *gin.Context, probe *service.Gr
 		}
 		writerSizeBeforeForward := c.Writer.Size()
 		forwardCtx := c.Request.Context()
+		if recovery.stopIfExpired(accountReleaseFunc) {
+			return
+		}
 		if probe != nil {
 			var admitted bool
 			forwardCtx, admitted = probe.Begin(forwardCtx, account, len(forwardBody))
@@ -387,31 +396,11 @@ func (h *OpenAIGatewayHandler) chatCompletions(c *gin.Context, probe *service.Gr
 						return
 					}
 					// Pool mode: retry on the same account
-					if claimed, retryErr := service.TryConfiguredUpstreamErrorRetry(c.Request.Context(), failoverErr); claimed {
-						if retryErr != nil {
-							return
-						}
+					switch recovery.afterFailure(c.Request.Context(), account, failoverErr, sameAccountRetryCount, true, reqLog, "openai_chat_completions.pool_mode_same_account_retry") {
+					case openAIStopRetry:
+						return
+					case openAIRetrySameAccount:
 						continue
-					}
-					if failoverErr.RetryableOnSameAccount {
-						retryLimit := effectiveSameAccountRetryLimit(failoverErr, account)
-						if sameAccountRetryAllowed(failoverErr, sameAccountRetryCount[account.ID], retryLimit) {
-							sameAccountRetryCount[account.ID]++
-							retryDelay := sameAccountRetryDelayFor(failoverErr, sameAccountRetryCount[account.ID])
-							reqLog.Warn("openai_chat_completions.pool_mode_same_account_retry",
-								zap.Int64("account_id", account.ID),
-								zap.Int("upstream_status", failoverErr.StatusCode),
-								zap.Int("retry_limit", retryLimit),
-								zap.Int("retry_count", sameAccountRetryCount[account.ID]),
-								zap.Duration("retry_delay", retryDelay),
-							)
-							select {
-							case <-c.Request.Context().Done():
-								return
-							case <-time.After(retryDelay):
-							}
-							continue
-						}
 					}
 					h.gatewayService.RecordOpenAIAccountSwitch()
 					service.RecordStrictFailoverFailure(c.Request.Context(), account.ID, failoverErr)

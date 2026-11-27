@@ -2812,7 +2812,17 @@ export interface TestAllPassProgress {
   blocked: boolean
 }
 
+export interface IntelligencePolicy {
+  version?: string
+  auto_isolate: boolean
+  pause_on_any?: boolean
+  model_default_effort?: boolean
+  interval_minutes: number
+  cooldown_minutes: number
+  recovery_passes: number
+}
 export interface TestProtectionConfig {
+  intelligence?: IntelligencePolicy
   enabled: boolean
   mode?: 'per_test' | 'combined' | 'all_pass'
   /** Complete successful rounds required before the all-pass action runs; defaults to 1. */

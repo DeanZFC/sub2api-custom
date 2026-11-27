@@ -293,24 +293,46 @@ describe('admin AccountsView select all filtered results', () => {
     wrapper.unmount()
   })
 
-  it('restores saved filters and persists custom platform tab changes across remounts', async () => {
+  it.each(['7', 'ungrouped'])('restores the platform and group %s on the first request after returning', async (group) => {
     localStorage.setItem('account-filter-values', JSON.stringify({ platform: 'grok', status: 'active' }))
-    getPlatformCounts.mockResolvedValue([{ platform: 'grok', count: 1 }, { platform: 'openai', count: 1 }])
+    getPlatformCounts.mockResolvedValue([{ platform: 'grok', count: 1 }, { platform: 'deepseek', count: 1 }])
+    getAllGroups.mockResolvedValue([{ id: 7, name: 'DeepSeek-官Key', platform: 'deepseek' }])
     listAccounts.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
     const wrapper = mountView()
     await flushPromises()
-    expect(listAccounts).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ platform: 'grok', status: 'active' }), expect.any(Object))
+    expect(listAccounts).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ platform: 'grok', status: 'active', group: '' }), expect.any(Object))
 
-    await wrapper.get('[data-platform="openai"]').trigger('click')
+    await wrapper.get('[data-platform="deepseek"]').trigger('click')
     await flushPromises()
-    expect(JSON.parse(localStorage.getItem('account-filter-values') || '{}')).toEqual({ platform: 'openai', status: 'active' })
+    await wrapper.get(`[data-group="${group}"]`).trigger('click')
     wrapper.unmount()
 
+    listAccounts.mockClear()
     const restored = mountView()
     await flushPromises()
-    expect(listAccounts).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ platform: 'openai', status: 'active' }), expect.any(Object))
-    expect(restored.get('[data-platform="openai"]').attributes('aria-selected')).toBe('true')
+    expect(listAccounts).toHaveBeenCalledTimes(1)
+    expect(listAccounts).toHaveBeenCalledWith(1, 20, expect.objectContaining({ platform: 'deepseek', status: 'active', group }), expect.any(Object))
+    expect(restored.get('[data-platform="deepseek"]').attributes('aria-selected')).toBe('true')
+    expect(restored.get(`[data-group="${group}"]`).attributes('aria-selected')).toBe('true')
     restored.unmount()
+  })
+
+  it('falls back to all groups when the saved group is no longer available', async () => {
+    localStorage.setItem('account-filter-values', JSON.stringify({ platform: 'deepseek', group: '7' }))
+    listAccounts.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
+    let finishLoadingGroups!: (groups: unknown[]) => void
+    getAllGroups.mockImplementationOnce(() => new Promise(resolve => { finishLoadingGroups = resolve }))
+    const wrapper = mountView()
+    await flushPromises()
+    expect(listAccounts).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ group: '7' }), expect.any(Object))
+
+    finishLoadingGroups([])
+    await flushPromises()
+    expect(wrapper.get('[data-group=""]').attributes('aria-selected')).toBe('true')
+    expect(listAccounts).toHaveBeenCalledTimes(2)
+    expect(listAccounts).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ platform: 'deepseek', group: '' }), expect.any(Object))
+    expect(JSON.parse(localStorage.getItem('account-filter-values')!)).toMatchObject({ platform: 'deepseek', group: '' })
+    wrapper.unmount()
   })
 
   it('filters groups by platform and resets pagination and selection when changing groups', async () => {
@@ -352,6 +374,7 @@ describe('admin AccountsView select all filtered results', () => {
     await flushPromises()
     expect(groupValues()).toEqual(['', 'ungrouped', '8', '10'])
     expect(listAccounts).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ platform: 'grok', group: '', search: 'team', status: 'active' }), expect.any(Object))
+    expect(JSON.parse(localStorage.getItem('account-filter-values')!)).toMatchObject({ platform: 'grok', group: '' })
     expect(wrapper.get('[data-group=""]').attributes('aria-selected')).toBe('true')
     wrapper.unmount()
   })
@@ -378,6 +401,7 @@ describe('admin AccountsView select all filtered results', () => {
     await wrapper.get('[data-group="7"]').trigger('keydown', { key: 'Home' })
     await flushPromises()
     expect(listAccounts).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({ platform: '', group: '' }), expect.any(Object))
+    expect(JSON.parse(localStorage.getItem('account-filter-values')!)).toMatchObject({ group: '' })
     wrapper.unmount()
   })
 

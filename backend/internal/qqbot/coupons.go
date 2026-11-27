@@ -74,7 +74,7 @@ func (s *Service) myCoupons(ctx context.Context, c Config, j Job, arg string) (s
 	if n == 0 {
 		_, _ = b.WriteString("暂无优惠券。\n")
 	}
-	_, _ = b.WriteString("在网站「我的优惠券」查看完整规则，在充值页选券；每单一张。")
+	_, _ = b.WriteString("在网站充值页选择可用优惠券，每单限用一张。")
 	if n == 5 {
 		fmt.Fprintf(&b, "\n下一页：我的优惠券 %d", page+1)
 	}

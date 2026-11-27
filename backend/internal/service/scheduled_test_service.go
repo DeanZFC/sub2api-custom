@@ -358,6 +358,9 @@ func (s *ScheduledTestService) DeleteDefinition(ctx context.Context, id int64) e
 
 // CreatePlan validates the schedule, computes next_run_at, and persists the plan.
 func (s *ScheduledTestService) CreatePlan(ctx context.Context, plan *ScheduledTestPlan) (*ScheduledTestPlan, error) {
+	if err := s.prepareIntelligencePolicy(ctx, plan); err != nil {
+		return nil, err
+	}
 	if err := validateScheduledTestPlan(plan); err != nil {
 		return nil, err
 	}
@@ -389,6 +392,9 @@ func (s *ScheduledTestService) ListPlansByAccount(ctx context.Context, accountID
 
 // UpdatePlan validates the schedule and updates the plan.
 func (s *ScheduledTestService) UpdatePlan(ctx context.Context, plan *ScheduledTestPlan) (*ScheduledTestPlan, error) {
+	if err := s.prepareIntelligencePolicy(ctx, plan); err != nil {
+		return nil, err
+	}
 	if err := validateScheduledTestPlan(plan); err != nil {
 		return nil, err
 	}

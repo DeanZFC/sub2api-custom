@@ -154,7 +154,7 @@ const togglingPlanId = ref<number | null>(null)
 const reportError = (error: unknown) => app.showError(extractApiErrorMessage(error, t('tests.loadFailed')))
 const route = useRoute()
 const props = withDefaults(defineProps<{ tab?: string }>(), { tab: 'plans' })
-const emit = defineEmits<{ catalog: [groups: AdminGroup[], accounts: AccountListItem[]] }>()
+const emit = defineEmits<{ catalog: [groups: AdminGroup[], accounts: AccountListItem[], plans: TestPlan[]] }>()
 const activeTab = computed(() => props.tab)
 const loading = ref(false)
 const saving = ref(false)
@@ -304,10 +304,10 @@ const load = async () => {
   try {
     const [loadedTypes, loadedPlans, loadedGroups, loadedAccounts] = await Promise.all([adminAPI.tests.listTypes(false), adminAPI.tests.listPlans(), adminAPI.groups.getAll(), loadTestAccounts()])
     types.value = loadedTypes.filter(type => type.output_kind !== 'statistics')
-    plans.value = loadedPlans
+    plans.value = loadedPlans.filter(plan => !plan.protection?.intelligence)
     groups.value = loadedGroups
     accounts.value = loadedAccounts
-    emit('catalog', groups.value, accounts.value)
+    emit('catalog', groups.value, accounts.value, loadedPlans)
   } catch (error) {
     reportError(error)
   } finally {

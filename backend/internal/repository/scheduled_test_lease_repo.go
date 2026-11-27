@@ -68,16 +68,37 @@ func (r *scheduledTestPlanRepository) ClaimExecution(ctx context.Context, plan *
 	if err = tx.QueryRowContext(ctx, `SELECT enabled,next_run_at,clock_timestamp() FROM scheduled_test_plans WHERE id=$1 FOR UPDATE`, plan.ID).Scan(&enabled, &next, &now); err != nil {
 		return false, err
 	}
-	if automatic && (!enabled || !next.Valid || next.Time.After(now) || plan.NextRunAt == nil || !next.Time.Equal(plan.NextRunAt.Round(time.Microsecond))) {
+	if automatic && plan.IntelligenceRetest {
+		if !enabled {
+			return false, nil
+		}
+	} else if automatic && (!enabled || !next.Valid || next.Time.After(now) || plan.NextRunAt == nil || !next.Time.Equal(plan.NextRunAt.Round(time.Microsecond))) {
 		return false, nil
 	}
 	// Close abandoned work without treating it as quality evidence or replaying
 	// the original paid request. A later round starts with a fresh snapshot.
+	if plan.Protection.Intelligence != nil {
+		if err = recordAbandonedIntelligence(ctx, tx, plan); err != nil {
+			return false, err
+		}
+	}
 	if _, err = tx.ExecContext(ctx, "UPDATE scheduled_test_results r SET status='failed',error_message='检测中断：执行租约过期，上游结果未知',finished_at=clock_timestamp() WHERE r.plan_id=$1 AND r.status IN ('pending','running') AND EXISTS(SELECT 1 FROM scheduled_test_execution_leases l WHERE l.plan_id=r.plan_id AND l.expires_at<=clock_timestamp() AND (l.scope='plan' OR l.scope='retry:' || r.account_id::text || ':' || COALESCE(r.test_definition_id,0)::text || ':' || r.model_id))", plan.ID); err != nil {
 		return false, err
 	}
 	if _, err = tx.ExecContext(ctx, `DELETE FROM scheduled_test_execution_leases WHERE plan_id=$1 AND expires_at<=clock_timestamp()`, plan.ID); err != nil {
 		return false, err
+	}
+	if automatic && plan.IntelligenceRetest {
+		// Take the target list under the lease lock, after fencing abandoned
+		// executions. Discovery may have raced another worker's recovery.
+		targets, err := dueIntelligenceTargets(ctx, tx, plan.ID, now)
+		if err != nil {
+			return false, err
+		}
+		if len(targets) == 0 {
+			return false, tx.Commit()
+		}
+		plan.IntelligenceTargets = targets
 	}
 	var conflict bool
 	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM scheduled_test_execution_leases WHERE plan_id=$1 AND (scope='plan' OR $2='plan' OR scope=$2))`, plan.ID, scope).Scan(&conflict); err != nil || conflict {

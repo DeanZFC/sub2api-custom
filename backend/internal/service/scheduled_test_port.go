@@ -7,10 +7,12 @@ import (
 
 // ScheduledTestPlan represents a scheduled test plan domain model.
 type ScheduledTestPlan struct {
-	ExecutionLeaseOwner string `json:"-"`
-	ExecutionLeaseScope string `json:"-"`
-	ID                  int64  `json:"id"`
-	Name                string `json:"name"`
+	IntelligenceRetest  bool                 `json:"-"`
+	IntelligenceTargets []IntelligenceTarget `json:"-"`
+	ExecutionLeaseOwner string               `json:"-"`
+	ExecutionLeaseScope string               `json:"-"`
+	ID                  int64                `json:"id"`
+	Name                string               `json:"name"`
 	// SortOrder orders strategies; GroupIDs orders groups within a strategy.
 	// A round snapshots the union of these groups once, deduplicated by account.
 	GroupIDs           []int64                       `json:"group_ids"`
@@ -40,6 +42,7 @@ type ScheduledTestPlan struct {
 
 // ScheduledTestResult represents a single test execution result.
 type ScheduledTestResult struct {
+	RetryExpectedFinish *time.Time                    `json:"-"`
 	ExecutionLeaseOwner string                        `json:"-"`
 	ExecutionLeaseScope string                        `json:"-"`
 	AllPassProgress     *ScheduledTestAllPassProgress `json:"all_pass_progress,omitempty"`

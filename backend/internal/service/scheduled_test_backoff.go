@@ -64,7 +64,7 @@ func scheduledTestQueuePolicy(queue []*scheduledTestExecutionTarget) string {
 }
 func (s *ScheduledTestRunnerService) deferAccountQueue(ctx context.Context, queue []*scheduledTestExecutionTarget, policy string) bool {
 	automatic, _ := ctx.Value(scheduledTestAutomaticRunKey{}).(bool)
-	if !automatic || len(queue) == 0 || queue[0].accountID == nil {
+	if !automatic || len(queue) == 0 || queue[0].plan.Protection.Intelligence != nil || queue[0].accountID == nil {
 		return false
 	}
 	repo, ok := s.scheduledSvc.resultRepo.(ScheduledTestBackoffRepository)
@@ -94,7 +94,7 @@ func (s *ScheduledTestRunnerService) deferAccountQueue(ctx context.Context, queu
 	return true
 }
 func (s *ScheduledTestRunnerService) recordAccountQueueBackoff(ctx context.Context, queue []*scheduledTestExecutionTarget, policy string, observations []*ScheduledTestResult, stopped, complete bool) {
-	if ctx.Err() != nil || len(queue) == 0 || len(observations) == 0 || queue[0].accountID == nil {
+	if ctx.Err() != nil || len(queue) == 0 || len(observations) == 0 || queue[0].plan.Protection.Intelligence != nil || queue[0].accountID == nil {
 		return
 	}
 	repo, ok := s.scheduledSvc.resultRepo.(ScheduledTestBackoffRepository)
@@ -197,7 +197,7 @@ func (s *ScheduledTestRunnerService) recordAccountQueueBackoff(ctx context.Conte
 
 func (s *ScheduledTestRunnerService) deferHealthyAccountQueue(ctx context.Context, queue []*scheduledTestExecutionTarget, policy string) bool {
 	automatic, _ := ctx.Value(scheduledTestAutomaticRunKey{}).(bool)
-	if !automatic || len(queue) == 0 || queue[0].accountID == nil {
+	if !automatic || len(queue) == 0 || queue[0].plan.Protection.Intelligence != nil || queue[0].accountID == nil {
 		return false
 	}
 	if s.accountTestSvc == nil || s.accountTestSvc.qualityOperations == nil {

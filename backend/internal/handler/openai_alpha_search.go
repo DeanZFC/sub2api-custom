@@ -129,6 +129,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 	var lastFailoverErr *service.UpstreamFailoverError
 	switchCount := 0
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
+	recovery := newHTTPOpenAI429Recovery(c, &streamStarted, h.handleFailoverExhausted)
 	routingStart := time.Now()
 
 	// 分组利润控制：alpha search 文本入口请求级装门并固定 pricingAt
@@ -137,8 +138,9 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 	c.Request = c.Request.WithContext(asPricingCtx)
 
 	for {
+		selectionCtx, cancelSelection := recovery.waitContext(c.Request.Context())
 		selection, _, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
-			c.Request.Context(),
+			selectionCtx,
 			apiKey.GroupID,
 			"",
 			sessionHash,
@@ -151,6 +153,10 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			false,
 			service.PlatformOpenAI,
 		)
+		cancelSelection()
+		if recovery.stopAfterSelection(selection) {
+			return
+		}
 		if err != nil || selection == nil || selection.Account == nil {
 			if handleAPIKeyFallbackAdmissionError(c, err, c.Writer.Written()) {
 				return
@@ -177,7 +183,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 
 		account := selection.Account
 		setOpsSelectedAccount(c, account.ID, account.Platform)
-		accountRelease, slotResult := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, false, &streamStarted, reqLog)
+		accountRelease, slotResult := h.acquireOpenAIAccountSlot(c, apiKey.GroupID, sessionHash, selection, false, &streamStarted, reqLog, nil, recovery)
 		if slotResult == openAISlotAcquireVetoed {
 			// 转发准入否决：排除该账号重新选号；否决次数达上限则按无可用账号终止。
 			if !recordOpenAIAdmissionVeto(failedAccountIDs, account.ID, &admissionVetoCount, c.Request.Context()) {
@@ -193,6 +199,9 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		writerSizeBeforeForward := c.Writer.Size()
 		forwardStart := time.Now()
 		var result *service.OpenAIForwardResult
+		if recovery.stopIfExpired(accountRelease) {
+			return
+		}
 		result, err = func() (*service.OpenAIForwardResult, error) {
 			if accountRelease != nil {
 				defer accountRelease()
@@ -235,31 +244,11 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			)
 			return
 		}
-		if claimed, retryErr := service.TryConfiguredUpstreamErrorRetry(c.Request.Context(), failoverErr); claimed {
-			if retryErr != nil {
-				return
-			}
+		switch recovery.afterFailure(c.Request.Context(), account, failoverErr, sameAccountRetryCount, true, reqLog, "openai_alpha_search.same_account_retry") {
+		case openAIStopRetry:
+			return
+		case openAIRetrySameAccount:
 			continue
-		}
-		if failoverErr.RetryableOnSameAccount {
-			retryLimit := account.GetPoolModeRetryCount()
-			if sameAccountRetryAllowed(failoverErr, sameAccountRetryCount[account.ID], retryLimit) {
-				sameAccountRetryCount[account.ID]++
-				retryDelay := sameAccountRetryDelayFor(failoverErr, sameAccountRetryCount[account.ID])
-				reqLog.Warn("openai_alpha_search.same_account_retry",
-					zap.Int64("account_id", account.ID),
-					zap.Int("upstream_status", failoverErr.StatusCode),
-					zap.Int("retry_limit", retryLimit),
-					zap.Int("retry_count", sameAccountRetryCount[account.ID]),
-					zap.Duration("retry_delay", retryDelay),
-				)
-				select {
-				case <-c.Request.Context().Done():
-					return
-				case <-time.After(retryDelay):
-				}
-				continue
-			}
 		}
 		h.gatewayService.RecordOpenAIAccountSwitch()
 		service.RecordStrictFailoverFailure(c.Request.Context(), account.ID, failoverErr)

@@ -53,7 +53,7 @@ func TestScheduledTestActionsIntegration(t *testing.T) {
 	}
 	exec(`CREATE TABLE users (id BIGINT PRIMARY KEY);
 CREATE TABLE accounts(id BIGINT PRIMARY KEY,name TEXT,platform TEXT NOT NULL DEFAULT 'openai',status TEXT NOT NULL DEFAULT 'active',schedulable BOOLEAN NOT NULL DEFAULT TRUE,extra JSONB NOT NULL DEFAULT '{}',updated_at TIMESTAMPTZ DEFAULT NOW(),deleted_at TIMESTAMPTZ);
-CREATE TABLE groups(id BIGINT PRIMARY KEY,name TEXT,platform TEXT NOT NULL DEFAULT 'openai',status TEXT NOT NULL DEFAULT 'active',deleted_at TIMESTAMPTZ,is_exclusive BOOLEAN NOT NULL DEFAULT FALSE,subscription_type TEXT NOT NULL DEFAULT 'standard');
+CREATE TABLE groups(id BIGINT PRIMARY KEY,name TEXT,model_allowlist JSONB NOT NULL DEFAULT '{}',platform TEXT NOT NULL DEFAULT 'openai',status TEXT NOT NULL DEFAULT 'active',deleted_at TIMESTAMPTZ,is_exclusive BOOLEAN NOT NULL DEFAULT FALSE,subscription_type TEXT NOT NULL DEFAULT 'standard');
 CREATE TABLE account_groups(account_id BIGINT NOT NULL REFERENCES accounts(id),group_id BIGINT NOT NULL REFERENCES groups(id),priority INTEGER NOT NULL DEFAULT 50,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),PRIMARY KEY(account_id,group_id));
 CREATE TABLE user_allowed_groups(user_id BIGINT,group_id BIGINT);
 CREATE TABLE user_subscriptions(user_id BIGINT,group_id BIGINT,deleted_at TIMESTAMPTZ,status TEXT,starts_at TIMESTAMPTZ,expires_at TIMESTAMPTZ);
@@ -77,7 +77,7 @@ INSERT INTO groups(id,name) VALUES(8,'Source and lower tier'),(9,'Unrelated memb
 		"309_quality_recovery_budget_evidence.sql",
 		"312_scheduled_test_pass_rate.sql",
 		"314_scheduled_test_auto_review.sql",
-		"315_scheduled_test_multi_model.sql", "326_scheduled_test_all_pass_rounds.sql", "332_archive_scheduled_test_definitions.sql", "333_active_test_model_states.sql",
+		"315_scheduled_test_multi_model.sql", "326_scheduled_test_all_pass_rounds.sql", "331_scheduled_test_execution_leases.sql", "332_archive_scheduled_test_definitions.sql", "333_active_test_model_states.sql", "368_intelligence_policy.sql", "369_scheduled_intelligence_rounds.sql", "370_intelligence_projection.sql",
 	} {
 		raw, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
@@ -96,6 +96,7 @@ UPDATE groups SET platform='openai',status='active',deleted_at=NULL,is_exclusive
 TRUNCATE user_allowed_groups,user_subscriptions,account_groups;
 INSERT INTO account_groups(account_id,group_id,priority) VALUES(62,8,71),(62,9,72),(63,8,73);`)
 	}
+	t.Run("intelligence routing and historical reviews", func(t *testing.T) { reset(t); testIntelligenceRouting(t, ctx, db, plans, repo, pelicanID) })
 	t.Run("immutable trigger evidence", func(t *testing.T) {
 		for _, combined := range []bool{false, true} {
 			t.Run(fmt.Sprintf("combined=%t", combined), func(t *testing.T) {

@@ -1,5 +1,4 @@
 <template>
-  <AppLayout>
     <MonitorHero
       :overall-status="overallStatus"
       :interval-seconds="DEFAULT_INTERVAL_SECONDS"
@@ -25,7 +24,6 @@
       :title="detailTitle"
       @close="closeDetail"
     />
-  </AppLayout>
 </template>
 
 <script setup lang="ts">
@@ -39,7 +37,6 @@ import {
   type UserMonitorView,
   type UserMonitorDetail,
 } from '@/api/channelMonitor'
-import AppLayout from '@/components/layout/AppLayout.vue'
 import MonitorHero, {
   type MonitorWindow,
   type OverallStatus,

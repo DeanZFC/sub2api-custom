@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
 
@@ -25,6 +27,9 @@ func NewScheduledTestPlanRepository(db *sql.DB) service.ScheduledTestPlanReposit
 func (r *scheduledTestPlanRepository) Create(ctx context.Context, plan *service.ScheduledTestPlan) (*service.ScheduledTestPlan, error) {
 	if err := r.validateTarget(ctx, plan); err != nil {
 		return nil, err
+	}
+	if p := plan.Protection.Intelligence; p != nil {
+		p.Version = uuid.NewString()
 	}
 	protection, err := json.Marshal(plan.Protection)
 	if err != nil {
@@ -96,8 +101,8 @@ func (r *scheduledTestPlanRepository) ListByAccountID(ctx context.Context, accou
 func (r *scheduledTestPlanRepository) ListDue(ctx context.Context, now time.Time) ([]*service.ScheduledTestPlan, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, name, sort_order, account_id, group_id, test_definition_id, test_type, target_mode, model_id, reasoning_effort, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, test_definition_ids, protection, group_ids, migration_note, schedule_config, excluded_account_ids, model_ids
-		FROM scheduled_test_plans
-		WHERE enabled = true AND next_run_at <= $1
+		FROM scheduled_test_plans p
+		WHERE enabled AND (next_run_at <= $1 OR (jsonb_typeof(protection->'intelligence')='object' AND EXISTS(SELECT 1`+intelligenceDueFrom+`)))
 		ORDER BY next_run_at ASC
 	`, now)
 	if err != nil {
@@ -137,6 +142,22 @@ func (r *scheduledTestPlanRepository) Update(ctx context.Context, plan *service.
 	if err != nil {
 		return nil, err
 	}
+	if (previous.Protection.Intelligence != nil) != (plan.Protection.Intelligence != nil) {
+		return nil, fmt.Errorf("请在相应的配置页面编辑策略，标准策略和自定义策略需分别创建")
+	}
+	if p := plan.Protection.Intelligence; p != nil {
+		old := previous.Protection.Intelligence
+		if old != nil {
+			p.Version = old.Version
+		}
+		if old == nil || !scheduledTestSameExecutionPolicy(previous, plan) {
+			p.Version = uuid.NewString()
+		}
+		protection, err = json.Marshal(plan.Protection)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err := validateScheduledTestPlanConflicts(ctx, tx, plan); err != nil {
 		return nil, err
 	}
@@ -166,13 +187,26 @@ func (r *scheduledTestPlanRepository) Update(ctx context.Context, plan *service.
 	if err != nil {
 		return nil, err
 	}
+	if cfg := updated.Protection.Intelligence; cfg != nil && cfg.Version != previous.Protection.Intelligence.Version {
+		// Removing a target or disabling its policy releases this policy's
+		// ownership permanently, even if the same scope is selected later.
+		const outside = ` scheduled_test_plans p WHERE p.id=$1 AND t.plan_id=p.id AND
+   (NOT p.enabled OR NOT(t.model_key=ANY(p.model_ids)) OR t.account_id=ANY(p.excluded_account_ids) OR NOT EXISTS
+    (SELECT 1 FROM account_groups ag WHERE ag.account_id=t.account_id AND ag.group_id=ANY(p.group_ids)))`
+		if _, err = tx.ExecContext(ctx, `UPDATE intelligence_observations t SET released=true FROM`+outside, plan.ID); err != nil {
+			return nil, err
+		}
+		if _, err = tx.ExecContext(ctx, `DELETE FROM intelligence_model_states t USING`+outside, plan.ID); err != nil {
+			return nil, err
+		}
+	}
 	previousGroups, currentGroups := slices.Clone(previous.GroupIDs), slices.Clone(updated.GroupIDs)
 	slices.Sort(previousGroups)
 	slices.Sort(currentGroups)
 	if err := reconcileScheduledTestPassRates(ctx, tx, updated, !slices.Equal(previousGroups, currentGroups)); err != nil {
 		return nil, err
 	}
-	if previous.Protection.Enabled || updated.Protection.Enabled {
+	if previous.Protection.Enabled || updated.Protection.Enabled || previous.Protection.Intelligence != nil || updated.Protection.Intelligence != nil {
 		if err := reconcileScheduledTestProjectionAccounts(ctx, tx, projectionIDs); err != nil {
 			return nil, err
 		}
@@ -202,6 +236,37 @@ func (r *scheduledTestPlanRepository) validateTarget(ctx context.Context, plan *
 	}
 	if count != len(plan.GroupIDs) || platforms != 1 {
 		return fmt.Errorf("selected detection groups must be distinct, active and use one concrete platform")
+	}
+	if plan.Protection.Intelligence != nil {
+		rows, err := r.db.QueryContext(ctx, `SELECT platform,model_allowlist FROM groups WHERE id=ANY($1)`, pq.Array(plan.GroupIDs))
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var platform string
+			var raw []byte
+			if err = rows.Scan(&platform, &raw); err != nil {
+				return err
+			}
+			if platform != "openai" {
+				return fmt.Errorf("标准智商监测需要 OpenAI 分组")
+			}
+			var cfg service.GroupModelAllowlist
+			if len(raw) > 0 {
+				if err = json.Unmarshal(raw, &cfg); err != nil {
+					return err
+				}
+			}
+			for _, model := range plan.SelectedModelIDs() {
+				if strings.Contains(model, "*") || !cfg.Allows(model) {
+					return fmt.Errorf("受测模型 %s 未在所选分组中全部开放", model)
+				}
+			}
+		}
+		if err = rows.Err(); err != nil {
+			return err
+		}
 	}
 	return r.validateProtectionGroups(ctx, plan)
 }
@@ -255,7 +320,7 @@ func (r *scheduledTestPlanRepository) Delete(ctx context.Context, id int64) erro
 	if _, err := tx.ExecContext(ctx, `DELETE FROM scheduled_test_plans WHERE id = $1`, id); err != nil {
 		return err
 	}
-	if plan != nil && plan.Protection.Enabled {
+	if plan != nil && (plan.Protection.Enabled || plan.Protection.Intelligence != nil) {
 		if err := reconcileScheduledTestProjectionAccounts(ctx, tx, projectionIDs); err != nil {
 			return err
 		}
@@ -494,6 +559,9 @@ func (r *scheduledTestResultRepository) Update(ctx context.Context, result *serv
 		query += ` AND started_at=$13 AND EXISTS(SELECT 1 FROM scheduled_test_execution_leases l WHERE l.plan_id=scheduled_test_results.plan_id AND l.scope=$16 AND l.owner=$17 AND l.expires_at>clock_timestamp())`
 		args = append(args, result.ExecutionLeaseScope, result.ExecutionLeaseOwner)
 	}
+	if result.ExecutionInfo != nil && result.ExecutionInfo.Intelligence != nil && result.Status != "running" && result.Status != "pending" {
+		return r.finishIntelligence(ctx, result, query, args)
+	}
 	res, err := execScheduledTestResultUnderLease(ctx, r.db, result, query, args...)
 	if err != nil {
 		return err
@@ -523,14 +591,20 @@ func (r *scheduledTestResultRepository) RestartFailed(ctx context.Context, resul
 		return fmt.Errorf("test result account id is required")
 	}
 
-	res, err := execScheduledTestResultUnderLease(ctx, r.db, result, `
+	query := `
 		UPDATE scheduled_test_results
 		SET status = 'running', response_text = '', output_kind = $2, output_html = '',
 		    output_numeric = NULL, model_id = $3, reasoning_effort = $4, group_id = $5,
 		    error_message = '', latency_ms = 0, started_at = $6, finished_at = $7, protection_decision = NULL
 		WHERE id = $1 AND plan_id = $8 AND account_id = $9 AND status = 'failed'
 		  AND test_definition_id IS NOT DISTINCT FROM $10 AND target_mode = $11
-	`, result.ID, result.OutputKind, result.ModelID, result.ReasoningEffort, result.GroupID, result.StartedAt, result.FinishedAt, result.PlanID, *result.AccountID, result.TestDefinitionID, result.TargetMode)
+	`
+	args := []any{result.ID, result.OutputKind, result.ModelID, result.ReasoningEffort, result.GroupID, result.StartedAt, result.FinishedAt, result.PlanID, *result.AccountID, result.TestDefinitionID, result.TargetMode}
+	if result.RetryExpectedFinish != nil {
+		query += " AND finished_at=$12"
+		args = append(args, *result.RetryExpectedFinish)
+	}
+	res, err := execScheduledTestResultUnderLease(ctx, r.db, result, query, args...)
 	if err != nil {
 		return err
 	}
@@ -749,6 +823,7 @@ const scheduledTestVisibleProjectionCTE = `WITH projected_results AS NOT MATERIA
 const scheduledTestVisibleAccessCTE = `    ) projected_group ON TRUE
     LEFT JOIN (` + scheduledTestGroupDisplayOrdersSQL + `) group_display_order
       ON group_display_order.group_id = CASE WHEN r.account_id IS NULL THEN r.group_id ELSE projected_group.group_id END
+    WHERE (p.protection->'intelligence' IS NULL OR p.protection->'intelligence'='null'::jsonb) AND r.execution_info->'intelligence' IS NULL
 ), visible_results AS NOT MATERIALIZED (
     SELECT r.id,r.plan_id,r.plan_name,r.test_name,r.test_order,r.group_name,r.plan_order,r.target_mode,r.status,
            r.response_text,r.output_kind,r.output_html,r.output_numeric,r.visible_account_id,r.model_id,r.reasoning_effort,
@@ -1054,7 +1129,7 @@ func (r *scheduledTestResultRepository) PruneOldResults(ctx context.Context, pla
 				WHERE plan_id = $1 AND status NOT IN ('running', 'pending')
 				  AND NOT EXISTS (SELECT 1 FROM scheduled_test_protection_states protection WHERE protection.result_id = scheduled_test_results.id)
 			) ranked
-			WHERE rn > $2
+			WHERE rn > $2 AND NOT EXISTS (SELECT 1 FROM intelligence_round_targets snapshot WHERE snapshot.result_id=ranked.id)
 		)
 	`, planID, keepCount)
 	return err

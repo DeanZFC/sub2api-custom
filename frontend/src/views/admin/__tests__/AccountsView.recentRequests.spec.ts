@@ -28,7 +28,7 @@ vi.mock('@/api/admin', () => ({
       getUpstreamBillingProbeSettings,
     },
     ops: { listRequestDetails, getAccountRequestStatsBatch },
-    proxies: { getAll: getAllProxies },
+    proxies: { getAllWithCount: getAllProxies },
     groups: { getAll: getAllGroups },
   },
 }))

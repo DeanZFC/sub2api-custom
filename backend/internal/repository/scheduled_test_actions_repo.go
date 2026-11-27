@@ -66,7 +66,7 @@ func (r *scheduledTestResultRepository) IsPlanRunAccountEligible(ctx context.Con
 	var eligible bool
 	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM accounts a JOIN scheduled_test_plans p ON p.id=$1
  WHERE a.id=$3 AND a.deleted_at IS NULL AND a.schedulable AND a.status IN ('active','quality_paused')
- AND p.latest_run_id=$2 AND EXISTS(SELECT 1 FROM scheduled_test_results r
+ AND (p.latest_run_id=$2 OR ($2 LIKE 'intel-retest:%' AND p.enabled AND jsonb_typeof(p.protection->'intelligence')='object' AND EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=a.id AND ag.group_id=ANY(p.group_ids)))) AND EXISTS(SELECT 1 FROM scheduled_test_results r
  WHERE r.plan_id=p.id AND r.run_id=$2 AND r.account_id=a.id AND NOT r.protection_revoked) AND `+scheduledTestRuntimeOwnershipSQL+`)`, planID, runID, accountID).Scan(&eligible)
 	return eligible, err
 }

@@ -405,6 +405,7 @@ export default {
     },
     orders: {
       title: '我的订单',
+      list: '订单列表',
       empty: '暂无订单',
       orderId: '订单 ID',
       orderNo: '订单编号',
